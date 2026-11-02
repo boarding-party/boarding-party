@@ -1,7 +1,7 @@
 // Smoke: Chromium launched with the pw-config args + bp-screen streaming to a local sink.
 import http from 'node:http';
 import { spawn, spawnSync } from 'node:child_process';
-import { readFileSync, readdirSync, mkdtempSync } from 'node:fs';
+import { readFileSync, readdirSync, mkdtempSync, accessSync, constants } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createRequire } from 'node:module';
@@ -83,6 +83,17 @@ const wf = [];
 let wWatchers = '1';
 let wStatus = 204;
 const wsink = http.createServer((req, res) => {
+  // The persona's files (bp-browser --files-url): a list, then each file.
+  if (req.method === 'GET' && req.url === '/files/run-token/') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end('["hello.txt"]\n');
+    return;
+  }
+  if (req.method === 'GET' && req.url === '/files/run-token/hello.txt') {
+    res.writeHead(200, { 'Content-Type': 'text/plain' });
+    res.end('hello from the smoke');
+    return;
+  }
   const chunks = [];
   req.on('data', (c) => chunks.push(c));
   req.on('end', () => {
@@ -96,7 +107,7 @@ const wurl = `http://127.0.0.1:${wsink.address().port}/live/run-token`;
 
 const outDir = mkdtempSync(join(tmpdir(), 'bp-out-'));
 const wrap = spawn('/opt/bp/bp-browser', [
-  `--live-url=${wurl}`, '--bp-device=pixel-7', '--headless', '--isolated', '--no-sandbox',
+  `--live-url=${wurl}`, `--files-url=http://127.0.0.1:${wsink.address().port}/files/run-token/`, '--bp-device=pixel-7', '--headless', '--isolated', '--no-sandbox',
   '--browser=chromium', `--output-dir=${outDir}`,
 ], { stdio: ['pipe', 'pipe', 'pipe'] });
 let wout = '';
@@ -129,6 +140,17 @@ try {
   const nav = await rpc(2, 'tools/call', { name: 'browser_navigate', arguments: { url: page } });
   if (nav.error || nav.result?.isError) fail('browser_navigate: ' + JSON.stringify(nav).slice(0, 300));
 } catch (e) { fail(String(e.message || e)); }
+
+// bp-browser downloads the persona's files before starting the browser. /workspace
+// is a mounted volume in a pod; in a bare container it may not be writable.
+try {
+  accessSync('/workspace', constants.W_OK);
+  if (readFileSync('/workspace/files/hello.txt', 'utf8') !== 'hello from the smoke') fail('files: hello.txt has the wrong content');
+  console.log('ok files downloaded');
+} catch (e) {
+  if (e && e.code === 'EACCES') console.log('skip files check: /workspace is not writable');
+  else fail('files: ' + (e.message || e));
+}
 
 // Phase A: a watcher is present, so frames flow at the fast cadence.
 await sleep(4000);

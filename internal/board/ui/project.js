@@ -269,6 +269,8 @@ export function ProjectPage({ onSaved, onDirty }) {
             onChange=${(fn) => edit((d) => fn(d.extraHosts))} />
         </div>
 
+        <${FilesCard} personas=${savedPersonas(baseline)} />
+
         ${draft.roles.map((r, i) => html`<${RoleCard} key=${r.id} role=${r} n=${i + 1} profileFields=${profileFields}
             onChange=${(fn) => edit((d) => fn(d.roles[i]))}
             onRemove=${async () => {
@@ -523,5 +525,105 @@ function ImportYAML({ dirty, onDone, onCancel }) {
         <button class="btn primary" type="button" disabled=${busy} onClick=${go}>${busy ? 'Importing…' : 'Import'}</button>
         <button class="btn" type="button" onClick=${onCancel}>Cancel</button>
       </div>
+    </div>`;
+}
+
+// ---- files ----------------------------------------------------------------
+// Test files personas can attach in the site. Independent of the project
+// draft: each upload and delete goes to the director straight away.
+
+// savedPersonas lists the persona names in the saved project (the baseline
+// JSON): the director only accepts a file for a persona it already knows.
+function savedPersonas(baseline) {
+  try {
+    return JSON.parse(baseline).roles.flatMap((r) => (r.personas || []).map((p) => p.name)).filter((n) => n && n.trim());
+  } catch (_) { return []; }
+}
+
+const fmtSize = (n) => (n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
+
+// fileName turns a picked file's name into one the director accepts.
+const fileName = (n) => n.toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^[^a-z0-9]+/, '').slice(0, 64);
+
+const fmtUploaded = (s) => {
+  const d = new Date(s);
+  return Number.isNaN(d.getTime()) ? '' : d.toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+};
+
+const who = (scope) => (scope === 'project' ? 'Everyone' : scope.replace(/^persona:/, ''));
+
+function FilesCard({ personas }) {
+  const [list, setList] = useState(null);
+  const [loadErr, setLoadErr] = useState('');
+  const [file, setFile] = useState(null);
+  const [name, setName] = useState('');
+  const [scope, setScope] = useState('project');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const input = useRef(null);
+
+  const load = async () => {
+    try { setList(await api('/api/files')); setLoadErr(''); } catch (e) { setLoadErr(e.message); }
+  };
+  useEffect(() => { load(); }, []);
+
+  const pick = (e) => {
+    const f = e.currentTarget.files && e.currentTarget.files[0];
+    setFile(f || null); setName(f ? fileName(f.name) : ''); setErr('');
+  };
+
+  const upload = async () => {
+    if (!file || busy) return;
+    setBusy(true); setErr('');
+    try {
+      await api(`/api/files/${encodeURIComponent(name)}?scope=${encodeURIComponent(scope)}`, {
+        method: 'PUT', headers: { 'Content-Type': file.type || 'application/octet-stream' }, body: file,
+      });
+      setFile(null); setName('');
+      if (input.current) input.current.value = '';
+      await load();
+    } catch (e) { setErr(e.message); } finally { setBusy(false); }
+  };
+
+  const remove = async (f) => {
+    if (!(await confirmDialog(`Delete ${f.name} (${who(f.scope)})? Personas lose access to it straight away.`, { confirm: 'Delete file', danger: true }))) return;
+    setErr('');
+    try {
+      await api(`/api/files/${encodeURIComponent(f.name)}?scope=${encodeURIComponent(f.scope)}`, { method: 'DELETE' });
+      await load();
+    } catch (e) { setErr(e.message); }
+  };
+
+  return html`
+    <div class="card" id="files-card">
+      <h2>Files</h2>
+      <p class="hint">Test files personas can attach in the site, such as a logo or a CSV. Use made-up content.</p>
+      ${loadErr ? html`<div class="note bad" role="alert">Could not load the files: ${loadErr}</div>` : null}
+      ${list && list.length ? html`<table class="filetab"><thead><tr><th>Name</th><th>Who can use it</th><th>Size</th><th>Uploaded</th><th></th></tr></thead>
+        <tbody>${list.map((f) => html`<tr key=${f.scope + '/' + f.name}>
+          <td class="nm">${f.name}</td><td>${who(f.scope)}</td><td>${fmtSize(f.size)}</td><td>${fmtUploaded(f.uploaded)}</td>
+          <td class="act"><button class="btn danger-ghost" type="button" onClick=${() => remove(f)}>Delete</button></td></tr>`)}</tbody></table>`
+        : list ? html`<p class="small muted">No files yet.</p>` : loadErr ? null : html`<p class="small muted">Loading…</p>`}
+      <div class="fileup">
+        <div class="field">
+          <label for="fl-file">File</label>
+          <input id="fl-file" type="file" ref=${input} onChange=${pick} />
+        </div>
+        <div class="field">
+          <label for="fl-name">Name in the pod</label>
+          <input id="fl-name" value=${name} disabled=${!file} placeholder="logo.png"
+            onInput=${(e) => setName(e.currentTarget.value)} />
+        </div>
+        <div class="field">
+          <label for="fl-who">Who can use it</label>
+          <select id="fl-who" value=${scope} onChange=${(e) => setScope(e.currentTarget.value)}>
+            <option value="project">Everyone</option>
+            ${personas.map((p) => html`<option key=${p} value=${'persona:' + p}>${p}</option>`)}
+          </select>
+        </div>
+        <button class="btn primary" type="button" disabled=${!file || !name || busy} onClick=${upload}>${busy ? 'Uploading…' : 'Upload'}</button>
+      </div>
+      ${personas.length ? null : html`<p class="hint">To limit a file to one persona, add the persona and save the project first.</p>`}
+      ${err ? html`<div class="note bad" role="alert">${err}</div>` : null}
     </div>`;
 }

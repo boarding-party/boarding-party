@@ -196,3 +196,11 @@ dialog.confirm p { margin: 0 0 14px; font-size: 14px; }
 }
 .bug-shot { display: block; width: fit-content; max-width: 240px; margin: 0 8px 10px; }
 .bug-shot img { display: block; max-width: 100%; height: auto; border: 1px solid var(--line); border-radius: 6px; }
+.filetab { width: 100%; border-collapse: collapse; font-size: 13px; margin: 10px 0 14px; }
+.filetab th { text-align: left; font-weight: 500; color: var(--muted); padding: 6px 8px; border-bottom: 1px solid var(--line); }
+.filetab td { padding: 7px 8px; border-bottom: 1px solid var(--line-soft); overflow-wrap: anywhere; }
+.filetab .nm { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.filetab .act { text-align: right; width: 1%; white-space: nowrap; }
+.filetab .btn.danger-ghost { align-self: auto; padding: 4px 10px; font-size: 12px; }
+.fileup { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, 1fr) auto; gap: 12px; align-items: end; margin-top: 12px; }
+@media (max-width: 760px) { .fileup { grid-template-columns: minmax(0, 1fr); } }

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/boarding-party/boardingparty/internal/artifacts"
+	"github.com/boarding-party/boardingparty/internal/files"
 	"github.com/boarding-party/boardingparty/internal/project"
 	"github.com/boarding-party/boardingparty/internal/runs"
 	"github.com/boarding-party/boardingparty/internal/store"
@@ -281,4 +282,34 @@ func TestCrossRunIsolation(t *testing.T) {
 
 func (f *fakeLauncher) Stage(context.Context, string) (string, string, error) {
 	return "running", "", nil
+}
+
+func TestNextAssignmentListsFiles(t *testing.T) {
+	svc, _, srv, run := setup(t)
+	fs := files.New(t.TempDir())
+	svc.Files = fs
+	fs.Put("project", "logo.png", strings.NewReader("p"))
+	fs.Put("persona:ann", "cv.pdf", strings.NewReader("a"))
+	fs.Put("persona:bob", "bob.pdf", strings.NewReader("b"))
+	text, isErr := call(t, connect(t, srv, run.Token), "next_assignment", nil)
+	if isErr {
+		t.Fatal(text)
+	}
+	var got struct {
+		Files []string `json:"files"`
+	}
+	if err := json.Unmarshal([]byte(text), &got); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(got.Files, ",") != "cv.pdf,logo.png" {
+		t.Errorf("files = %v", got.Files)
+	}
+}
+
+func TestNextAssignmentFilesEmptyIsList(t *testing.T) {
+	_, _, srv, run := setup(t) // no file store at all
+	text, _ := call(t, connect(t, srv, run.Token), "next_assignment", nil)
+	if !strings.Contains(text, `"files":[]`) {
+		t.Errorf("want an empty files list, got %s", text)
+	}
 }

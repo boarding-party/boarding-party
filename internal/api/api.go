@@ -71,6 +71,9 @@ func admin(svc *runs.Service, maxBytes int64, token string, hub *live.Hub) (*ser
 	mux.HandleFunc("GET /api/runs/{id}/artifacts/{name}", s.getArtifact)
 	mux.HandleFunc("GET /api/runs/{id}/live", s.streamLive)
 	mux.HandleFunc("GET /api/runs/{id}/live.jpg", s.liveStill)
+	mux.HandleFunc("GET /api/files", s.listFiles)
+	mux.HandleFunc("PUT /api/files/{name}", s.putFile)
+	mux.HandleFunc("DELETE /api/files/{name}", s.deleteFile)
 	return s, guardAdmin(token, mux)
 }
 
@@ -80,6 +83,8 @@ func Worker(svc *runs.Service, maxBytes int64, hub *live.Hub) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("PUT /artifacts/{token}/{name}", s.putArtifact)
 	mux.HandleFunc("PUT /live/{token}", s.putLive)
+	mux.HandleFunc("GET /files/{token}/{$}", s.workerFiles)
+	mux.HandleFunc("GET /files/{token}/{name}", s.workerFile)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
 	return mux
 }

@@ -28,6 +28,7 @@ import (
 
 	"github.com/boarding-party/boardingparty/internal/api"
 	"github.com/boarding-party/boardingparty/internal/artifacts"
+	"github.com/boarding-party/boardingparty/internal/files"
 	"github.com/boarding-party/boardingparty/internal/launcher"
 	"github.com/boarding-party/boardingparty/internal/live"
 	"github.com/boarding-party/boardingparty/internal/mcpserver"
@@ -192,6 +193,7 @@ func run() error {
 	svc := &runs.Service{
 		Store:     st,
 		Artifacts: artifacts.NewFS(filepath.Join(cfg.Data, "artifacts"), cfg.MaxArtifactBytes),
+		Files:     files.New(filepath.Join(cfg.Data, "files")),
 		Launcher:  tl,
 	}
 

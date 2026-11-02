@@ -2,12 +2,14 @@
 # MCP stdio launcher: starts the screen streamer once per pod, then execs Playwright MCP.
 # Nothing may be written to stdout here; it belongs to the MCP protocol.
 live=""
+files=""
 device=""
 n=$#
 while [ "$n" -gt 0 ]; do
   a="$1"; shift; n=$((n - 1))
   case "$a" in
     --live-url=*) live="${a#--live-url=}" ;;
+    --files-url=*) files="${a#--files-url=}" ;;
     --bp-device=*) device="${a#--bp-device=}" ;;
     *) set -- "$@" "$a" ;;
   esac
@@ -20,6 +22,19 @@ if [ -n "$live" ]; then
     node /opt/bp/bp-screen.mjs "--live-url=$live" >>/tmp/bp-screen.log 2>&1 &
     echo $! >/tmp/bp-screen.pid
   fi
+fi
+
+# Fetch the persona's test files into /workspace/files before the browser
+# starts. Best effort: a failure is logged (never the URL, it carries the run
+# token) and the browser starts anyway. Output goes to the log, not stdout.
+if [ -n "$files" ]; then
+  timeout 30 sh -c '
+    mkdir -p /workspace/files || exit 1
+    list=$(curl -fsS --max-time 20 "$1") || { echo "bp-files: could not list files"; exit 1; }
+    printf "%s" "$list" | tr -d "[]\" " | tr "," "\n" | grep -E "^[a-z0-9][a-z0-9._-]{0,63}\$" | while read -r n; do
+      curl -fsS --max-time 20 -o "/workspace/files/$n" "$1$n" || echo "bp-files: could not fetch $n"
+    done
+  ' sh "$files" >>/tmp/bp-files.log 2>&1 || echo "bp-files: failed or timed out" >>/tmp/bp-files.log
 fi
 
 name=""

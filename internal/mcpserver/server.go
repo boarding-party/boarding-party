@@ -71,6 +71,8 @@ type assignment struct {
 	Sites        []string        `json:"sites"`
 	PersonaState json.RawMessage `json:"personaState"`
 	UploadURL    string          `json:"uploadURL"`
+	// Files are the names under /workspace/files the persona may upload in the site.
+	Files []string `json:"files"`
 }
 
 type saveArgs struct {
@@ -114,7 +116,16 @@ func newServer(svc *runs.Service, st *store.Store, directorURL, token string) *m
 			if err != nil {
 				return nil, nil, fmt.Errorf("load project: %w", err)
 			}
-			a := assignment{Sites: p.Sites, UploadURL: directorURL + "/artifacts/" + token + "/"}
+			a := assignment{Sites: p.Sites, UploadURL: directorURL + "/artifacts/" + token + "/", Files: []string{}}
+			if svc.Files != nil {
+				fl, err := svc.Files.ForPersona(r.Persona)
+				if err != nil {
+					return nil, nil, fmt.Errorf("list files: %w", err)
+				}
+				for _, f := range fl {
+					a.Files = append(a.Files, f.Name)
+				}
+			}
 			a.Persona.Name, a.Persona.Role = r.Persona, r.Role
 			a.Story.Name = r.Story
 			for _, role := range p.Roles {

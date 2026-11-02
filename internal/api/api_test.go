@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -16,6 +17,7 @@ import (
 	"time"
 
 	"github.com/boarding-party/boardingparty/internal/artifacts"
+	"github.com/boarding-party/boardingparty/internal/files"
 	"github.com/boarding-party/boardingparty/internal/live"
 	"github.com/boarding-party/boardingparty/internal/project"
 	"github.com/boarding-party/boardingparty/internal/runs"
@@ -732,5 +734,169 @@ func TestRunListStageLookupsShareOneDeadline(t *testing.T) {
 		if it["stage"] != nil {
 			t.Fatalf("stage not omitted: %v", it)
 		}
+	}
+}
+
+// ---- files ----
+
+func putFile(t *testing.T, base, name, scope, body string) *http.Response {
+	t.Helper()
+	u := base + "/api/files/" + name
+	if scope != "" {
+		u += "?scope=" + url.QueryEscape(scope)
+	}
+	req, _ := http.NewRequest("PUT", u, strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+testToken)
+	req.Header.Set("Content-Type", "application/octet-stream")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { resp.Body.Close() })
+	return resp
+}
+
+func withFiles(svc *runs.Service, t *testing.T) *files.Store {
+	fs := files.New(t.TempDir())
+	svc.Files = fs
+	return fs
+}
+
+func TestAdminFilesCRUD(t *testing.T) {
+	srv, svc := setup(t, 0)
+	withFiles(svc, t)
+	if r := do(t, "POST", srv.URL+"/api/project", projYAML); r.StatusCode != 204 {
+		t.Fatalf("project: %d", r.StatusCode)
+	}
+	if r := putFile(t, srv.URL, "logo.png", "", "\x89PNG\r\n\x1a\n0000"); r.StatusCode != 200 {
+		t.Fatalf("put project file: %d", r.StatusCode)
+	}
+	if r := putFile(t, srv.URL, "cv.pdf", "persona:ann", "%PDF-1.4 x"); r.StatusCode != 200 {
+		t.Fatalf("put persona file: %d", r.StatusCode)
+	}
+	// Replace keeps one entry.
+	if r := putFile(t, srv.URL, "logo.png", "project", "\x89PNG\r\n\x1a\n1111111"); r.StatusCode != 200 {
+		t.Fatalf("replace: %d", r.StatusCode)
+	}
+	r := do(t, "GET", srv.URL+"/api/files", "")
+	var got []files.Info
+	if err := json.NewDecoder(r.Body).Decode(&got); err != nil || r.StatusCode != 200 {
+		t.Fatalf("list: %d %v", r.StatusCode, err)
+	}
+	if len(got) != 2 || got[0].Name != "logo.png" || got[0].Scope != "project" || got[0].Size != 15 || got[0].ContentType != "image/png" ||
+		got[1].Name != "cv.pdf" || got[1].Scope != "persona:ann" || got[1].ContentType != "application/pdf" || got[1].Uploaded.IsZero() {
+		t.Fatalf("list = %+v", got)
+	}
+	raw, _ := json.Marshal(got[0])
+	for _, k := range []string{`"name"`, `"scope"`, `"size"`, `"contentType"`, `"uploaded"`} {
+		if !strings.Contains(string(raw), k) {
+			t.Errorf("json %s missing %s", raw, k)
+		}
+	}
+	if r := do(t, "DELETE", srv.URL+"/api/files/cv.pdf?scope=persona:ann", ""); r.StatusCode != 204 {
+		t.Fatalf("delete: %d", r.StatusCode)
+	}
+	if r := do(t, "DELETE", srv.URL+"/api/files/cv.pdf?scope=persona:ann", ""); r.StatusCode != 404 {
+		t.Fatalf("delete again: %d", r.StatusCode)
+	}
+	if r := do(t, "DELETE", srv.URL+"/api/files/logo.png", ""); r.StatusCode != 204 {
+		t.Fatalf("delete default scope: %d", r.StatusCode)
+	}
+	r = do(t, "GET", srv.URL+"/api/files", "")
+	if b, _ := io.ReadAll(r.Body); strings.TrimSpace(string(b)) != "[]" {
+		t.Fatalf("empty list = %s", b)
+	}
+}
+
+func TestAdminFilesRejects(t *testing.T) {
+	srv, svc := setup(t, 0)
+	fs := withFiles(svc, t)
+	fs.MaxFile, fs.MaxTotal = 10, 15
+	do(t, "POST", srv.URL+"/api/project", projYAML)
+	body := func(r *http.Response) string { b, _ := io.ReadAll(r.Body); return string(b) }
+
+	if r := putFile(t, srv.URL, "Bad_Name.png", "", "x"); r.StatusCode != 400 || !strings.Contains(body(r), "bad file name") {
+		t.Errorf("bad name: %d", r.StatusCode)
+	}
+	if r := putFile(t, srv.URL, "a.txt", "persona:ghost", "x"); r.StatusCode != 400 || !strings.Contains(body(r), "unknown persona") {
+		t.Errorf("unknown persona: %d", r.StatusCode)
+	}
+	if r := putFile(t, srv.URL, "a.txt", "everyone", "x"); r.StatusCode != 400 {
+		t.Errorf("bad scope: %d", r.StatusCode)
+	}
+	if r := putFile(t, srv.URL, "a.txt", "", strings.Repeat("x", 11)); r.StatusCode != 413 || !strings.Contains(body(r), "limit") {
+		t.Errorf("too large: %d", r.StatusCode)
+	}
+	if r := putFile(t, srv.URL, "a.txt", "", strings.Repeat("x", 10)); r.StatusCode != 200 {
+		t.Fatalf("a: %d", r.StatusCode)
+	}
+	if r := putFile(t, srv.URL, "b.txt", "", strings.Repeat("x", 6)); r.StatusCode != 413 || !strings.Contains(body(r), "total") {
+		t.Errorf("total: %d", r.StatusCode)
+	}
+	// The guard still applies to the new routes.
+	req, _ := http.NewRequest("PUT", srv.URL+"/api/files/a.txt", strings.NewReader("x"))
+	if resp, err := http.DefaultClient.Do(req); err != nil || resp.StatusCode != 401 {
+		t.Errorf("no bearer: %v %v", resp, err)
+	}
+	req, _ = http.NewRequest("PUT", srv.URL+"/api/files/a.txt", strings.NewReader("x"))
+	req.Header.Set("Authorization", "Bearer "+testToken)
+	req.Header.Set("Origin", "https://evil.test")
+	if resp, err := http.DefaultClient.Do(req); err != nil || resp.StatusCode != 403 {
+		t.Errorf("origin: %v %v", resp, err)
+	}
+}
+
+func TestWorkerFiles(t *testing.T) {
+	srv, wsrv, svc := setupBoth(t, 0)
+	fs := withFiles(svc, t)
+	run := startRun(t, srv, svc) // persona ann
+	fs.Put("project", "logo.png", strings.NewReader("project-logo"))
+	fs.Put("project", "shared.csv", strings.NewReader("a,b"))
+	fs.Put("persona:ann", "logo.png", strings.NewReader("ann-logo"))
+	fs.Put("persona:bob", "bob.pdf", strings.NewReader("bob"))
+	get := func(path string) (int, string) {
+		resp, err := http.Get(wsrv.URL + path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		b, _ := io.ReadAll(resp.Body)
+		return resp.StatusCode, string(b)
+	}
+	code, b := get("/files/" + run.Token + "/")
+	var names []string
+	if json.Unmarshal([]byte(b), &names) != nil || code != 200 || strings.Join(names, ",") != "logo.png,shared.csv" {
+		t.Fatalf("list: %d %s", code, b)
+	}
+	if code, b := get("/files/" + run.Token + "/logo.png"); code != 200 || b != "ann-logo" {
+		t.Errorf("persona wins: %d %q", code, b)
+	}
+	if code, b := get("/files/" + run.Token + "/shared.csv"); code != 200 || b != "a,b" {
+		t.Errorf("project file: %d %q", code, b)
+	}
+	if code, _ := get("/files/" + run.Token + "/bob.pdf"); code != 404 {
+		t.Errorf("other persona's file: %d", code)
+	}
+	if code, _ := get("/files/" + run.Token + "/..%2Fx"); code != 404 {
+		t.Errorf("traversal: %d", code)
+	}
+	if code, _ := get("/files/deadbeef/"); code != 404 {
+		t.Errorf("unknown token list: %d", code)
+	}
+	if code, _ := get("/files/deadbeef/logo.png"); code != 404 {
+		t.Errorf("unknown token file: %d", code)
+	}
+	if err := svc.Finish(context.Background(), run.Token, store.RunDone, "ok"); err != nil {
+		t.Fatal(err)
+	}
+	if code, _ := get("/files/" + run.Token + "/"); code != 404 {
+		t.Errorf("inactive list: %d", code)
+	}
+	if code, _ := get("/files/" + run.Token + "/logo.png"); code != 404 {
+		t.Errorf("inactive file: %d", code)
+	}
+	// The admin surface is not on the worker listener.
+	if code, _ := get("/api/files"); code != 404 {
+		t.Errorf("worker serves /api/files: %d", code)
 	}
 }

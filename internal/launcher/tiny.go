@@ -276,6 +276,7 @@ func podStage(p corev1.Pod) (string, string) {
 // stable key (--bp-device) that the worker maps to a Playwright device name.
 func (t *Tiny) browserArgs(r store.Run, p project.Project) []string {
 	args := []string{"--live-url=" + t.DirectorURL + "/live/" + r.Token,
+		"--files-url=" + t.DirectorURL + "/files/" + r.Token + "/",
 		"--headless", "--isolated", "--no-sandbox", "--browser=chromium", "--output-dir=/workspace/out"}
 	device := personaDevice(r, p)
 	if pd, viewport := project.DeviceLaunch(device); pd != "" {

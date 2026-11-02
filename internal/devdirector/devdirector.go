@@ -26,6 +26,7 @@ import (
 
 	"github.com/boarding-party/boardingparty/internal/api"
 	"github.com/boarding-party/boardingparty/internal/artifacts"
+	"github.com/boarding-party/boardingparty/internal/files"
 	"github.com/boarding-party/boardingparty/internal/live"
 	"github.com/boarding-party/boardingparty/internal/project"
 	"github.com/boarding-party/boardingparty/internal/runs"
@@ -258,6 +259,7 @@ func start(ctx context.Context, dir string, projectYAML []byte, duration time.Du
 	svc := &runs.Service{
 		Store:     st,
 		Artifacts: artifacts.NewFS(filepath.Join(dir, "artifacts"), api.MaxArtifactBytes),
+		Files:     files.New(filepath.Join(dir, "files")),
 		Launcher:  l,
 	}
 	l.Svc = svc

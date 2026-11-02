@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/boarding-party/boardingparty/internal/artifacts"
+	"github.com/boarding-party/boardingparty/internal/files"
 	"github.com/boarding-party/boardingparty/internal/project"
 	"github.com/boarding-party/boardingparty/internal/store"
 )
@@ -57,6 +58,7 @@ type Launcher interface {
 type Service struct {
 	Store     *store.Store
 	Artifacts artifacts.Store
+	Files     *files.Store // test fixtures personas may upload in the site; may be nil
 	Launcher  Launcher
 
 	startMu sync.Mutex // makes the one-active-run check and CreateRun atomic

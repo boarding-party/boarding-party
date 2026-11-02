@@ -266,6 +266,16 @@ A run takes a few minutes, mostly pod start-up and the agent's own pace. Cost
 depends on the model and how long the agent works: from a few pence to around
 a pound per run for a short story.
 
+### Files
+
+Some stories need a file, such as a logo to upload or a CSV to import. On the
+Project page of the board, the Files card takes test files for the whole
+project or for one persona (25 MiB each, 200 MiB in total, stored on the
+director's volume). Use made-up content only. Before a run starts, the
+persona's files are copied into `/workspace/files` in the pod, and the agent
+is told it may upload those and nothing else. A persona's file wins over a
+project file with the same name.
+
 ### Scripting and CI
 
 Everything the board does is also a command:
