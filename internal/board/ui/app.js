@@ -489,4 +489,7 @@ function Bug({ bug, duration, onSeek }) {
     : html`<div class="bug">${body}</div>`;
 }
 
-render(html`<${App} />`, document.getElementById('root'));
+// Clear the static "Loading…" placeholder: render() appends, it doesn't replace.
+const root = document.getElementById('root');
+root.replaceChildren();
+render(html`<${App} />`, root);
