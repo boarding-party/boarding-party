@@ -340,31 +340,39 @@ function StateTag({ state }) {
   return html`<span class=${'tag ' + (STATE_TAG.get(state) || 'idle')}>${state || 'unknown'}</span>`;
 }
 
-const STAGE_SHORT = { 'waiting-for-node': 'Starting machine', 'starting': 'Starting run', 'running': 'Getting ready' };
+const STAGE_SHORT = { 'waiting-for-node': 'Starting machine', 'starting': 'Starting run', 'running': 'Getting ready', 'failing': 'Failing to start' };
+const THUMB_MS = 3000;
 
-// A small live picture of an active run. It looks at the run itself every
-// 3 s for the stage and whether a frame exists, and bumps ?t= to refresh.
-// Mounted only while the list is shown, so it stops with the page.
-function Thumb({ id }) {
-  const [info, setInfo] = useState({});
+// A small live picture of an active run. The runs list says (through its own
+// poll) whether a frame exists and what stage the run is at; while one does,
+// this loads live.jpg one at a time, and waits while the tab is hidden.
+function Thumb({ id, stage, live }) {
   const [tick, setTick] = useState(0);
+  const [ok, setOk] = useState(false);
+  const timer = useRef(0);
+  const on = useRef(false);
+  // Wait, then ask for the next image; each load or error calls this again,
+  // so requests never overlap.
+  const schedule = () => {
+    clearTimeout(timer.current);
+    if (!on.current) return;
+    timer.current = setTimeout(function go() {
+      if (!on.current) return;
+      if (document.hidden) { timer.current = setTimeout(go, THUMB_MS); return; }
+      setTick((n) => n + 1);
+    }, THUMB_MS);
+  };
   useEffect(() => {
-    let on = true;
-    const look = async () => {
-      try {
-        const d = await api(`/api/runs/${encodeURIComponent(id)}`);
-        if (on && d) { setInfo({ stage: d.stage, live: !!d.live }); setTick((n) => n + 1); }
-      } catch (e) { /* keep the last look */ }
-    };
-    look();
-    const t = setInterval(look, 3000);
-    return () => { on = false; clearInterval(t); };
-  }, [id]);
+    on.current = !!live;
+    if (live) setTick((n) => n + 1); else setOk(false);
+    return () => { on.current = false; clearTimeout(timer.current); };
+  }, [id, live]);
   return html`
     <a class="thumb" href=${runHref(id)} onClick=${(e) => e.stopPropagation()} title="Watch this run">
-      ${info.live
-        ? html`<img src=${`/api/runs/${encodeURIComponent(id)}/live.jpg?t=${tick}`} alt="Live view of the run" />`
-        : html`<span>${STAGE_SHORT[info.stage] || 'Waiting'}</span>`}
+      ${live && tick ? html`<img src=${`/api/runs/${encodeURIComponent(id)}/live.jpg?t=${tick}`} alt="Live view of the run"
+          style=${ok ? '' : 'display:none'}
+          onLoad=${() => { setOk(true); schedule(); }} onError=${() => { setOk(false); schedule(); }} />` : null}
+      ${live && ok ? null : html`<span>${STAGE_SHORT[stage] || 'Waiting'}</span>`}
     </a>`;
 }
 
@@ -377,7 +385,7 @@ function RunsTable({ runs }) {
         <tbody>
           ${runs.map((r) => html`
             <tr class="click" key=${r.id} onClick=${open(r.id)}>
-              <td class="thumbcell">${ACTIVE.has(r.state) ? html`<${Thumb} key=${r.id} id=${r.id} />` : null}</td>
+              <td class="thumbcell">${ACTIVE.has(r.state) ? html`<${Thumb} key=${r.id} id=${r.id} stage=${r.stage} live=${r.live} />` : null}</td>
               <td><a href=${runHref(r.id)} onClick=${(e) => e.stopPropagation()}>${r.persona}</a>
                 ${r.role ? html`<div class="small muted">${r.role}</div>` : null}</td>
               <td>${r.story}${ACTIVE.has(r.state) ? html` <a class="small" href=${runHref(r.id)} onClick=${(e) => e.stopPropagation()}>Watch</a>` : null}</td>
@@ -402,17 +410,17 @@ const STAGE_TEXT = {
 };
 
 // What the run is doing before its first frame; text only.
-function LiveStatus({ stage, started }) {
+function LiveStatus({ stage, reason, started }) {
   const [now, setNow] = useState(Date.now());
   useEffect(() => { const t = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(t); }, []);
   const t0 = started ? Date.parse(started) : NaN;
   const secs = Number.isFinite(t0) ? Math.max(0, Math.floor((now - t0) / 1000)) : null;
-  const text = STAGE_TEXT[stage];
+  const text = stage === 'failing' ? ['The run is failing to start', reason || ''] : STAGE_TEXT[stage];
   if (!text) return html`<p class="livewait">Waiting for the first frame…${secs === null ? '' : ' · ' + secs + ' s'}</p>`;
   return html`<div class="livewait livestatus"><p>${text[0]}${secs === null ? '' : ' · ' + secs + ' s'}</p><p class="muted small">${text[1]}</p></div>`;
 }
 
-function LiveView({ id, stage, started }) {
+function LiveView({ id, stage, reason, started }) {
   const [shown, setShown] = useState(false);
   const [nonce, setNonce] = useState(0);
   const timer = useRef(0);
@@ -446,7 +454,7 @@ function LiveView({ id, stage, started }) {
     <img class="livefeed" src=${src} alt="Live view of the run" onLoad=${() => setShown(true)} onError=${lost}
       style=${shown ? '' : 'visibility:hidden'} />
     <span class="livetag"><span class="dot live"></span> Live</span>
-    ${shown ? null : html`<${LiveStatus} stage=${stage} started=${started} />`}`;
+    ${shown ? null : html`<${LiveStatus} stage=${stage} reason=${reason} started=${started} />`}`;
 }
 
 function RunPage({ id, onChange }) {
@@ -514,7 +522,7 @@ function RunPage({ id, onChange }) {
       <div class="grid g-side">
         <div class="stack">
           <div class=${'player' + (ACTIVE.has(run.state) ? ' live' : '')}>
-            ${ACTIVE.has(run.state) ? html`<${LiveView} key=${run.id} id=${run.id} stage=${data.stage} started=${run.started} />` : webm ? html`<video ref=${video} key=${webm} src=${artifactURL(run.id, webm)} controls preload="metadata" playsinline
+            ${ACTIVE.has(run.state) ? html`<${LiveView} key=${run.id} id=${run.id} stage=${data.stage} reason=${data.stageReason} started=${run.started} />` : webm ? html`<video ref=${video} key=${webm} src=${artifactURL(run.id, webm)} controls preload="metadata" playsinline
                 onLoadedMetadata=${(e) => { const d = e.currentTarget.duration; setDuration(d > 0 ? d : 0); }}></video>`
               : html`<p>This run has no recording.</p>`}
           </div>

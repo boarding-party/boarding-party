@@ -279,4 +279,6 @@ func TestCrossRunIsolation(t *testing.T) {
 	}
 }
 
-func (f *fakeLauncher) Stage(context.Context, string) (string, error) { return "running", nil }
+func (f *fakeLauncher) Stage(context.Context, string) (string, string, error) {
+	return "running", "", nil
+}

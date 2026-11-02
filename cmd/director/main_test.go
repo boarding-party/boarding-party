@@ -170,4 +170,4 @@ func TestTinyVersionFromThisBinary(t *testing.T) {
 	}
 }
 
-func (fakeLauncher) Stage(context.Context, string) (string, error) { return "running", nil }
+func (fakeLauncher) Stage(context.Context, string) (string, string, error) { return "running", "", nil }

@@ -50,7 +50,8 @@ type Launcher interface {
 	LivePods(ctx context.Context) (int, error)
 	// Stage says how far a session's pod has got: "starting" (no pod yet, or
 	// image pull and init), "waiting-for-node" (unscheduled) or "running".
-	Stage(ctx context.Context, session string) (string, error)
+	// "failing" carries the reason a container cannot start.
+	Stage(ctx context.Context, session string) (stage, reason string, err error)
 }
 
 type Service struct {

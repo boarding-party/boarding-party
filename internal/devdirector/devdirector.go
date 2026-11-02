@@ -67,20 +67,20 @@ const (
 	fakeFrameAfter   = 11 * time.Second
 )
 
-func (l *Launcher) Stage(_ context.Context, session string) (string, error) {
+func (l *Launcher) Stage(_ context.Context, session string) (string, string, error) {
 	l.mu.Lock()
 	t0, ok := l.started[session]
 	l.mu.Unlock()
 	if !ok {
-		return "starting", nil
+		return "starting", "", nil
 	}
 	switch d := time.Since(t0); {
 	case d < fakeNodeAfter:
-		return "waiting-for-node", nil
+		return "waiting-for-node", "", nil
 	case d < fakeRunningAfter:
-		return "starting", nil
+		return "starting", "", nil
 	}
-	return "running", nil
+	return "running", "", nil
 }
 
 func (l *Launcher) SessionName(runID string) string { return "fake-" + runID }

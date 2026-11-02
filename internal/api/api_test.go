@@ -12,6 +12,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/boarding-party/boardingparty/internal/artifacts"
 	"github.com/boarding-party/boardingparty/internal/live"
@@ -31,9 +32,9 @@ func (noopLauncher) Phase(context.Context, string) (string, bool, string, error)
 	return "Running", true, "", nil
 }
 
-func (noopLauncher) Sessions(context.Context) (map[string]string, error) { return nil, nil }
-func (noopLauncher) LivePods(context.Context) (int, error)               { return 0, nil }
-func (noopLauncher) Stage(context.Context, string) (string, error)       { return "running", nil }
+func (noopLauncher) Sessions(context.Context) (map[string]string, error)   { return nil, nil }
+func (noopLauncher) LivePods(context.Context) (int, error)                 { return 0, nil }
+func (noopLauncher) Stage(context.Context, string) (string, string, error) { return "running", "", nil }
 
 const projYAML = `name: p
 sites: ["https://x.test"]
@@ -640,5 +641,54 @@ func TestLiveStill(t *testing.T) {
 	}
 	if r := do(t, "GET", srv.URL+"/api/runs/nope/live.jpg", ""); r.StatusCode != 404 {
 		t.Fatalf("unknown run: %d", r.StatusCode)
+	}
+}
+
+type failingLauncher struct{ noopLauncher }
+
+func (failingLauncher) Stage(context.Context, string) (string, string, error) {
+	return "failing", "ImagePullBackOff", nil
+}
+
+type slowLauncher struct{ noopLauncher }
+
+func (slowLauncher) Stage(ctx context.Context, _ string) (string, string, error) {
+	<-ctx.Done()
+	return "", "", ctx.Err()
+}
+
+func TestRunListAndDetailCarryStage(t *testing.T) {
+	srv, w, svc := setupBoth(t, 1024)
+	svc.Launcher = failingLauncher{}
+	run := startRun(t, srv, svc)
+	do(t, "PUT", w.URL+"/live/"+run.Token, "\xff\xd8x")
+	var list []map[string]any
+	json.NewDecoder(do(t, "GET", srv.URL+"/api/runs", "").Body).Decode(&list)
+	if len(list) != 1 || list[0]["stage"] != "failing" || list[0]["stageReason"] != "ImagePullBackOff" || list[0]["live"] != true {
+		t.Fatalf("list: %v", list)
+	}
+	var d map[string]any
+	json.NewDecoder(do(t, "GET", srv.URL+"/api/runs/"+run.ID, "").Body).Decode(&d)
+	if d["stage"] != "failing" || d["stageReason"] != "ImagePullBackOff" {
+		t.Fatalf("detail: %v", d)
+	}
+	svc.Finish(context.Background(), run.Token, store.RunDone, "ok")
+	list = nil
+	json.NewDecoder(do(t, "GET", srv.URL+"/api/runs", "").Body).Decode(&list)
+	if list[0]["stage"] != nil || list[0]["live"] != nil {
+		t.Fatalf("finished list item: %v", list[0])
+	}
+}
+
+func TestStageLookupTimesOutWithoutFailingRequest(t *testing.T) {
+	srv, _, svc := setupBoth(t, 1024)
+	run := startRun(t, srv, svc)
+	svc.Launcher = slowLauncher{}
+	start := time.Now()
+	resp := do(t, "GET", srv.URL+"/api/runs/"+run.ID, "")
+	var d map[string]any
+	json.NewDecoder(resp.Body).Decode(&d)
+	if resp.StatusCode != 200 || d["stage"] != nil || time.Since(start) > 4*time.Second {
+		t.Fatalf("got %d %v after %v", resp.StatusCode, d, time.Since(start))
 	}
 }

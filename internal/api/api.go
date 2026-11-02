@@ -3,6 +3,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -202,9 +203,16 @@ func (s *server) listRuns(w http.ResponseWriter, r *http.Request) {
 		fail(w, err)
 		return
 	}
-	out := make([]store.Run, len(rs))
+	type item struct {
+		store.Run
+		Stage       string `json:"stage,omitempty"`
+		StageReason string `json:"stageReason,omitempty"`
+		Live        bool   `json:"live,omitempty"`
+	}
+	out := make([]item, len(rs))
 	for i, x := range rs {
-		out[i] = redact(x)
+		out[i] = item{Run: redact(x)}
+		out[i].Stage, out[i].StageReason, out[i].Live = s.progress(r.Context(), x)
 	}
 	writeJSON(w, http.StatusOK, out)
 }
@@ -233,17 +241,38 @@ func (s *server) getRun(w http.ResponseWriter, r *http.Request) {
 		names = []string{}
 	}
 	out := map[string]any{"run": redact(run), "bugs": bugs, "artifacts": names}
-	if isActive(run.State) {
-		if run.Session != "" {
-			if stage, err := s.svc.Launcher.Stage(r.Context(), run.Session); err == nil && stage != "" {
-				out["stage"] = stage
-			}
+	if stage, reason, isLive := s.progress(r.Context(), run); stage != "" || isLive {
+		if stage != "" {
+			out["stage"] = stage
 		}
-		if s.hub != nil && s.hub.HasFrame(id) {
+		if reason != "" {
+			out["stageReason"] = reason
+		}
+		if isLive {
 			out["live"] = true
 		}
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// stageTimeout bounds the pod lookup so a slow cluster cannot stall the API.
+const stageTimeout = 2 * time.Second
+
+// progress says what an active run is doing: its stage (and reason when it is
+// failing) and whether a live frame exists. Finished runs give zero values; a
+// failed or slow lookup just leaves the stage empty.
+func (s *server) progress(ctx context.Context, run store.Run) (stage, reason string, isLive bool) {
+	if !isActive(run.State) {
+		return "", "", false
+	}
+	if run.Session != "" {
+		c, cancel := context.WithTimeout(ctx, stageTimeout)
+		defer cancel()
+		if st, why, err := s.svc.Launcher.Stage(c, run.Session); err == nil {
+			stage, reason = st, why
+		}
+	}
+	return stage, reason, s.hub != nil && s.hub.HasFrame(run.ID)
 }
 
 // artifactTypes pins the content types we serve; anything else is opaque.
@@ -336,8 +365,15 @@ const liveWriteTimeout = 10 * time.Second
 func (s *server) liveStill(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	var frame []byte
-	if run, err := s.svc.Store.RunByID(id); err == nil && isActive(run.State) {
-		frame = s.hub.Latest(id)
+	run, err := s.svc.Store.RunByID(id)
+	switch {
+	case err == nil:
+		if isActive(run.State) && s.hub != nil {
+			frame = s.hub.Latest(id)
+		}
+	case !errors.Is(err, store.ErrNotFound):
+		fail(w, err)
+		return
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	if frame == nil {

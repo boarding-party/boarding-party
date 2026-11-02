@@ -214,30 +214,61 @@ func (t *Tiny) LivePods(ctx context.Context) (int, error) {
 
 // Stage reports how far the session's pod has got: "waiting-for-node" while
 // it has no node, "starting" with no pod yet or while its containers are not
-// all ready, and "running" once it is Ready.
-func (t *Tiny) Stage(ctx context.Context, name string) (string, error) {
+// all ready, "running" once it is Ready, and "failing" (with the reason) when
+// a container cannot start. Pods being deleted or already finished are
+// ignored; of the rest the furthest along wins: running, starting, failing,
+// waiting-for-node.
+func (t *Tiny) Stage(ctx context.Context, name string) (stage, reason string, err error) {
 	l := &corev1.PodList{}
 	if err := t.Client.List(ctx, l, client.InNamespace(t.Namespace),
 		client.MatchingLabels{podAppLabel: podAppValue, session.SessionLabel: name}); err != nil {
-		return "", fmt.Errorf("list pods: %w", err)
+		return "", "", fmt.Errorf("list pods: %w", err)
 	}
-	stage := "starting"
+	rank := map[string]int{"": 0, "waiting-for-node": 1, "failing": 2, "starting": 3, "running": 4}
+	best, bestReason := "", ""
 	for _, p := range l.Items {
-		if p.Spec.NodeName == "" {
-			for _, c := range p.Status.Conditions {
-				if c.Type == corev1.PodScheduled && c.Status == corev1.ConditionFalse {
-					return "waiting-for-node", nil
-				}
-			}
+		if p.DeletionTimestamp != nil || p.Status.Phase == corev1.PodSucceeded {
 			continue
 		}
-		for _, c := range p.Status.Conditions {
-			if c.Type == corev1.PodReady && c.Status == corev1.ConditionTrue {
-				return "running", nil
-			}
+		st, why := podStage(p)
+		if rank[st] > rank[best] {
+			best, bestReason = st, why
 		}
 	}
-	return stage, nil
+	if best == "" {
+		return "starting", "", nil
+	}
+	return best, bestReason, nil
+}
+
+var failingReasons = map[string]bool{
+	"CrashLoopBackOff": true, "ImagePullBackOff": true, "ErrImagePull": true, "CreateContainerConfigError": true,
+}
+
+func podStage(p corev1.Pod) (string, string) {
+	for _, c := range p.Status.Conditions {
+		if c.Type == corev1.PodReady && c.Status == corev1.ConditionTrue {
+			return "running", ""
+		}
+	}
+	statuses := append(append([]corev1.ContainerStatus{}, p.Status.InitContainerStatuses...), p.Status.ContainerStatuses...)
+	for _, cs := range statuses {
+		if w := cs.State.Waiting; w != nil && failingReasons[w.Reason] {
+			return "failing", w.Reason
+		}
+	}
+	if p.Status.Phase == corev1.PodFailed {
+		return "failing", p.Status.Reason
+	}
+	if p.Spec.NodeName == "" {
+		for _, c := range p.Status.Conditions {
+			if c.Type == corev1.PodScheduled && c.Status == corev1.ConditionFalse {
+				return "waiting-for-node", ""
+			}
+		}
+		return "starting", ""
+	}
+	return "starting", ""
 }
 
 // browserArgs builds the bp-browser arguments. tiny's CRD rejects MCP args

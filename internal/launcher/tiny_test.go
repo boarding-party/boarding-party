@@ -514,44 +514,82 @@ func TestWorkerDeviceTableMatches(t *testing.T) {
 }
 
 func TestStage(t *testing.T) {
+	mk := func(name string, f func(p *corev1.Pod)) *corev1.Pod {
+		p := pod("bp", name, "tiny-session", "bp-run-1")
+		f(p)
+		return p
+	}
 	cond := func(typ corev1.PodConditionType, st corev1.ConditionStatus) []corev1.PodCondition {
 		return []corev1.PodCondition{{Type: typ, Status: st}}
 	}
+	waiting := func(reason string) []corev1.ContainerStatus {
+		return []corev1.ContainerStatus{{State: corev1.ContainerState{Waiting: &corev1.ContainerStateWaiting{Reason: reason}}}}
+	}
+	unscheduled := func(p *corev1.Pod) { p.Status.Conditions = cond(corev1.PodScheduled, corev1.ConditionFalse) }
+	pulling := func(p *corev1.Pod) {
+		p.Spec.NodeName = "n1"
+		p.Status.Conditions = cond(corev1.PodReady, corev1.ConditionFalse)
+	}
+	ready := func(p *corev1.Pod) {
+		p.Spec.NodeName = "n1"
+		p.Status.Conditions = cond(corev1.PodReady, corev1.ConditionTrue)
+	}
 	cases := []struct {
-		name string
-		pod  *corev1.Pod
-		want string
+		name      string
+		pods      []*corev1.Pod
+		want, why string
 	}{
-		{"no pod", nil, "starting"},
-		{"unscheduled", func() *corev1.Pod {
-			p := pod("bp", "p", "tiny-session", "bp-run-1")
-			p.Status.Conditions = cond(corev1.PodScheduled, corev1.ConditionFalse)
-			return p
-		}(), "waiting-for-node"},
-		{"pulling", func() *corev1.Pod {
-			p := pod("bp", "p", "tiny-session", "bp-run-1")
-			p.Spec.NodeName = "n1"
-			p.Status.Conditions = cond(corev1.PodReady, corev1.ConditionFalse)
-			return p
-		}(), "starting"},
-		{"ready", func() *corev1.Pod {
-			p := pod("bp", "p", "tiny-session", "bp-run-1")
-			p.Spec.NodeName = "n1"
-			p.Status.Conditions = cond(corev1.PodReady, corev1.ConditionTrue)
-			return p
-		}(), "running"},
+		{"no pod", nil, "starting", ""},
+		{"unscheduled", []*corev1.Pod{mk("a", unscheduled)}, "waiting-for-node", ""},
+		{"pulling", []*corev1.Pod{mk("a", pulling)}, "starting", ""},
+		{"ready", []*corev1.Pod{mk("a", ready)}, "running", ""},
+		{"crash loop", []*corev1.Pod{mk("a", func(p *corev1.Pod) {
+			pulling(p)
+			p.Status.ContainerStatuses = waiting("CrashLoopBackOff")
+		})}, "failing", "CrashLoopBackOff"},
+		{"image pull init container", []*corev1.Pod{mk("a", func(p *corev1.Pod) {
+			pulling(p)
+			p.Status.InitContainerStatuses = waiting("ImagePullBackOff")
+		})}, "failing", "ImagePullBackOff"},
+		{"normal waiting is not failing", []*corev1.Pod{mk("a", func(p *corev1.Pod) {
+			pulling(p)
+			p.Status.ContainerStatuses = waiting("ContainerCreating")
+		})}, "starting", ""},
+		{"failed phase", []*corev1.Pod{mk("a", func(p *corev1.Pod) {
+			p.Status.Phase = corev1.PodFailed
+			p.Status.Reason = "Evicted"
+		})}, "failing", "Evicted"},
+		{"deleting pod ignored", []*corev1.Pod{mk("a", func(p *corev1.Pod) {
+			ready(p)
+			p.Finalizers = []string{"x"}
+		}), mk("b", unscheduled)}, "waiting-for-node", ""},
+		{"succeeded pod ignored", []*corev1.Pod{mk("a", func(p *corev1.Pod) {
+			ready(p)
+			p.Status.Phase = corev1.PodSucceeded
+		})}, "starting", ""},
+		{"running beats others whatever the order", []*corev1.Pod{mk("a", unscheduled), mk("b", ready), mk("c", func(p *corev1.Pod) {
+			p.Status.Phase = corev1.PodFailed
+		})}, "running", ""},
+		{"healthier pod beats failed one", []*corev1.Pod{mk("a", func(p *corev1.Pod) {
+			p.Status.Phase = corev1.PodFailed
+		}), mk("b", pulling)}, "starting", ""},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			tn := newTiny()
-			if c.pod != nil {
-				if err := tn.Client.Create(context.Background(), c.pod); err != nil {
+			for _, p := range c.pods {
+				if err := tn.Client.Create(context.Background(), p); err != nil {
 					t.Fatal(err)
 				}
+				if p.Name == "a" && len(p.Finalizers) > 0 { // deleting: the finalizer keeps it, with a deletion time
+					if err := tn.Client.Delete(context.Background(), p); err != nil {
+						t.Fatal(err)
+					}
+				}
 			}
-			got, err := tn.Stage(context.Background(), "bp-run-1")
-			if err != nil || got != c.want {
-				t.Errorf("Stage = %q %v, want %q", got, err, c.want)
+			got, why, err := tn.Stage(context.Background(), "bp-run-1")
+			if err != nil || got != c.want || why != c.why {
+				t.Errorf("Stage = %q %q %v, want %q %q", got, why, err, c.want, c.why)
 			}
 		})
 	}
