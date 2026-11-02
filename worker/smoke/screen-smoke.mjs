@@ -59,11 +59,12 @@ if (!after.some((f) => before.every((b) => !b.body.equals(f.body)))) fail('frame
 const ids = new Set([...screenLog.matchAll(/attached to target (\w+)/g)].map((m) => m[1]));
 if (ids.size < 2) fail(`bp-screen attached to ${ids.size} distinct targets, want 2`);
 
-// Video size: iPhone 15 viewport must be 390x844 and the recording proportional to it.
+// Video size: context viewport must match Playwright's iPhone 15 viewport and the recording must be proportional to it.
+const want = iphone.viewport;
 const vp = ctx._options?.viewport || iphone.viewport;
-if (vp.width !== 390 || vp.height !== 844) fail(`viewport ${vp.width}x${vp.height}`);
+if (vp.width !== want.width || vp.height !== want.height) fail(`viewport ${vp.width}x${vp.height}, want ${want.width}x${want.height}`);
 const webm = readdirSync(dir).find((f) => f.endsWith('.webm'));
-let videoNote = 'viewport 390x844 (no ffmpeg)';
+let videoNote = `viewport ${want.width}x${want.height} (no ffmpeg)`;
 const ffdir = readdirSync('/ms-playwright').find((d) => d.startsWith('ffmpeg-'));
 if (webm && ffdir) {
   const bin = readdirSync(join('/ms-playwright', ffdir)).find((f) => f.startsWith('ffmpeg'));
@@ -71,7 +72,7 @@ if (webm && ffdir) {
   const m = /Video:.*?, (\d+)x(\d+)/.exec(r.stderr || '');
   if (!m) fail('cannot read video size');
   const [w, h] = [+m[1], +m[2]];
-  if (Math.abs(w / h - 390 / 844) > 0.01) fail(`video ${w}x${h} not 390x844-proportional`);
+  if (Math.abs(w / h - want.width / want.height) > 0.01) fail(`video ${w}x${h} not ${want.width}x${want.height}-proportional`);
   videoNote = `video ${w}x${h}`;
 }
 console.log(`ok ${frames.length} frames; ${videoNote}`);
