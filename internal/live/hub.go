@@ -88,6 +88,17 @@ func (h *Hub) Subscribe(runID string) (<-chan []byte, func()) {
 	}
 }
 
+// Latest returns the run's newest frame, or nil. It is not a subscription, so
+// it does not count as a watcher.
+func (h *Hub) Latest(runID string) []byte {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if e := h.runs[runID]; e != nil {
+		return e.frame
+	}
+	return nil
+}
+
 // HasFrame reports whether the run has a frame held right now.
 func (h *Hub) HasFrame(runID string) bool {
 	h.mu.Lock()

@@ -614,3 +614,31 @@ func TestGetRunStageAndLive(t *testing.T) {
 		t.Fatalf("finished run: %v", d)
 	}
 }
+
+func TestLiveStill(t *testing.T) {
+	srv, w, svc := setupBoth(t, 1024)
+	run := startRun(t, srv, svc)
+	url := srv.URL + "/api/runs/" + run.ID + "/live.jpg"
+	resp := do(t, "GET", url, "")
+	b, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != 404 || !strings.Contains(string(b), "no frame yet") || resp.Header.Get("Cache-Control") != "no-store" {
+		t.Fatalf("no frame: %d %q", resp.StatusCode, b)
+	}
+	if r := do(t, "PUT", w.URL+"/live/"+run.Token, "\xff\xd8x"); r.StatusCode != 204 {
+		t.Fatalf("put live: %d", r.StatusCode)
+	}
+	resp = do(t, "GET", url, "")
+	b, _ = io.ReadAll(resp.Body)
+	if resp.StatusCode != 200 || string(b) != "\xff\xd8x" || resp.Header.Get("Content-Type") != "image/jpeg" || resp.Header.Get("Cache-Control") != "no-store" {
+		t.Fatalf("with frame: %d %q %v", resp.StatusCode, b, resp.Header)
+	}
+	if err := svc.Finish(context.Background(), run.Token, store.RunDone, "ok"); err != nil {
+		t.Fatal(err)
+	}
+	if r := do(t, "GET", url, ""); r.StatusCode != 404 {
+		t.Fatalf("finished run: %d", r.StatusCode)
+	}
+	if r := do(t, "GET", srv.URL+"/api/runs/nope/live.jpg", ""); r.StatusCode != 404 {
+		t.Fatalf("unknown run: %d", r.StatusCode)
+	}
+}

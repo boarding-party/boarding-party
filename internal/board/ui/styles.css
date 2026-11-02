@@ -88,6 +88,9 @@ tr.click { cursor: pointer; }
 tr.click:hover td { background: #F7F9FB; }
 td.when { white-space: nowrap; color: var(--muted); }
 td.outcome { max-width: 420px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+td.thumbcell { width: 96px; padding-right: 0; }
+a.thumb { display: flex; align-items: center; justify-content: center; width: 96px; height: 60px; background: var(--player); border-radius: 6px; overflow: hidden; color: #8C97A8; font-size: 11px; font-weight: 400; text-align: center; line-height: 1.2; }
+a.thumb img { width: 100%; height: 100%; object-fit: contain; display: block; }
 td a { color: var(--ink); font-weight: 600; }
 
 /* tags */

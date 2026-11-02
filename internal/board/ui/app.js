@@ -340,15 +340,44 @@ function StateTag({ state }) {
   return html`<span class=${'tag ' + (STATE_TAG.get(state) || 'idle')}>${state || 'unknown'}</span>`;
 }
 
+const STAGE_SHORT = { 'waiting-for-node': 'Starting machine', 'starting': 'Starting run', 'running': 'Getting ready' };
+
+// A small live picture of an active run. It looks at the run itself every
+// 3 s for the stage and whether a frame exists, and bumps ?t= to refresh.
+// Mounted only while the list is shown, so it stops with the page.
+function Thumb({ id }) {
+  const [info, setInfo] = useState({});
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    let on = true;
+    const look = async () => {
+      try {
+        const d = await api(`/api/runs/${encodeURIComponent(id)}`);
+        if (on && d) { setInfo({ stage: d.stage, live: !!d.live }); setTick((n) => n + 1); }
+      } catch (e) { /* keep the last look */ }
+    };
+    look();
+    const t = setInterval(look, 3000);
+    return () => { on = false; clearInterval(t); };
+  }, [id]);
+  return html`
+    <a class="thumb" href=${runHref(id)} onClick=${(e) => e.stopPropagation()} title="Watch this run">
+      ${info.live
+        ? html`<img src=${`/api/runs/${encodeURIComponent(id)}/live.jpg?t=${tick}`} alt="Live view of the run" />`
+        : html`<span>${STAGE_SHORT[info.stage] || 'Waiting'}</span>`}
+    </a>`;
+}
+
 function RunsTable({ runs }) {
   const open = (id) => () => { location.hash = runHref(id); };
   return html`
     <div class="card flush tablewrap">
       <table>
-        <thead><tr><th>Persona</th><th>Story</th><th>State</th><th>Started</th><th>Outcome</th></tr></thead>
+        <thead><tr><th></th><th>Persona</th><th>Story</th><th>State</th><th>Started</th><th>Outcome</th></tr></thead>
         <tbody>
           ${runs.map((r) => html`
             <tr class="click" key=${r.id} onClick=${open(r.id)}>
+              <td class="thumbcell">${ACTIVE.has(r.state) ? html`<${Thumb} key=${r.id} id=${r.id} />` : null}</td>
               <td><a href=${runHref(r.id)} onClick=${(e) => e.stopPropagation()}>${r.persona}</a>
                 ${r.role ? html`<div class="small muted">${r.role}</div>` : null}</td>
               <td>${r.story}${ACTIVE.has(r.state) ? html` <a class="small" href=${runHref(r.id)} onClick=${(e) => e.stopPropagation()}>Watch</a>` : null}</td>

@@ -69,6 +69,7 @@ func admin(svc *runs.Service, maxBytes int64, token string, hub *live.Hub) (*ser
 	mux.HandleFunc("GET /api/runs/{id}", s.getRun)
 	mux.HandleFunc("GET /api/runs/{id}/artifacts/{name}", s.getArtifact)
 	mux.HandleFunc("GET /api/runs/{id}/live", s.streamLive)
+	mux.HandleFunc("GET /api/runs/{id}/live.jpg", s.liveStill)
 	return s, guardAdmin(token, mux)
 }
 
@@ -329,6 +330,23 @@ func (s *server) putLive(w http.ResponseWriter, r *http.Request) {
 func isActive(st store.RunState) bool { return st == store.RunPending || st == store.RunRunning }
 
 const liveWriteTimeout = 10 * time.Second
+
+// liveStill serves the newest frame as one JPEG, for thumbnails. It never
+// subscribes, so polling it does not make the worker send frames faster.
+func (s *server) liveStill(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	var frame []byte
+	if run, err := s.svc.Store.RunByID(id); err == nil && isActive(run.State) {
+		frame = s.hub.Latest(id)
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	if frame == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no frame yet"})
+		return
+	}
+	w.Header().Set("Content-Type", "image/jpeg")
+	w.Write(frame)
+}
 
 // streamLive serves a run's screen as multipart/x-mixed-replace JPEG parts.
 func (s *server) streamLive(w http.ResponseWriter, r *http.Request) {

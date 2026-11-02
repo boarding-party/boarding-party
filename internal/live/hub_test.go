@@ -88,6 +88,17 @@ func TestSweepKeepsSubscribedRuns(t *testing.T) {
 	}
 }
 
+func TestLatest(t *testing.T) {
+	h := NewHub()
+	if h.Latest("r") != nil {
+		t.Fatal("frame before publish")
+	}
+	h.Publish("r", []byte("f"))
+	if string(h.Latest("r")) != "f" {
+		t.Fatal("latest not returned")
+	}
+}
+
 func TestHasFrame(t *testing.T) {
 	h := NewHub()
 	if h.HasFrame("r") {
