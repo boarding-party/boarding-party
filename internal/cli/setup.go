@@ -3,6 +3,8 @@ package cli
 import (
 	"bufio"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -42,6 +44,9 @@ const (
 	directorImage   = "ghcr.io/boarding-party/director"
 	workerImage     = "ghcr.io/boarding-party/worker"
 	defaultImageTag = "main"
+	// manifestHashAnnotation is stamped on the director Deployment's own
+	// metadata (not its pod template) with the fingerprint of what was applied.
+	manifestHashAnnotation = "boardingparty.io/manifest-hash"
 )
 
 // checker prints one line per preflight check and remembers failures.
@@ -223,6 +228,22 @@ func renderManifest(raw []byte, ns, tag string) ([]*unstructured.Unstructured, e
 	return objs, nil
 }
 
+// manifestHash fingerprints the fully rendered manifest (every object, for
+// this namespace and image tag): the first 16 hex chars of a sha256 over a
+// deterministic serialisation (encoding/json sorts map keys).
+func manifestHash(objs []*unstructured.Unstructured) (string, error) {
+	h := sha256.New()
+	for _, o := range objs {
+		b, err := json.Marshal(o.Object)
+		if err != nil {
+			return "", err
+		}
+		h.Write(b)
+		h.Write([]byte{'\n'})
+	}
+	return hex.EncodeToString(h.Sum(nil))[:16], nil
+}
+
 func printManifest(out io.Writer, objs []*unstructured.Unstructured) error {
 	for i, o := range objs {
 		b, err := yaml.Marshal(o.Object)
@@ -303,7 +324,19 @@ func installDirector(ctx context.Context, d setupDeps, o setupOpts, objs []*unst
 	if created {
 		fmt.Fprintf(out, "✓ Secret/%s (admin key, created)\n", adminSecret)
 	}
+	hash, err := manifestHash(objs)
+	if err != nil {
+		return "", err
+	}
 	for _, obj := range objs {
+		if obj.GetKind() == "Deployment" {
+			ann := obj.GetAnnotations()
+			if ann == nil {
+				ann = map[string]string{}
+			}
+			ann[manifestHashAnnotation] = hash
+			obj.SetAnnotations(ann)
+		}
 		if obj.GetKind() == "Deployment" && sec.UID != "" {
 			if err := unstructured.SetNestedField(obj.Object, string(sec.UID), "spec", "template", "metadata", "annotations", adminSecretAnnotation); err != nil {
 				return "", err
@@ -350,8 +383,8 @@ func waitVerify(ctx context.Context, d setupDeps) error {
 }
 
 // ensureDirector is what every command that needs the director runs first.
-// Fast path: a Deployment GET and a Secret GET; if the director is there at
-// the wanted tag and its admin Secret exists, nothing else happens and the
+// Fast path: a Deployment GET and a Secret GET; if the director is there with
+// the wanted manifest fingerprint (which covers the image tag) and its admin Secret exists, nothing else happens and the
 // admin token is returned. Otherwise (including a missing Secret, which the
 // running director can't work without) tiny's prerequisites are checked (read-only,
 // failing with a pointer to `tiny init`), the warnings are printed once, and
@@ -363,7 +396,15 @@ func ensureDirector(ctx context.Context, d setupDeps, o setupOpts, out io.Writer
 	}
 	upgrade := err == nil
 	keyMissing := false
-	if upgrade && imageTag(dep) == o.tag {
+	objs, err := renderManifest(deploy.Director, o.ns, o.tag)
+	if err != nil {
+		return "", err
+	}
+	want, err := manifestHash(objs)
+	if err != nil {
+		return "", err
+	}
+	if upgrade && dep.Annotations[manifestHashAnnotation] == want {
 		sec, serr := d.kube.CoreV1().Secrets(o.ns).Get(ctx, adminSecret, metav1.GetOptions{})
 		switch {
 		case serr == nil:
@@ -398,10 +439,6 @@ func ensureDirector(ctx context.Context, d setupDeps, o setupOpts, out io.Writer
 	}
 	if o.note != "" {
 		fmt.Fprintln(out, o.note)
-	}
-	objs, err := renderManifest(deploy.Director, o.ns, o.tag)
-	if err != nil {
-		return "", err
 	}
 	switch {
 	case keyMissing:

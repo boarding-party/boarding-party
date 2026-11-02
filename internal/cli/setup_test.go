@@ -236,7 +236,28 @@ func TestSetupVerifyTimeout(t *testing.T) {
 
 func directorForTest() string { return string(deploy.Director) }
 
+// directorAt is a director at tag whose installed manifest matches this build's.
 func directorAt(tag string) *appsv1.Deployment {
+	objs, err := renderManifest(deploy.Director, testNS, tag)
+	if err != nil {
+		panic(err)
+	}
+	h, err := manifestHash(objs)
+	if err != nil {
+		panic(err)
+	}
+	return directorWithHash(tag, h)
+}
+
+func directorWithHash(tag, hash string) *appsv1.Deployment {
+	d := directorAt0(tag)
+	if hash != "" {
+		d.Annotations = map[string]string{manifestHashAnnotation: hash}
+	}
+	return d
+}
+
+func directorAt0(tag string) *appsv1.Deployment {
 	return &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: directorDeploy, Namespace: testNS, Generation: 1},
 		Spec: appsv1.DeploymentSpec{Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{
 			Containers: []corev1.Container{{Name: "director", Image: directorImage + ":" + tag}}}}},
@@ -317,6 +338,90 @@ func TestEnsureDirectorCurrentIsSilent(t *testing.T) {
 	}
 	if tok != "tok-1" {
 		t.Errorf("token = %q", tok)
+	}
+}
+
+func ensureOnce(t *testing.T, dep *appsv1.Deployment) (applied []string, out string, stamped string) {
+	t.Helper()
+	waitPoll = time.Millisecond
+	d := ensureDeps(&applied, true, dep, adminSecretObj("tok-1"))
+	d.apply = func(_ context.Context, o *unstructured.Unstructured) error {
+		applied = append(applied, o.GetKind())
+		if o.GetKind() == "Deployment" {
+			stamped = o.GetAnnotations()[manifestHashAnnotation]
+			if _, ok, _ := unstructured.NestedString(o.Object, "spec", "template", "metadata", "annotations", manifestHashAnnotation); ok {
+				t.Error("hash must not be on the pod template")
+			}
+		}
+		return nil
+	}
+	var b strings.Builder
+	if _, err := ensureDirector(context.Background(), d, setupOpts{ns: testNS, tag: "main", timeout: time.Second}, &b); err != nil {
+		t.Fatal(err)
+	}
+	return applied, b.String(), stamped
+}
+
+func TestEnsureDirectorMatchingHashIsSilent(t *testing.T) {
+	applied, out, _ := ensureOnce(t, directorAt("main"))
+	if len(applied) != 0 || out != "" {
+		t.Errorf("applied=%v out=%q", applied, out)
+	}
+}
+
+func TestEnsureDirectorDifferentHashInstalls(t *testing.T) {
+	applied, _, stamped := ensureOnce(t, directorWithHash("main", "0123456789abcdef"))
+	if len(applied) == 0 {
+		t.Fatal("expected install")
+	}
+	want, _ := renderManifest(deploy.Director, testNS, "main")
+	h, _ := manifestHash(want)
+	if stamped != h {
+		t.Errorf("stamped %q, want %q", stamped, h)
+	}
+}
+
+func TestEnsureDirectorMissingHashAnnotationInstalls(t *testing.T) {
+	applied, _, _ := ensureOnce(t, directorWithHash("main", ""))
+	if len(applied) == 0 {
+		t.Error("expected install for an install without the annotation")
+	}
+}
+
+// The real-world case: same image tag (dev build -> main), manifest changed.
+func TestEnsureDirectorSameTagChangedManifestInstalls(t *testing.T) {
+	objs, _ := renderManifest(deploy.Director, testNS, "main")
+	objs = append(objs, &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "v1", "kind": "LimitRange", "metadata": map[string]any{"name": "new", "namespace": testNS}}})
+	old, err := manifestHash(objs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	applied, _, _ := ensureOnce(t, directorWithHash("main", old))
+	if len(applied) == 0 {
+		t.Error("expected install when the manifest changed at the same tag")
+	}
+}
+
+func TestManifestHashStable(t *testing.T) {
+	var hs []string
+	for i := 0; i < 2; i++ {
+		objs, err := renderManifest(deploy.Director, testNS, "main")
+		if err != nil {
+			t.Fatal(err)
+		}
+		h, err := manifestHash(objs)
+		if err != nil {
+			t.Fatal(err)
+		}
+		hs = append(hs, h)
+	}
+	if hs[0] != hs[1] || len(hs[0]) != 16 {
+		t.Errorf("hashes %v", hs)
+	}
+	other, _ := renderManifest(deploy.Director, testNS, "1.0.0")
+	if h, _ := manifestHash(other); h == hs[0] {
+		t.Error("hash ignores the tag")
 	}
 }
 
