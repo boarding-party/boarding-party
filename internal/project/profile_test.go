@@ -95,3 +95,31 @@ func TestLabels(t *testing.T) {
 		t.Fatalf("%v", got)
 	}
 }
+
+func TestProfileFieldOrderMatchesStruct(t *testing.T) {
+	typ := reflect.TypeOf(Profile{})
+	if typ.NumField() != len(ProfileFields) {
+		t.Fatalf("%d struct fields, %d catalogue fields", typ.NumField(), len(ProfileFields))
+	}
+	var p Profile
+	v := reflect.ValueOf(&p).Elem()
+	for i, f := range ProfileFields {
+		key, _, _ := strings.Cut(typ.Field(i).Tag.Get("json"), ",")
+		if key != f.Key {
+			t.Errorf("field %d: struct key %q, catalogue key %q", i, key, f.Key)
+		}
+		v.Field(i).SetString(f.Options[0].Value)
+	}
+	for i, got := range p.values() {
+		if got != ProfileFields[i].Options[0].Value {
+			t.Errorf("values()[%d] = %q, want field %s", i, got, ProfileFields[i].Key)
+		}
+	}
+}
+
+func TestNoProfileOmitted(t *testing.T) {
+	b, _ := json.Marshal(Persona{Name: "x"})
+	if strings.Contains(string(b), "profile") {
+		t.Fatalf("%s", b)
+	}
+}

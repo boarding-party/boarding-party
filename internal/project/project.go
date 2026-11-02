@@ -91,7 +91,7 @@ type Persona struct {
 	Traits   []string          `json:"traits"`   // e.g. "impatient", "phone"
 	Identity map[string]string `json:"identity"` // synthetic: email, password, address...
 	// Profile is the persona's structured background (device, age, ...).
-	Profile Profile `json:"profile,omitempty"`
+	Profile Profile `json:"profile,omitzero"`
 }
 
 type Story struct {

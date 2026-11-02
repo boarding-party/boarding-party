@@ -15,7 +15,7 @@ type Profile struct {
 // reads; it is never sent to the UI.
 type Option struct{ Value, Label, Guide string }
 
-// Field is one profile question. Its JSON keys are part of /api/profile-fields.
+// Field is one profile question. The API sends it through its own wire types.
 type Field struct {
 	Key, Label, Hint string
 	Options          []Option
@@ -39,7 +39,7 @@ var ProfileFields = []Field{
 		{"25-34", "25-34", "You are aged 25 to 34 and are comfortable with most online services."},
 		{"35-49", "35-49", "You are aged 35 to 49, busy, and want to get things done without fuss."},
 		{"50-64", "50-64", "You are aged 50 to 64 and prefer clear labels and familiar patterns to clever design."},
-		{"65-plus", "65 or over", "You are aged 65 or over and read carefully, mistrust anything unclear, and avoid risky-looking steps."},
+		{"65-plus", "65 or over", "You are aged 65 or over and read carefully and mistrust anything unclear: hesitate before steps that look risky and report anything unclear, but still complete the story."},
 	}},
 	{Key: "techLevel", Label: "Tech confidence", Hint: "How well the persona copes with unfamiliar interfaces.", Options: []Option{
 		{"new", "New to the internet", "You are new to the internet: you do not know common conventions, and you get lost when labels use jargon."},
@@ -50,7 +50,7 @@ var ProfileFields = []Field{
 	{Key: "patience", Label: "Patience", Hint: "When the persona gives up.", Options: []Option{
 		{"patient", "Patient", "You are patient: you will retry and explore several routes before you decide you are stuck."},
 		{"normal", "Normal", "You have normal patience: you will try a couple of routes, then give up if nothing works."},
-		{"impatient", "Gives up quickly", "If something takes more than a few seconds or two tries, give up and finish the run as stuck, saying why."},
+		{"impatient", "Gives up quickly", "If something takes more than a few seconds or two tries, give up on the story and end the run as stuck, saying why, after the usual wrap-up steps (stop recording, upload, save)."},
 	}},
 	{Key: "reading", Label: "Reading", Hint: "How the persona deals with text on the page.", Options: []Option{
 		{"careful", "Reads everything", "You read every word on a page before you act, including the small print."},
@@ -62,7 +62,7 @@ var ProfileFields = []Field{
 		{"none", "None", "You use no assistive technology."},
 		{"screen-reader", "Screen reader", "Navigate only by the accessibility snapshot; never rely on how the page looks, and report anything a screen reader would miss."},
 		{"keyboard-only", "Keyboard only", "Use only the keyboard (Tab, Shift+Tab, Enter, Space, arrow keys); never click, and report anything you cannot reach or see focus on."},
-		{"zoom", "Large text / zoom", "You need large text and zoom the page to 200 per cent or more, so report anything that is cut off, overlaps or needs sideways scrolling."},
+		{"zoom", "Large text / zoom", "Browse as someone who has enlarged text to 200 per cent; report anything that would be cut off, overlap or be too small to read at that size."},
 	}},
 }
 
