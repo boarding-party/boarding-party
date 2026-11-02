@@ -149,6 +149,10 @@ if (bRate > 3) fail(`unwatched cadence too fast: ${bRate} PUTs in 8s`);
 if (bRate < 1) fail('keepalive missing: no PUT in 8s while unwatched');
 
 // Phase C: the director says the run is over (404); PUTs must stop.
+// bp-screen only learns the watcher count from a 2xx response, so first let one PUT
+// (up to 5 s away at the slow gap) bring the fast cadence back, then answer 404.
+wWatchers = '1';
+await sleep(6500);
 wStatus = 404;
 await sleep(1500);
 const cStart = wf.length;
