@@ -12,6 +12,7 @@ const ACTIVE = new Set(['pending', 'running']);
 const STATE_TAG = new Map([['pending', 'idle'], ['running', 'run'], ['done', 'ok'], ['stuck', 'wait'], ['failed', 'bad']]);
 const RETRY_MS = [5000, 10000, 30000]; // back-off after consecutive errors
 const MAX_FINISHED_FAILURES = 5;
+const RECONNECT_MS = 14 * 60 * 1000; // under the director's 15-minute stream cap
 const ACTIVE_POLL_MS = 5000;
 const IDLE_POLL_MS = 30000;
 
@@ -369,17 +370,31 @@ function LiveView({ id }) {
   const [shown, setShown] = useState(false);
   const [nonce, setNonce] = useState(0);
   const timer = useRef(0);
-  useEffect(() => () => clearTimeout(timer.current), []);
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; clearTimeout(timer.current); };
+  }, []);
+  const stillActive = async () => {
+    try {
+      const d = await api(`/api/runs/${encodeURIComponent(id)}`);
+      return !!(d && d.run && ACTIVE.has(d.run.state));
+    } catch (e) { return true; /* director unreachable: keep trying while mounted */ }
+  };
   const lost = async () => {
     setShown(false);
     clearTimeout(timer.current);
-    let again = true;
-    try {
-      const d = await api(`/api/runs/${encodeURIComponent(id)}`);
-      again = !!(d && d.run && ACTIVE.has(d.run.state));
-    } catch (e) { /* director unreachable: keep trying while this view is mounted */ }
-    if (again) timer.current = setTimeout(() => setNonce((n) => n + 1), 2000);
+    const again = await stillActive();
+    if (again && mounted.current) timer.current = setTimeout(() => { if (mounted.current) setNonce((n) => n + 1); }, 2000);
   };
+  // A stream the director ends cleanly (its 15-minute cap) fires neither load
+  // nor error, so the picture would freeze: reconnect on a timer instead.
+  useEffect(() => {
+    const t = setInterval(async () => {
+      if (await stillActive() && mounted.current) setNonce((n) => n + 1);
+    }, RECONNECT_MS);
+    return () => clearInterval(t);
+  }, [id]);
   const src = `/api/runs/${encodeURIComponent(id)}/live` + (nonce ? `?t=${nonce}` : '');
   return html`
     <img class="livefeed" src=${src} alt="Live view of the run" onLoad=${() => setShown(true)} onError=${lost}
