@@ -76,6 +76,12 @@ type Store struct {
 
 // New stores files under root/<scope>/<name>, with the default limits.
 func New(root string) *Store {
+	// Drop temp files an earlier crash left behind.
+	if tmps, _ := filepath.Glob(filepath.Join(root, "*", tmpPrefix+"*")); len(tmps) > 0 {
+		for _, t := range tmps {
+			os.Remove(t)
+		}
+	}
 	return &Store{root: root, MaxFile: DefaultMaxFile, MaxTotal: DefaultMaxTotal}
 }
 
@@ -117,8 +123,6 @@ func (s *Store) Put(scope, name string, r io.Reader) (Info, error) {
 	if !ValidName(name) {
 		return Info{}, ErrBadName
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	full := filepath.Join(s.root, dir)
 	if err := os.MkdirAll(full, 0o755); err != nil {
 		return Info{}, err
@@ -143,6 +147,10 @@ func (s *Store) Put(scope, name string, r io.Reader) (Info, error) {
 	if n > s.MaxFile {
 		return Info{}, ErrTooLarge
 	}
+	// The body is in; only the quota check and the rename need the lock, so a
+	// slow upload never blocks listing or serving.
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	all, err := s.list()
 	if err != nil {
 		return Info{}, err

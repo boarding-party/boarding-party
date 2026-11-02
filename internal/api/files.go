@@ -91,7 +91,11 @@ func (s *server) putFile(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	in, err := fs.Put(scope, r.PathValue("name"), r.Body)
+	if r.ContentLength > fs.MaxFile {
+		failFile(w, files.ErrTooLarge)
+		return
+	}
+	in, err := fs.Put(scope, r.PathValue("name"), http.MaxBytesReader(w, r.Body, fs.MaxFile))
 	if err != nil {
 		failFile(w, err)
 		return
@@ -148,7 +152,7 @@ func (s *server) workerFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	f, in, err := s.svc.Files.OpenFor(run.Persona, r.PathValue("name"))
-	if errors.Is(err, files.ErrBadName) {
+	if errors.Is(err, files.ErrBadName) || errors.Is(err, files.ErrBadScope) {
 		err = files.ErrNotFound
 	}
 	if err != nil {

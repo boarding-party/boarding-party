@@ -579,7 +579,8 @@ function Bug({ bug, runId, artifacts, duration, onSeek }) {
     ${bug.step ? html`<span class="meta"><b>Step:</b> ${bug.step}</span>` : null}
     ${bug.evidence ? html`<span class="meta"><b>Evidence:</b> ${bug.evidence}</span>` : null}
     ${bug.note ? html`<span class="meta"><b>Note:</b> ${bug.note}</span>` : null}`;
-  const shot = IMAGE_EXT.test(bug.evidence || '') && artifacts.includes(bug.evidence.trim()) ? bug.evidence.trim() : '';
+  const tok = SHOT_TOKEN.exec(bug.evidence || '');
+  const shot = tok && artifacts.includes(tok[0]) ? tok[0] : '';
   return html`${seekable
     ? html`<button type="button" class="bug seek" title=${'Jump to ' + fmtStamp(secs)} onClick=${() => onSeek(secs)}>${body}</button>`
     : html`<div class="bug">${body}</div>`}
@@ -587,7 +588,7 @@ function Bug({ bug, runId, artifacts, duration, onSeek }) {
       <img src=${artifactURL(runId, shot)} alt=${'Screenshot for: ' + bug.summary} loading="lazy" /></a>` : null}`;
 }
 
-const IMAGE_EXT = /\.(png|jpe?g)\s*$/i;
+const SHOT_TOKEN = /\bbug-\d+\.(?:png|jpe?g)\b/i;
 
 // Clear the static "Loading…" placeholder: render() appends, it doesn't replace.
 const root = document.getElementById('root');

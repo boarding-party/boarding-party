@@ -35,7 +35,7 @@ jobs:
           cache-from: type=gha,scope=worker
           cache-to: type=gha,mode=max,scope=worker
       - name: Smoke test worker screen streaming
-        run: docker run --rm --user 1000 bp-worker:smoke node /opt/bp/smoke/screen-smoke.mjs
+        run: docker run --rm --user 1000 --tmpfs /workspace:rw,mode=1777 bp-worker:smoke node /opt/bp/smoke/screen-smoke.mjs
 
   images:
     needs: [test, worker-smoke]

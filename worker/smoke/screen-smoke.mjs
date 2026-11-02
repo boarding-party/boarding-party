@@ -1,7 +1,7 @@
 // Smoke: Chromium launched with the pw-config args + bp-screen streaming to a local sink.
 import http from 'node:http';
 import { spawn, spawnSync } from 'node:child_process';
-import { readFileSync, readdirSync, mkdtempSync, accessSync, constants } from 'node:fs';
+import { readFileSync, readdirSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createRequire } from 'node:module';
@@ -141,16 +141,13 @@ try {
   if (nav.error || nav.result?.isError) fail('browser_navigate: ' + JSON.stringify(nav).slice(0, 300));
 } catch (e) { fail(String(e.message || e)); }
 
-// bp-browser downloads the persona's files before starting the browser. /workspace
-// is a mounted volume in a pod; in a bare container it may not be writable.
+// bp-browser downloads the persona's files before starting the browser. The
+// smoke needs a writable /workspace (CI mounts a tmpfs there); no skipping.
 try {
-  accessSync('/workspace', constants.W_OK);
   if (readFileSync('/workspace/files/hello.txt', 'utf8') !== 'hello from the smoke') fail('files: hello.txt has the wrong content');
+  if (readdirSync('/workspace/files').some((n) => n.endsWith('.part'))) fail('files: a .part file was left behind');
   console.log('ok files downloaded');
-} catch (e) {
-  if (e && e.code === 'EACCES') console.log('skip files check: /workspace is not writable');
-  else fail('files: ' + (e.message || e));
-}
+} catch (e) { fail('files: ' + (e.message || e)); }
 
 // Phase A: a watcher is present, so frames flow at the fast cadence.
 await sleep(4000);

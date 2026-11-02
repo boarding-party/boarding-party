@@ -3,8 +3,11 @@ package files
 import (
 	"errors"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func put(t *testing.T, s *Store, scope, name, body string) Info {
@@ -147,5 +150,46 @@ func TestPersonaPrecedenceAndVisibility(t *testing.T) {
 	}
 	if b, _ := read("Ann", "logo.png"); b != "project-logo" {
 		t.Errorf("after delete = %q", b)
+	}
+}
+
+func TestListNotBlockedBySlowPut(t *testing.T) {
+	s := New(t.TempDir())
+	put(t, s, ScopeProject, "a.txt", "x")
+	pr, pw := io.Pipe()
+	done := make(chan error, 1)
+	go func() { _, err := s.Put(ScopeProject, "slow.txt", pr); done <- err }()
+	pw.Write([]byte("partial")) // the Put is now blocked reading the body
+	listed := make(chan int, 1)
+	go func() { l, _ := s.List(); listed <- len(l) }()
+	select {
+	case n := <-listed:
+		if n != 1 {
+			t.Errorf("list = %d files, want 1 (slow upload not visible yet)", n)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("List blocked behind a slow Put")
+	}
+	pw.Close()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if l, _ := s.List(); len(l) != 2 {
+		t.Fatalf("after put: %+v", l)
+	}
+}
+
+func TestNewRemovesLeftoverTempFiles(t *testing.T) {
+	root := t.TempDir()
+	os.MkdirAll(filepath.Join(root, "project"), 0o755)
+	tmp := filepath.Join(root, "project", tmpPrefix+"123")
+	os.WriteFile(tmp, []byte("half"), 0o644)
+	os.WriteFile(filepath.Join(root, "project", "keep.txt"), []byte("k"), 0o644)
+	s := New(root)
+	if _, err := os.Stat(tmp); !os.IsNotExist(err) {
+		t.Errorf("temp file survived: %v", err)
+	}
+	if l, _ := s.List(); len(l) != 1 || l[0].Name != "keep.txt" {
+		t.Errorf("list = %+v", l)
 	}
 }

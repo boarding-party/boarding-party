@@ -274,7 +274,8 @@ project or for one persona (25 MiB each, 200 MiB in total, stored on the
 director's volume). Use made-up content only. Before a run starts, the
 persona's files are copied into `/workspace/files` in the pod, and the agent
 is told it may upload those and nothing else. A persona's file wins over a
-project file with the same name.
+project file with the same name. Files of a persona you later remove stay until
+you delete them, and still count toward the total.
 
 ### Scripting and CI
 

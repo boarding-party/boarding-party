@@ -536,11 +536,13 @@ function ImportYAML({ dirty, onDone, onCancel }) {
 // JSON): the director only accepts a file for a persona it already knows.
 function savedPersonas(baseline) {
   try {
-    return JSON.parse(baseline).roles.flatMap((r) => (r.personas || []).map((p) => p.name)).filter((n) => n && n.trim());
+    return [...new Set(JSON.parse(baseline).roles.flatMap((r) => (r.personas || []).map((p) => p.name)).filter((n) => n && n.trim()))];
   } catch (_) { return []; }
 }
 
-const fmtSize = (n) => (n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
+const MAX_FILE = 25 << 20, MAX_TOTAL = 200 << 20;
+
+const fmtSize = (n) => (n === 0 ? '0 B' : n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
 
 // fileName turns a picked file's name into one the director accepts.
 const fileName = (n) => n.toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^[^a-z0-9]+/, '').slice(0, 64);
@@ -566,6 +568,10 @@ function FilesCard({ personas }) {
     try { setList(await api('/api/files')); setLoadErr(''); } catch (e) { setLoadErr(e.message); }
   };
   useEffect(() => { load(); }, []);
+  // A persona removed from the project can no longer be chosen.
+  useEffect(() => {
+    if (scope !== 'project' && !personas.includes(scope.slice('persona:'.length))) setScope('project');
+  }, [personas.join('\n')]);
 
   const pick = (e) => {
     const f = e.currentTarget.files && e.currentTarget.files[0];
@@ -574,6 +580,9 @@ function FilesCard({ personas }) {
 
   const upload = async () => {
     if (!file || busy) return;
+    if (file.size > MAX_FILE) { setErr(`This file is ${fmtSize(file.size)}, over the 25 MiB limit.`); return; }
+    const used = (list || []).filter((f) => !(f.name === name && f.scope === scope)).reduce((a, f) => a + f.size, 0);
+    if (list && used + file.size > MAX_TOTAL) { setErr('Adding this file would exceed the 200 MiB total; delete some files first.'); return; }
     setBusy(true); setErr('');
     try {
       await api(`/api/files/${encodeURIComponent(name)}?scope=${encodeURIComponent(scope)}`, {

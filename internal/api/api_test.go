@@ -900,3 +900,22 @@ func TestWorkerFiles(t *testing.T) {
 		t.Errorf("worker serves /api/files: %d", code)
 	}
 }
+
+func TestAdminFilesTooLargeWithoutContentLength(t *testing.T) {
+	srv, svc := setup(t, 0)
+	fs := withFiles(svc, t)
+	fs.MaxFile = 10
+	req, _ := http.NewRequest("PUT", srv.URL+"/api/files/a.bin", io.NopCloser(strings.NewReader(strings.Repeat("x", 50)))) // unknown length: chunked
+	req.Header.Set("Authorization", "Bearer "+testToken)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != 413 {
+		t.Fatalf("chunked oversize: %d", resp.StatusCode)
+	}
+	if l, _ := fs.List(); len(l) != 0 {
+		t.Fatalf("stored %+v", l)
+	}
+}

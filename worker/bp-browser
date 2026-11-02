@@ -25,16 +25,23 @@ if [ -n "$live" ]; then
 fi
 
 # Fetch the persona's test files into /workspace/files before the browser
-# starts. Best effort: a failure is logged (never the URL, it carries the run
-# token) and the browser starts anyway. Output goes to the log, not stdout.
+# starts. Best effort and quick (10 s in total): a failure is logged (never
+# the URL, it carries the run token) and the browser starts anyway. Each file
+# lands as a .part and is moved into place only when complete. Output goes to
+# the log, not stdout.
 if [ -n "$files" ]; then
-  timeout 30 sh -c '
+  timeout 10 sh -c '
     mkdir -p /workspace/files || exit 1
-    list=$(curl -fsS --max-time 20 "$1") || { echo "bp-files: could not list files"; exit 1; }
-    printf "%s" "$list" | tr -d "[]\" " | tr "," "\n" | grep -E "^[a-z0-9][a-z0-9._-]{0,63}\$" | while read -r n; do
-      curl -fsS --max-time 20 -o "/workspace/files/$n" "$1$n" || echo "bp-files: could not fetch $n"
+    list=$(curl -fsS --max-time 8 "$1") || { echo "bp-files: could not list files"; exit 1; }
+    printf "%s" "$list" | node -e "
+      let d=\"\"; process.stdin.on(\"data\",c=>d+=c).on(\"end\",()=>{
+        try { for (const n of JSON.parse(d)) if (/^[a-z0-9][a-z0-9._-]{0,63}\$/.test(n)) console.log(n); } catch (e) { process.exit(1); }
+      })" | while read -r n; do
+      part="/workspace/files/.$n.part"
+      if curl -fsS --max-time 8 -o "$part" "$1$n"; then mv -f "$part" "/workspace/files/$n"; else rm -f "$part"; echo "bp-files: could not fetch $n"; fi
     done
   ' sh "$files" >>/tmp/bp-files.log 2>&1 || echo "bp-files: failed or timed out" >>/tmp/bp-files.log
+  rm -f /workspace/files/.*.part 2>/dev/null
 fi
 
 name=""
