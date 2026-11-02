@@ -7,7 +7,7 @@ roles:
     personas:
       - name: Ada
         profile: {device: desktop, techLevel: everyday}
-        traits: [careful, desktop]
+        traits: [careful]
         identity:
           email: ada@example.test
     stories:

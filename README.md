@@ -251,7 +251,7 @@ personas:
 ```
 
 The project editor offers these as dropdowns, and `traits` stays for anything
-else. While a run is going, its page shows the browser live.
+else. While a run is going, its page shows the browser live. Each watcher pulls roughly 0.5-1 MB/s through the port-forward while a run is active.
 
 Every command works on one cluster and namespace. Leave out `--context` and
 `-n` in a terminal and the CLI asks: first the kubeconfig context (your

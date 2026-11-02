@@ -317,6 +317,8 @@ func (s *server) putLive(w http.ResponseWriter, r *http.Request) {
 
 func isActive(st store.RunState) bool { return st == store.RunPending || st == store.RunRunning }
 
+const liveWriteTimeout = 10 * time.Second
+
 // streamLive serves a run's screen as multipart/x-mixed-replace JPEG parts.
 func (s *server) streamLive(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
@@ -344,6 +346,7 @@ func (s *server) streamLive(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	fl.Flush()
 
+	rc := http.NewResponseController(w)
 	deadline := time.NewTimer(s.liveMax)
 	defer deadline.Stop()
 	check := time.NewTicker(s.liveCheck)
@@ -360,6 +363,10 @@ func (s *server) streamLive(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		case f := <-frames:
+			// A stalled viewer must not pin this goroutine: bound each part's write.
+			if err := rc.SetWriteDeadline(time.Now().Add(liveWriteTimeout)); err != nil && !errors.Is(err, http.ErrNotSupported) {
+				return
+			}
 			if _, err := fmt.Fprintf(w, "--frame\r\nContent-Type: image/jpeg\r\nContent-Length: %d\r\n\r\n", len(f)); err != nil {
 				return
 			}

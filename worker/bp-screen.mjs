@@ -17,7 +17,8 @@ const SLOW_MS = 5000;
 let ws = null;
 let targetId = '';
 let msgId = 0;
-let latest = null; // frame waiting to be sent
+let pending = null; // newest screencast frame {data (base64), sessionId}; unacked until sent
+let latest = null; // Buffer waiting to be sent (retry/keepalive)
 let last = null; // last frame the director accepted (keepalive)
 const seen = new Set();
 let inflight = false;
@@ -44,12 +45,12 @@ function attach(t) {
     let m;
     try { m = JSON.parse(ev.data); } catch { return; }
     if (m.method === 'Page.screencastFrame') {
-      sock.send(JSON.stringify({ id: ++msgId, method: 'Page.screencastFrameAck',
-        params: { sessionId: m.params.sessionId } }));
-      latest = Buffer.from(m.params.data, 'base64');
+      // Ack lazily (in tick/send): Chromium only encodes the next frame after an ack,
+      // so this caps encoding at about one frame per send interval.
+      pending = { data: m.params.data, sessionId: m.params.sessionId, sock };
     }
   };
-  sock.onclose = () => { if (ws === sock) { ws = null; targetId = ''; } };
+  sock.onclose = () => { if (ws === sock) { ws = null; targetId = ''; } if (pending && pending.sock === sock) pending = null; };
   sock.onerror = () => {};
 }
 
@@ -72,6 +73,25 @@ async function poll() {
   }
 }
 
+function ackPending() {
+  const p = pending;
+  pending = null;
+  if (!p) return null;
+  try {
+    if (p.sock.readyState === 1) {
+      p.sock.send(JSON.stringify({ id: ++msgId, method: 'Page.screencastFrameAck', params: { sessionId: p.sessionId } }));
+    }
+  } catch {}
+  return Buffer.from(p.data, 'base64');
+}
+
+function stop() {
+  over = true;
+  pending = null;
+  latest = null;
+  if (ws) { try { ws.close(); } catch {} ws = null; }
+}
+
 async function send() {
   const body = latest;
   latest = null;
@@ -81,8 +101,10 @@ async function send() {
     const res = await fetch(liveUrl, { method: 'PUT', headers: { 'Content-Type': 'image/jpeg' }, body, signal: AbortSignal.timeout(5000) });
     await res.arrayBuffer().catch(() => {});
     if (res.status === 404 || res.status === 410) {
-      over = true;
       log('director says run is over (' + res.status + '); stopping');
+      stop();
+    } else if (res.status === 413) {
+      logOnce('director ' + host + ' rejected a frame as too large; dropping it');
     } else if (res.status >= 400) {
       logOnce('director ' + host + ' answered ' + res.status);
       if (!latest) latest = body;
@@ -101,13 +123,16 @@ async function send() {
 
 function tick() {
   if (over || inflight) return;
-  if (!latest) {
+  const gap = watchers > 0 ? FAST_MS : SLOW_MS;
+  if (Date.now() - lastSend < gap) return;
+  // a fresh frame supersedes a queued retry
+  if (pending) latest = ackPending();
+  else if (!latest) {
     // idle page: re-send the last good frame so the director keeps it
     if (!last || Date.now() - lastSend < SLOW_MS) return;
     latest = last;
   }
-  const gap = watchers > 0 ? FAST_MS : SLOW_MS;
-  if (Date.now() - lastSend >= gap) send();
+  send();
 }
 
 log('starting, director host', host);

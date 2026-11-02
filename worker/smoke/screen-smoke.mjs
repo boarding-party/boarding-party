@@ -75,4 +75,88 @@ if (webm && ffdir) {
   videoNote = `video ${w}x${h}`;
 }
 console.log(`ok ${frames.length} frames; ${videoNote}`);
+
+// ---- Case 2: the real wrapper end to end over stdio JSON-RPC -------------------------
+// bp-browser starts bp-screen and execs Playwright MCP; stdout must carry only JSON-RPC.
+const wf = [];
+let wWatchers = '1';
+let wStatus = 204;
+const wsink = http.createServer((req, res) => {
+  const chunks = [];
+  req.on('data', (c) => chunks.push(c));
+  req.on('end', () => {
+    wf.push({ at: Date.now(), body: Buffer.concat(chunks) });
+    res.writeHead(wStatus, { 'X-Bp-Watchers': wWatchers });
+    res.end();
+  });
+});
+await new Promise((r) => wsink.listen(0, '127.0.0.1', r));
+const wurl = `http://127.0.0.1:${wsink.address().port}/live/run-token`;
+
+const outDir = mkdtempSync(join(tmpdir(), 'bp-out-'));
+const wrap = spawn('/opt/bp/bp-browser', [
+  `--live-url=${wurl}`, '--bp-device=pixel-7', '--headless', '--isolated', '--no-sandbox',
+  '--browser=chromium', `--output-dir=${outDir}`,
+], { stdio: ['pipe', 'pipe', 'pipe'] });
+let wout = '';
+const waiters = new Map();
+wrap.stdout.on('data', (d) => {
+  wout += d;
+  let i;
+  while ((i = wout.indexOf('\n')) >= 0) {
+    const line = wout.slice(0, i).trim();
+    wout = wout.slice(i + 1);
+    if (!line) continue;
+    let m;
+    try { m = JSON.parse(line); } catch { fail('wrapper stdout carried non-JSON: ' + line.slice(0, 80)); }
+    if (m.jsonrpc !== '2.0') fail('wrapper stdout line is not JSON-RPC: ' + line.slice(0, 80));
+    if (m.id != null && waiters.has(m.id)) { waiters.get(m.id)(m); waiters.delete(m.id); }
+  }
+});
+wrap.stderr.on('data', (d) => process.stderr.write(d));
+wrap.on('exit', (c) => { if (c) fail('wrapper exited with ' + c); });
+const rpc = (id, method, params) => new Promise((resolve, reject) => {
+  const t = setTimeout(() => reject(new Error('timeout waiting for ' + method)), 60000);
+  waiters.set(id, (m) => { clearTimeout(t); resolve(m); });
+  wrap.stdin.write(JSON.stringify({ jsonrpc: '2.0', id, method, params }) + '\n');
+});
+try {
+  const init = await rpc(1, 'initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'smoke', version: '0' } });
+  if (init.error) fail('initialize: ' + JSON.stringify(init.error));
+  wrap.stdin.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) + '\n');
+  const page = 'data:text/html,' + encodeURIComponent('<body><h1>wrapper</h1><script>setInterval(()=>{document.body.style.background="hsl("+(Date.now()/5%360)+",80%,50%)"},50)</script>');
+  const nav = await rpc(2, 'tools/call', { name: 'browser_navigate', arguments: { url: page } });
+  if (nav.error || nav.result?.isError) fail('browser_navigate: ' + JSON.stringify(nav).slice(0, 300));
+} catch (e) { fail(String(e.message || e)); }
+
+// Phase A: a watcher is present, so frames flow at the fast cadence.
+await sleep(4000);
+const a0 = wf.length;
+if (a0 < 4) fail(`wrapper streamed only ${a0} frames with a watcher`);
+if (!wf.every((f) => f.body[0] === 0xff && f.body[1] === 0xd8)) fail('wrapper frame is not a JPEG');
+const aStart = wf.length;
+await sleep(3000);
+const aRate = wf.length - aStart;
+if (aRate < 5) fail(`watched cadence too slow: ${aRate} PUTs in 3s`);
+
+// Phase B: no watchers, so the cadence drops to the slow gap (about one PUT per 5s).
+wWatchers = '0';
+await sleep(1500); // let the in-flight response carry the new header
+const bStart = wf.length;
+await sleep(8000);
+const bRate = wf.length - bStart;
+if (bRate > 3) fail(`unwatched cadence too fast: ${bRate} PUTs in 8s`);
+if (bRate < 1) fail('keepalive missing: no PUT in 8s while unwatched');
+
+// Phase C: the director says the run is over (404); PUTs must stop.
+wStatus = 404;
+await sleep(1500);
+const cStart = wf.length;
+await sleep(8000);
+if (wf.length !== cStart) fail(`${wf.length - cStart} PUTs after the director answered 404`);
+
+wrap.removeAllListeners('exit');
+wrap.kill();
+wsink.close();
+console.log(`ok wrapper: watched ${aRate}/3s, unwatched ${bRate}/8s, stopped on 404; stdout was JSON-RPC only`);
 process.exit(0);
