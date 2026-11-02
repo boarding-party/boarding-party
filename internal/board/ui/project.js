@@ -330,12 +330,13 @@ function RoleCard({ role, n, onChange, onRemove }) {
       <label class="check">
         <input type="checkbox" checked=${role.canWatchRecordings}
           onChange=${(e) => { const v = e.currentTarget.checked; onChange((r) => { r.canWatchRecordings = v; }); }} />
-        <span>Can watch other roles' recordings <span class="hint">Turns this role into a supervisor.</span></span>
+        <span>Can watch other roles' recordings <span class="hint">For a supervisor role that reviews what others did. Not used by runs yet; leave it off.</span></span>
       </label>
 
       <div class="cols">
         <div>
           <h3>Personas</h3>
+          <p class="hint">Made-up people who play this role. A run picks one persona and one story.</p>
           ${role.personas.length ? null : html`<p class="small muted">No personas. Runs need at least one.</p>`}
           ${role.personas.map((p, i) => html`<${PersonaRow} key=${p.id} persona=${p}
               onChange=${(fn) => onChange((r) => fn(r.personas[i]))}
@@ -347,6 +348,7 @@ function RoleCard({ role, n, onChange, onRemove }) {
         </div>
         <div>
           <h3>Stories</h3>
+          <p class="hint">Goals, not steps. Any persona in this role can play any story; the agent finds the way.</p>
           ${role.stories.length ? null : html`<p class="small muted">No stories. Runs need at least one.</p>`}
           ${role.stories.map((s, i) => html`<${StoryRow} key=${s.id} story=${s}
               onChange=${(fn) => onChange((r) => fn(r.stories[i]))}
@@ -366,19 +368,20 @@ function PersonaRow({ persona, onChange, onRemove }) {
   return html`
     <div class="sub">
       <div class="row nowrap">
-        <input id=${id} class="strong" value=${persona.name} placeholder="Persona name" aria-label="Persona name"
+        <input id=${id} class="strong" value=${persona.name} placeholder="Persona name, such as Priya" aria-label="Persona name"
           onInput=${(e) => { const v = e.currentTarget.value; onChange((p) => { p.name = v; }); }} />
         <button class="btn icon" type="button" title="Remove persona" aria-label=${'Remove persona ' + persona.name}
           onClick=${onRemove}>×</button>
       </div>
-      <${Tags} tags=${persona.traits} label="Traits" placeholder="Add a trait, such as impatient or phone"
+      <${Tags} tags=${persona.traits} label="Traits" placeholder="How they behave: impatient, phone, not technical. Enter adds"
         onChange=${(fn) => onChange((p) => fn(p.traits))} />
       <div class="kv">
         <span class="sublabel">Identity</span>
+        <span class="hint">Details the persona types into forms. Field on the left, value on the right. Use made-up data.</span>
         ${persona.identity.map((x, i) => html`<div key=${x.id}><div class="row nowrap">
-          <input class="k" value=${x.k} placeholder="email" aria-label="Identity field"
+          <input class="k" value=${x.k} placeholder="field, such as email" aria-label="Identity field"
             onInput=${(e) => { const v = e.currentTarget.value; onChange((p) => { p.identity[i].k = v; }); }} />
-          <input value=${x.v} placeholder="value" aria-label=${'Value for ' + (x.k || 'field')}
+          <input value=${x.v} placeholder="priya@example.test" aria-label=${'Value for ' + (x.k || 'field')}
             onInput=${(e) => { const v = e.currentTarget.value; onChange((p) => { p.identity[i].v = v; }); }} />
           <button class="btn icon" type="button" title="Remove field" aria-label=${'Remove ' + (x.k || 'field')}
             onClick=${() => onChange((p) => { p.identity.splice(i, 1); })}>×</button>
@@ -392,12 +395,12 @@ function StoryRow({ story, onChange, onRemove }) {
   return html`
     <div class="sub">
       <div class="row nowrap">
-        <input class="strong" value=${story.name} placeholder="Story name" aria-label="Story name"
+        <input class="strong" value=${story.name} placeholder="Story name, such as first-invoice" aria-label="Story name"
           onInput=${(e) => { const v = e.currentTarget.value; onChange((s) => { s.name = v; }); }} />
         <button class="btn icon" type="button" title="Remove story" aria-label=${'Remove story ' + story.name}
           onClick=${onRemove}>×</button>
       </div>
-      <textarea rows="3" value=${story.goal} placeholder="What the persona is trying to get done, in their words." aria-label="Goal"
+      <textarea rows="3" value=${story.goal} placeholder="In their words: I need to bill a client £450 + VAT and download the invoice as a PDF." aria-label="Goal"
         onInput=${(e) => { const v = e.currentTarget.value; onChange((s) => { s.goal = v; }); }}></textarea>
     </div>`;
 }

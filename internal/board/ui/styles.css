@@ -150,6 +150,7 @@ input.strong { font-weight: 600; }
 .check .hint { display: block; }
 .cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line-soft); }
 .cols h3 { font-size: 13px; margin: 0 0 8px; color: var(--muted); font-weight: 600; }
+.cols h3 + .hint { margin: -4px 0 10px; }
 .sub { background: #F7F9FB; border: 1px solid var(--line-soft); border-radius: 6px; padding: 10px; margin-bottom: 8px; display: flex; flex-direction: column; gap: 8px; }
 .sublabel { font-size: 12px; color: var(--muted); font-weight: 500; }
 .kv { display: flex; flex-direction: column; gap: 6px; }
