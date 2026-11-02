@@ -210,9 +210,13 @@ func (s *server) listRuns(w http.ResponseWriter, r *http.Request) {
 		Live        bool   `json:"live,omitempty"`
 	}
 	out := make([]item, len(rs))
+	// One deadline for every lookup: a slow cluster costs the list at most
+	// listStageBudget, and runs after it expires just omit their stage.
+	ctx, cancel := context.WithTimeout(r.Context(), listStageBudget)
+	defer cancel()
 	for i, x := range rs {
 		out[i] = item{Run: redact(x)}
-		out[i].Stage, out[i].StageReason, out[i].Live = s.progress(r.Context(), x)
+		out[i].Stage, out[i].StageReason, out[i].Live = s.progress(ctx, x)
 	}
 	writeJSON(w, http.StatusOK, out)
 }
@@ -257,6 +261,9 @@ func (s *server) getRun(w http.ResponseWriter, r *http.Request) {
 
 // stageTimeout bounds the pod lookup so a slow cluster cannot stall the API.
 const stageTimeout = 2 * time.Second
+
+// listStageBudget bounds all stage lookups of one runs-list request together.
+var listStageBudget = 3 * time.Second
 
 // progress says what an active run is doing: its stage (and reason when it is
 // failing) and whether a live frame exists. Finished runs give zero values; a

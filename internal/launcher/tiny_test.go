@@ -570,6 +570,10 @@ func TestStage(t *testing.T) {
 		{"running beats others whatever the order", []*corev1.Pod{mk("a", unscheduled), mk("b", ready), mk("c", func(p *corev1.Pod) {
 			p.Status.Phase = corev1.PodFailed
 		})}, "running", ""},
+		{"waiting replacement beats stale failed pod", []*corev1.Pod{mk("a", func(p *corev1.Pod) {
+			p.Status.Phase = corev1.PodFailed
+			p.Status.Reason = "Evicted"
+		}), mk("b", unscheduled)}, "waiting-for-node", ""},
 		{"healthier pod beats failed one", []*corev1.Pod{mk("a", func(p *corev1.Pod) {
 			p.Status.Phase = corev1.PodFailed
 		}), mk("b", pulling)}, "starting", ""},

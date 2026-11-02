@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -690,5 +691,46 @@ func TestStageLookupTimesOutWithoutFailingRequest(t *testing.T) {
 	json.NewDecoder(resp.Body).Decode(&d)
 	if resp.StatusCode != 200 || d["stage"] != nil || time.Since(start) > 4*time.Second {
 		t.Fatalf("got %d %v after %v", resp.StatusCode, d, time.Since(start))
+	}
+}
+
+type countingSlowLauncher struct {
+	noopLauncher
+	calls *int
+}
+
+func (l countingSlowLauncher) Stage(ctx context.Context, _ string) (string, string, error) {
+	*l.calls++
+	<-ctx.Done()
+	return "", "", ctx.Err()
+}
+
+func TestRunListStageLookupsShareOneDeadline(t *testing.T) {
+	old := listStageBudget
+	listStageBudget = 300 * time.Millisecond
+	defer func() { listStageBudget = old }()
+	srv, _, svc := setupBoth(t, 1024)
+	run := startRun(t, srv, svc)
+	// Two more active runs, written straight to the store.
+	for i := 0; i < 2; i++ {
+		r := run
+		r.ID, r.Token = fmt.Sprintf("extra%d", i), fmt.Sprintf("tok%d", i)
+		if err := svc.Store.CreateRun(r); err != nil {
+			t.Fatal(err)
+		}
+	}
+	calls := 0
+	svc.Launcher = countingSlowLauncher{calls: &calls}
+	start := time.Now()
+	resp := do(t, "GET", srv.URL+"/api/runs", "")
+	var list []map[string]any
+	json.NewDecoder(resp.Body).Decode(&list)
+	if resp.StatusCode != 200 || len(list) != 3 || time.Since(start) > time.Second {
+		t.Fatalf("got %d, %d runs after %v", resp.StatusCode, len(list), time.Since(start))
+	}
+	for _, it := range list {
+		if it["stage"] != nil {
+			t.Fatalf("stage not omitted: %v", it)
+		}
 	}
 }

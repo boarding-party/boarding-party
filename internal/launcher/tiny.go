@@ -216,15 +216,15 @@ func (t *Tiny) LivePods(ctx context.Context) (int, error) {
 // it has no node, "starting" with no pod yet or while its containers are not
 // all ready, "running" once it is Ready, and "failing" (with the reason) when
 // a container cannot start. Pods being deleted or already finished are
-// ignored; of the rest the furthest along wins: running, starting, failing,
-// waiting-for-node.
+// ignored; of the rest the furthest along wins: running, starting,
+// waiting-for-node, failing.
 func (t *Tiny) Stage(ctx context.Context, name string) (stage, reason string, err error) {
 	l := &corev1.PodList{}
 	if err := t.Client.List(ctx, l, client.InNamespace(t.Namespace),
 		client.MatchingLabels{podAppLabel: podAppValue, session.SessionLabel: name}); err != nil {
 		return "", "", fmt.Errorf("list pods: %w", err)
 	}
-	rank := map[string]int{"": 0, "waiting-for-node": 1, "failing": 2, "starting": 3, "running": 4}
+	rank := map[string]int{"": 0, "failing": 1, "waiting-for-node": 2, "starting": 3, "running": 4}
 	best, bestReason := "", ""
 	for _, p := range l.Items {
 		if p.DeletionTimestamp != nil || p.Status.Phase == corev1.PodSucceeded {
