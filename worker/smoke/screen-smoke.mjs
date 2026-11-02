@@ -30,12 +30,14 @@ const iphone = devices['iPhone 15'];
 const browser = await chromium.launch({ args: cfg.browser.launchOptions.args });
 const ctx = await browser.newContext({ ...iphone, recordVideo: { dir } });
 const p1 = await ctx.newPage();
-await p1.goto('data:text/html,<h1>one</h1>');
+await p1.goto('data:text/html,<body style="background:red"><h1>one</h1>');
 
-const screen = spawn('node', ['/opt/bp/bp-screen.mjs', `--live-url=${url}`], { stdio: ['ignore', 'inherit', 'inherit'] });
+const screen = spawn('node', ['/opt/bp/bp-screen.mjs', `--live-url=${url}`], { stdio: ['ignore', 'inherit', 'pipe'] });
+let screenLog = '';
+screen.stderr.on('data', (d) => { screenLog += d; process.stderr.write(d); });
 await sleep(3000); // poll interval 2s + attach
 const p2 = await ctx.newPage();
-await p2.goto('data:text/html,<h1>two</h1>');
+await p2.goto('data:text/html,<body style="background:blue"><h1>two</h1>');
 const secondOpened = Date.now();
 await sleep(4000);
 
@@ -49,7 +51,13 @@ for (const f of frames) {
   if (f.method !== 'PUT' || f.ct !== 'image/jpeg') fail('bad method/content-type');
   if (f.body[0] !== 0xff || f.body[1] !== 0xd8) fail('frame is not a JPEG');
 }
-if (!frames.some((f) => f.at > secondOpened)) fail('no frame after the second page opened');
+const before = frames.filter((f) => f.at <= secondOpened);
+const after = frames.filter((f) => f.at > secondOpened);
+if (!after.length) fail('no frame after the second page opened');
+if (!before.length) fail('no frame before the second page opened');
+if (!after.some((f) => before.every((b) => !b.body.equals(f.body)))) fail('frames after page two equal earlier ones (no re-attach)');
+const ids = new Set([...screenLog.matchAll(/attached to target (\w+)/g)].map((m) => m[1]));
+if (ids.size < 2) fail(`bp-screen attached to ${ids.size} distinct targets, want 2`);
 
 // Video size: iPhone 15 viewport must be 390x844 and the recording proportional to it.
 const vp = ctx._options?.viewport || iphone.viewport;

@@ -51,6 +51,20 @@ jobs:
             type=ref,event=branch
             type=sha,prefix=sha-
             type=semver,pattern={{version}}
+      - name: Build worker (amd64) for smoke test
+        if: matrix.image == 'worker'
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          platforms: linux/amd64
+          load: true
+          tags: bp-worker:smoke
+          cache-from: type=gha,scope=${{ matrix.image }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image }}
+      - name: Smoke test worker screen streaming
+        if: matrix.image == 'worker'
+        run: docker run --rm bp-worker:smoke node /opt/bp/smoke/screen-smoke.mjs
       - uses: docker/build-push-action@v6
         with:
           context: ${{ matrix.context }}
@@ -61,8 +75,3 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha,scope=${{ matrix.image }}
           cache-to: type=gha,mode=max,scope=${{ matrix.image }}
-      - name: Smoke test worker screen streaming
-        if: matrix.image == 'worker'
-        run: |
-          docker buildx build --platform linux/amd64 --load -t bp-worker:smoke worker
-          docker run --rm bp-worker:smoke node /opt/bp/smoke/screen-smoke.mjs

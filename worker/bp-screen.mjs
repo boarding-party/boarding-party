@@ -17,7 +17,9 @@ const SLOW_MS = 5000;
 let ws = null;
 let targetId = '';
 let msgId = 0;
-let latest = null; // pending JPEG buffer
+let latest = null; // frame waiting to be sent
+let last = null; // last frame the director accepted (keepalive)
+const seen = new Set();
 let inflight = false;
 let lastSend = 0;
 let watchers = 0;
@@ -54,11 +56,15 @@ function attach(t) {
 async function poll() {
   if (over) return;
   try {
-    const res = await fetch(CDP + '/json/list');
+    const res = await fetch(CDP + '/json/list', { signal: AbortSignal.timeout(5000) });
     const list = (await res.json()).filter((t) => t.type === 'page' && t.webSocketDebuggerUrl);
     if (list.length) {
-      const t = list[0]; // Chromium lists the newest page first
-      if (t.id !== targetId || !ws) attach(t);
+      // /json/list order is not a contract: attach to the first page id not seen before;
+      // if the attached page is gone, fall back to the first listed page.
+      const fresh = list.find((t) => !seen.has(t.id));
+      for (const t of list) seen.add(t.id);
+      if (fresh) attach(fresh);
+      else if (!ws || !list.some((t) => t.id === targetId)) attach(list[0]);
     }
     lastErr = '';
   } catch (e) {
@@ -72,26 +78,34 @@ async function send() {
   inflight = true;
   lastSend = Date.now();
   try {
-    const res = await fetch(liveUrl, { method: 'PUT', headers: { 'Content-Type': 'image/jpeg' }, body });
+    const res = await fetch(liveUrl, { method: 'PUT', headers: { 'Content-Type': 'image/jpeg' }, body, signal: AbortSignal.timeout(5000) });
     await res.arrayBuffer().catch(() => {});
     if (res.status === 404 || res.status === 410) {
       over = true;
       log('director says run is over (' + res.status + '); stopping');
     } else if (res.status >= 400) {
       logOnce('director ' + host + ' answered ' + res.status);
+      if (!latest) latest = body;
     } else {
       lastErr = '';
+      last = body;
       watchers = parseInt(res.headers.get('x-bp-watchers') || '0', 10) || 0;
     }
   } catch (e) {
     logOnce('send to ' + host + ' failed: ' + (e.cause?.code || e.message));
+    if (!latest) latest = body;
   } finally {
     inflight = false;
   }
 }
 
 function tick() {
-  if (over || inflight || !latest) return;
+  if (over || inflight) return;
+  if (!latest) {
+    // idle page: re-send the last good frame so the director keeps it
+    if (!last || Date.now() - lastSend < SLOW_MS) return;
+    latest = last;
+  }
   const gap = watchers > 0 ? FAST_MS : SLOW_MS;
   if (Date.now() - lastSend >= gap) send();
 }
