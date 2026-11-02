@@ -231,6 +231,28 @@ demo; paste it into the project editor to start. [docs/e2e.md](docs/e2e.md)
 has the full check: a successful run, a run that gets stuck on purpose, and a
 watchdog timeout.
 
+A persona can carry a `profile`: a few choices that shape how the agent
+behaves. All are optional, and each value is a fixed key:
+
+| Field | Values |
+|---|---|
+| `device` | `desktop`, `desktop-large`, `laptop-small`, `iphone-15`, `iphone-15-pro-max`, `pixel-7`, `galaxy-s24`, `ipad`, `ipad-mini`. Sets the browser's screen size when the run starts. |
+| `age` | `18-24`, `25-34`, `35-49`, `50-64`, `65-plus` |
+| `techLevel` | `new`, `everyday`, `confident`, `expert` |
+| `patience` | `patient`, `normal`, `impatient` |
+| `reading` | `careful`, `skims`, `struggles`, `second-language` |
+| `assistive` | `none`, `screen-reader`, `keyboard-only`, `zoom` |
+
+```yaml
+personas:
+  - name: Ada
+    profile: {device: desktop, techLevel: everyday}
+    traits: [careful]
+```
+
+The project editor offers these as dropdowns, and `traits` stays for anything
+else. While a run is going, its page shows the browser live.
+
 Every command works on one cluster and namespace. Leave out `--context` and
 `-n` in a terminal and the CLI asks: first the kubeconfig context (your
 current one is preselected), then the namespace, with the ones where tiny is
@@ -298,8 +320,6 @@ because it is only for this.
 - Supervisor roles that review other personas' recordings.
 - A persona workspace: email via IMAP, files, calendar, a password vault with
   2FA codes, payment test cards.
-- Structured persona profiles: age, computer confidence, vision, reading,
-  device, assistive technology.
 
 **Already here.**
 - `boardingparty setup` installs the director; `leave` removes it.

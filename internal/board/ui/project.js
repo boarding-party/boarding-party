@@ -14,7 +14,7 @@ let seq = 0;
 const nid = () => `r${++seq}`;
 
 const row = (v = '') => ({ id: nid(), v });
-const newPersona = () => ({ id: nid(), name: '', traits: [], identity: [] });
+const newPersona = () => ({ id: nid(), name: '', profile: {}, traits: [], identity: [] });
 const newStory = () => ({ id: nid(), name: '', goal: '' });
 const newRole = () => ({ id: nid(), name: '', description: '', canWatchRecordings: false, personas: [newPersona()], stories: [newStory()] });
 
@@ -37,6 +37,7 @@ function fromProject(p) {
       personas: (r.personas || []).map((pe) => ({
         id: nid(),
         name: pe.name || '',
+        profile: { ...(pe.profile || {}) },
         traits: [...(pe.traits || [])],
         identity: Object.entries(pe.identity || {}).map(([k, v]) => ({ id: nid(), k, v: String(v) })),
       })),
@@ -45,7 +46,7 @@ function fromProject(p) {
   };
 }
 
-const personaHasContent = (p) => !!(p.name.trim() || p.traits.length || p.identity.some((x) => x.k.trim() || x.v.trim()));
+const personaHasContent = (p) => !!(p.name.trim() || p.traits.length || Object.values(p.profile).some(Boolean) || p.identity.some((x) => x.k.trim() || x.v.trim()));
 const storyHasContent = (s) => !!(s.name.trim() || s.goal.trim());
 
 // identityWarnings returns a message per identity row that won't save as
@@ -78,6 +79,7 @@ function toJSON(d) {
       canWatchRecordings: r.canWatchRecordings,
       personas: r.personas.map((pe) => ({
         name: pe.name.trim(),
+        ...(Object.values(pe.profile).some(Boolean) ? { profile: Object.fromEntries(Object.entries(pe.profile).filter(([, v]) => v)) } : {}),
         traits: pe.traits,
         identity: Object.fromEntries(pe.identity.filter((x) => x.k.trim()).map((x) => [x.k.trim(), x.v])),
       })),
@@ -119,6 +121,7 @@ export function ProjectPage({ onSaved, onDirty }) {
   const [saveErr, setSaveErr] = useState('');
   const [toast, setToast] = useState('');
   const [importOpen, setImportOpen] = useState(false);
+  const profileFields = useProfileFields();
   const top = useRef(null);
 
   const adopt = (p) => {
@@ -266,7 +269,7 @@ export function ProjectPage({ onSaved, onDirty }) {
             onChange=${(fn) => edit((d) => fn(d.extraHosts))} />
         </div>
 
-        ${draft.roles.map((r, i) => html`<${RoleCard} key=${r.id} role=${r} n=${i + 1}
+        ${draft.roles.map((r, i) => html`<${RoleCard} key=${r.id} role=${r} n=${i + 1} profileFields=${profileFields}
             onChange=${(fn) => edit((d) => fn(d.roles[i]))}
             onRemove=${async () => {
               const busy = r.name.trim() || r.description.trim() || r.personas.some(personaHasContent) || r.stories.some(storyHasContent);
@@ -321,7 +324,7 @@ function ListField({ label, hint, rows, placeholder, addLabel, warn, onChange })
     </div>`;
 }
 
-function RoleCard({ role, n, onChange, onRemove }) {
+function RoleCard({ role, n, profileFields, onChange, onRemove }) {
   const id = `role-${role.id}`;
   return html`
     <div class="card role">
@@ -349,7 +352,7 @@ function RoleCard({ role, n, onChange, onRemove }) {
           <h3>Personas</h3>
           <p class="hint">Made-up people who play this role. A run picks one persona and one story.</p>
           ${role.personas.length ? null : html`<p class="small muted">No personas. Runs need at least one.</p>`}
-          ${role.personas.map((p, i) => html`<${PersonaRow} key=${p.id} persona=${p}
+          ${role.personas.map((p, i) => html`<${PersonaRow} key=${p.id} persona=${p} fields=${profileFields}
               onChange=${(fn) => onChange((r) => fn(r.personas[i]))}
               onRemove=${async () => {
                 if (personaHasContent(p) && !(await confirmDialog(`Remove the persona ${p.name.trim() ? `"${p.name.trim()}"` : 'without a name'}?`, { confirm: 'Remove persona', danger: true }))) return;
@@ -373,7 +376,40 @@ function RoleCard({ role, n, onChange, onRemove }) {
     </div>`;
 }
 
-function PersonaRow({ persona, onChange, onRemove }) {
+// Profile fields come from the director so the lists stay in one place.
+function useProfileFields() {
+  const [fields, setFields] = useState([]);
+  useEffect(() => {
+    let live = true;
+    api('/api/profile-fields').then((f) => { if (live && Array.isArray(f)) setFields(f); }).catch(() => {});
+    return () => { live = false; };
+  }, []);
+  return fields;
+}
+
+function ProfileGrid({ profile, fields, onChange }) {
+  if (!fields.length) return null;
+  return html`
+    <div class="kv">
+      <span class="sublabel">Profile</span>
+      <div class="fields">
+        ${fields.map((f) => {
+          const cur = profile[f.key] || '';
+          const known = !cur || (f.options || []).some((o) => o.value === cur);
+          return html`<label class="field">${f.label}
+            <select title=${f.hint || ''} value=${cur}
+              onChange=${(e) => { const v = e.currentTarget.value; onChange((p) => { if (v) p.profile[f.key] = v; else delete p.profile[f.key]; }); }}>
+              <option value="" selected=${!cur}>Not set</option>
+              ${(f.options || []).map((o) => html`<option key=${o.value} value=${o.value} selected=${cur === o.value}>${o.label}</option>`)}
+              ${known ? null : html`<option value=${cur} selected>${cur} (unknown)</option>`}
+            </select></label>`;
+        })}
+      </div>
+      <span class="hint">The agent behaves like this person. Device sets the browser's screen size when the run starts.</span>
+    </div>`;
+}
+
+function PersonaRow({ persona, fields, onChange, onRemove }) {
   const id = `p-${persona.id}`;
   const warns = identityWarnings(persona.identity);
   return html`
@@ -384,8 +420,10 @@ function PersonaRow({ persona, onChange, onRemove }) {
         <button class="btn icon" type="button" title="Remove persona" aria-label=${'Remove persona ' + persona.name}
           onClick=${onRemove}>×</button>
       </div>
-      <${Tags} tags=${persona.traits} label="Traits" placeholder="How they behave: impatient, phone, not technical. Enter adds"
+      <${ProfileGrid} profile=${persona.profile} fields=${fields} onChange=${onChange} />
+      <${Tags} tags=${persona.traits} label="Other traits (optional)" placeholder="Optional. Enter adds"
         onChange=${(fn) => onChange((p) => fn(p.traits))} />
+      <span class="hint">Anything the lists don't cover, such as distracted or left-handed.</span>
       <div class="kv">
         <span class="sublabel">Identity</span>
         <span class="hint">Details the persona types into forms. Field on the left, value on the right. Use made-up data.</span>

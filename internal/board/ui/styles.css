@@ -155,6 +155,8 @@ input.strong { font-weight: 600; }
 .cols h3 { font-size: 13px; margin: 0 0 8px; color: var(--muted); font-weight: 600; }
 .cols h3 + .hint { margin: -4px 0 10px; }
 .sub { background: #F7F9FB; border: 1px solid var(--line-soft); border-radius: 6px; padding: 10px; margin-bottom: 8px; display: flex; flex-direction: column; gap: 8px; }
+.kv .fields { gap: 8px 12px; }
+.kv .field { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--muted); font-weight: 500; }
 .sublabel { font-size: 12px; color: var(--muted); font-weight: 500; }
 .kv { display: flex; flex-direction: column; gap: 6px; }
 .kv input.k { flex: 0 0 34%; }

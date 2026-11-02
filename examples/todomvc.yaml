@@ -6,6 +6,7 @@ roles:
     description: Someone using the app for the first time, with no account.
     personas:
       - name: Ada
+        profile: {device: desktop, techLevel: everyday}
         traits: [careful, desktop]
         identity:
           email: ada@example.test
