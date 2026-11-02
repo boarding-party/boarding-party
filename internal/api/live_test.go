@@ -128,8 +128,23 @@ func TestLiveStreamAndWatchers(t *testing.T) {
 	}
 	next := append([]byte{0xFF, 0xD8}, []byte("second")...)
 	putLive(t, w.URL, run.Token, next)
-	if got := readPart(t, br); !bytes.Equal(got, next) && !bytes.Equal(got, jpeg1) {
-		t.Error("unexpected part")
+	found := make(chan bool, 1)
+	go func() {
+		for i := 0; i < 10; i++ {
+			if bytes.Equal(readPart(t, br), next) {
+				found <- true
+				return
+			}
+		}
+		found <- false
+	}()
+	select {
+	case ok := <-found:
+		if !ok {
+			t.Error("published frame never arrived")
+		}
+	case <-time.After(3 * time.Second):
+		t.Error("timed out waiting for the published frame")
 	}
 }
 

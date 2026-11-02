@@ -88,14 +88,19 @@ func (h *Hub) Subscribe(runID string) (<-chan []byte, func()) {
 	}
 }
 
-// Sweep drops runs with no frame for IdleTTL. Their subscribers stop
-// receiving; the stream handler ends on its own run-state check.
+// Sweep drops the frame of runs idle for IdleTTL, and the run itself unless
+// it still has subscribers.
 func (h *Hub) Sweep(now time.Time) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	for id, e := range h.runs {
-		if now.Sub(e.last) >= IdleTTL {
-			delete(h.runs, id)
+		if now.Sub(e.last) < IdleTTL {
+			continue
 		}
+		if len(e.subs) > 0 {
+			e.frame = nil // keep the entry so open streams still get later frames
+			continue
+		}
+		delete(h.runs, id)
 	}
 }

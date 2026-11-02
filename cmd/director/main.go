@@ -205,7 +205,7 @@ func run() error {
 	go svc.Watch(ctx, runs.DefaultPollInterval, cfg.RunTimeout)
 
 	hub := live.NewHub()
-	go sweepLive(ctx, hub, 30*time.Second)
+	go sweepLive(ctx, hub, 10*time.Second)
 	admin, worker := newServers(cfg, svc, st, hub)
 	return serve(ctx, []*http.Server{
 		{Addr: cfg.AdminAddr, Handler: admin, ReadHeaderTimeout: 10 * time.Second},

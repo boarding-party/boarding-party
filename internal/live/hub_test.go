@@ -69,3 +69,21 @@ func TestSweepDropsIdleRuns(t *testing.T) {
 		t.Fatal("frame survived sweep")
 	}
 }
+
+func TestSweepKeepsSubscribedRuns(t *testing.T) {
+	h := NewHub()
+	ch, cancel := h.Subscribe("r")
+	defer cancel()
+	h.Sweep(time.Now().Add(3 * time.Minute))
+	if n := h.Publish("r", []byte("late")); n != 1 {
+		t.Fatalf("watchers = %d, want 1", n)
+	}
+	select {
+	case f := <-ch:
+		if string(f) != "late" {
+			t.Fatalf("got %q", f)
+		}
+	default:
+		t.Fatal("subscriber got nothing")
+	}
+}
