@@ -95,9 +95,8 @@ func (t *Tiny) Start(ctx context.Context, r store.Run, p project.Project) (strin
 				{Name: "bp", URL: t.DirectorURL + "/mcp/run/" + r.Token},
 				{
 					Name:    "pw",
-					Command: "playwright-mcp",
-					Args: []string{"--headless", "--isolated", "--no-sandbox", "--browser=chromium",
-						"--output-dir=/workspace/out", "--viewport-size=1280x800", "--caps=devtools"},
+					Command: "bp-browser",
+					Args:    t.browserArgs(r, p),
 				},
 			},
 		},
@@ -211,4 +210,33 @@ func (t *Tiny) LivePods(ctx context.Context) (int, error) {
 		}
 	}
 	return n, nil
+}
+
+// browserArgs builds the bp-browser arguments. tiny's CRD rejects MCP args
+// with whitespace, quotes or backslashes, so a phone or tablet goes as a
+// stable key (--bp-device) that the worker maps to a Playwright device name.
+func (t *Tiny) browserArgs(r store.Run, p project.Project) []string {
+	args := []string{"--live-url=" + t.DirectorURL + "/live/" + r.Token,
+		"--headless", "--isolated", "--no-sandbox", "--browser=chromium", "--output-dir=/workspace/out"}
+	device := personaDevice(r, p)
+	if pd, viewport := project.DeviceLaunch(device); pd != "" {
+		args = append(args, "--bp-device="+device)
+	} else {
+		args = append(args, "--viewport-size="+viewport)
+	}
+	return append(args, "--caps=devtools")
+}
+
+func personaDevice(r store.Run, p project.Project) string {
+	for _, role := range p.Roles {
+		if role.Name != r.Role {
+			continue
+		}
+		for _, pe := range role.Personas {
+			if pe.Name == r.Persona {
+				return pe.Profile.Device
+			}
+		}
+	}
+	return ""
 }

@@ -3,6 +3,7 @@ package launcher
 import (
 	"context"
 	"fmt"
+	"os"
 	"regexp"
 	"strings"
 	"testing"
@@ -95,10 +96,10 @@ func TestStartCreatesSessionWithBothMCPServers(t *testing.T) {
 		t.Errorf("bp = %v", bp)
 	}
 	pw := servers[1]
-	if pw.Name != "pw" || pw.Command != "playwright-mcp" {
+	if pw.Name != "pw" || pw.Command != "bp-browser" {
 		t.Errorf("pw = %v", pw)
 	}
-	want := []string{"--headless", "--isolated", "--no-sandbox", "--browser=chromium",
+	want := []string{"--live-url=http://bp-director.bp.svc:8080/live/tok123", "--headless", "--isolated", "--no-sandbox", "--browser=chromium",
 		"--output-dir=/workspace/out", "--viewport-size=1280x800", "--caps=devtools"}
 	if strings.Join(pw.Args, " ") != strings.Join(want, " ") {
 		t.Errorf("args = %v", pw.Args)
@@ -440,5 +441,74 @@ func TestPhaseFailsUnschedulablePodAfterGrace(t *testing.T) {
 	ph, ok, msg, err := tn.Phase(context.Background(), name)
 	if err != nil || !ok || ph != "Failed" || !strings.Contains(msg, "Insufficient memory") {
 		t.Errorf("got %q %v %q %v", ph, ok, msg, err)
+	}
+}
+
+func deviceProject(device string) project.Project {
+	return project.Project{Roles: []project.Role{{Name: "visitor", Personas: []project.Persona{
+		{Name: "ann", Profile: project.Profile{Device: device}},
+	}}}}
+}
+
+func pwArgs(t *testing.T, device string) []string {
+	t.Helper()
+	tn := newTiny()
+	r := store.Run{ID: "eeeeeeee11", Token: "tk", Role: "visitor", Persona: "ann"}
+	name, err := tn.Start(context.Background(), r, deviceProject(device))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pw := getSession(t, tn, name).Spec.MCPServers[1]
+	if pw.Command != "bp-browser" {
+		t.Fatalf("command = %q", pw.Command)
+	}
+	for _, a := range pw.Args {
+		if strings.ContainsAny(a, " \t\"'\\") {
+			t.Errorf("arg %q breaks tiny's CRD pattern", a)
+		}
+	}
+	return pw.Args
+}
+
+func TestStartLaunchesPersonaDevice(t *testing.T) {
+	args := strings.Join(pwArgs(t, "iphone-15"), " ")
+	if !strings.Contains(args, "--bp-device=iphone-15") || strings.Contains(args, "--viewport-size") {
+		t.Errorf("phone args = %s", args)
+	}
+	for _, f := range []string{"--live-url=http://bp-director.bp.svc:8080/live/tk", "--headless", "--isolated", "--no-sandbox", "--browser=chromium", "--output-dir=/workspace/out", "--caps=devtools"} {
+		if !strings.Contains(args, f) {
+			t.Errorf("missing %s in %s", f, args)
+		}
+	}
+	args = strings.Join(pwArgs(t, "desktop-large"), " ")
+	if !strings.Contains(args, "--viewport-size=1920x1080") || strings.Contains(args, "--bp-device") {
+		t.Errorf("desktop args = %s", args)
+	}
+	args = strings.Join(pwArgs(t, ""), " ")
+	if !strings.Contains(args, "--viewport-size=1280x800") || strings.Contains(args, "--bp-device") {
+		t.Errorf("no-profile args = %s", args)
+	}
+}
+
+func TestWorkerDeviceTableMatches(t *testing.T) {
+	b, err := os.ReadFile("../../worker/bp-browser")
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := string(b)
+	for _, f := range project.ProfileFields {
+		if f.Key != "device" {
+			continue
+		}
+		for _, o := range f.Options {
+			pd, _ := project.DeviceLaunch(o.Value)
+			if pd == "" {
+				continue
+			}
+			want := o.Value + `) name="` + pd + `" ;;`
+			if !strings.Contains(script, want) {
+				t.Errorf("worker/bp-browser lacks %q", want)
+			}
+		}
 	}
 }
