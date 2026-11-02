@@ -231,7 +231,18 @@ func (s *server) getRun(w http.ResponseWriter, r *http.Request) {
 	if names == nil {
 		names = []string{}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"run": redact(run), "bugs": bugs, "artifacts": names})
+	out := map[string]any{"run": redact(run), "bugs": bugs, "artifacts": names}
+	if isActive(run.State) {
+		if run.Session != "" {
+			if stage, err := s.svc.Launcher.Stage(r.Context(), run.Session); err == nil && stage != "" {
+				out["stage"] = stage
+			}
+		}
+		if s.hub != nil && s.hub.HasFrame(id) {
+			out["live"] = true
+		}
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 // artifactTypes pins the content types we serve; anything else is opaque.

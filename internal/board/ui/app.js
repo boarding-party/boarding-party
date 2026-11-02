@@ -366,7 +366,24 @@ function RunsTable({ runs }) {
 // The live screen: a multipart JPEG stream shown in an <img>. The stream can
 // end while the run is still going (the director caps one connection), so on
 // an error we check the run and, if it is still active, connect again.
-function LiveView({ id }) {
+const STAGE_TEXT = {
+  'waiting-for-node': ['Starting a machine for this run', 'Takes a minute or two when no machine is running.'],
+  'starting': ['Starting the run', 'Pulling the browser image and starting the agent.'],
+  'running': ['The agent is getting ready', 'The screen appears when it opens the browser.'],
+};
+
+// What the run is doing before its first frame; text only.
+function LiveStatus({ stage, started }) {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => { const t = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(t); }, []);
+  const t0 = started ? Date.parse(started) : NaN;
+  const secs = Number.isFinite(t0) ? Math.max(0, Math.floor((now - t0) / 1000)) : null;
+  const text = STAGE_TEXT[stage];
+  if (!text) return html`<p class="livewait">Waiting for the first frame…${secs === null ? '' : ' · ' + secs + ' s'}</p>`;
+  return html`<div class="livewait livestatus"><p>${text[0]}${secs === null ? '' : ' · ' + secs + ' s'}</p><p class="muted small">${text[1]}</p></div>`;
+}
+
+function LiveView({ id, stage, started }) {
   const [shown, setShown] = useState(false);
   const [nonce, setNonce] = useState(0);
   const timer = useRef(0);
@@ -400,7 +417,7 @@ function LiveView({ id }) {
     <img class="livefeed" src=${src} alt="Live view of the run" onLoad=${() => setShown(true)} onError=${lost}
       style=${shown ? '' : 'visibility:hidden'} />
     <span class="livetag"><span class="dot live"></span> Live</span>
-    ${shown ? null : html`<p class="livewait">Waiting for the first frame…</p>`}`;
+    ${shown ? null : html`<${LiveStatus} stage=${stage} started=${started} />`}`;
 }
 
 function RunPage({ id, onChange }) {
@@ -468,7 +485,7 @@ function RunPage({ id, onChange }) {
       <div class="grid g-side">
         <div class="stack">
           <div class=${'player' + (ACTIVE.has(run.state) ? ' live' : '')}>
-            ${ACTIVE.has(run.state) ? html`<${LiveView} key=${run.id} id=${run.id} />` : webm ? html`<video ref=${video} key=${webm} src=${artifactURL(run.id, webm)} controls preload="metadata" playsinline
+            ${ACTIVE.has(run.state) ? html`<${LiveView} key=${run.id} id=${run.id} stage=${data.stage} started=${run.started} />` : webm ? html`<video ref=${video} key=${webm} src=${artifactURL(run.id, webm)} controls preload="metadata" playsinline
                 onLoadedMetadata=${(e) => { const d = e.currentTarget.duration; setDuration(d > 0 ? d : 0); }}></video>`
               : html`<p>This run has no recording.</p>`}
           </div>

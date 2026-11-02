@@ -212,6 +212,34 @@ func (t *Tiny) LivePods(ctx context.Context) (int, error) {
 	return n, nil
 }
 
+// Stage reports how far the session's pod has got: "waiting-for-node" while
+// it has no node, "starting" with no pod yet or while its containers are not
+// all ready, and "running" once it is Ready.
+func (t *Tiny) Stage(ctx context.Context, name string) (string, error) {
+	l := &corev1.PodList{}
+	if err := t.Client.List(ctx, l, client.InNamespace(t.Namespace),
+		client.MatchingLabels{podAppLabel: podAppValue, session.SessionLabel: name}); err != nil {
+		return "", fmt.Errorf("list pods: %w", err)
+	}
+	stage := "starting"
+	for _, p := range l.Items {
+		if p.Spec.NodeName == "" {
+			for _, c := range p.Status.Conditions {
+				if c.Type == corev1.PodScheduled && c.Status == corev1.ConditionFalse {
+					return "waiting-for-node", nil
+				}
+			}
+			continue
+		}
+		for _, c := range p.Status.Conditions {
+			if c.Type == corev1.PodReady && c.Status == corev1.ConditionTrue {
+				return "running", nil
+			}
+		}
+	}
+	return stage, nil
+}
+
 // browserArgs builds the bp-browser arguments. tiny's CRD rejects MCP args
 // with whitespace, quotes or backslashes, so a phone or tablet goes as a
 // stable key (--bp-device) that the worker maps to a Playwright device name.

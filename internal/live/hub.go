@@ -88,6 +88,14 @@ func (h *Hub) Subscribe(runID string) (<-chan []byte, func()) {
 	}
 }
 
+// HasFrame reports whether the run has a frame held right now.
+func (h *Hub) HasFrame(runID string) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	e := h.runs[runID]
+	return e != nil && e.frame != nil
+}
+
 // Sweep drops the frame of runs idle for IdleTTL, and the run itself unless
 // it still has subscribers.
 func (h *Hub) Sweep(now time.Time) {

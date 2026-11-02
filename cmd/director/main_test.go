@@ -169,3 +169,5 @@ func TestTinyVersionFromThisBinary(t *testing.T) {
 		t.Errorf("tinyVersion = %q", v)
 	}
 }
+
+func (fakeLauncher) Stage(context.Context, string) (string, error) { return "running", nil }

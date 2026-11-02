@@ -48,6 +48,9 @@ type Launcher interface {
 	// LivePods counts the pods of run sessions that still exist. A deleted
 	// session's pod outlives it briefly.
 	LivePods(ctx context.Context) (int, error)
+	// Stage says how far a session's pod has got: "starting" (no pod yet, or
+	// image pull and init), "waiting-for-node" (unscheduled) or "running".
+	Stage(ctx context.Context, session string) (string, error)
 }
 
 type Service struct {

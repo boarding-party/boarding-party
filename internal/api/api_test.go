@@ -33,6 +33,7 @@ func (noopLauncher) Phase(context.Context, string) (string, bool, string, error)
 
 func (noopLauncher) Sessions(context.Context) (map[string]string, error) { return nil, nil }
 func (noopLauncher) LivePods(context.Context) (int, error)               { return 0, nil }
+func (noopLauncher) Stage(context.Context, string) (string, error)       { return "running", nil }
 
 const projYAML = `name: p
 sites: ["https://x.test"]
@@ -585,5 +586,31 @@ func TestProfileFieldsEndpoint(t *testing.T) {
 	}
 	if strings.Contains(string(b), "uide") || !strings.Contains(string(b), `"key"`) || !strings.Contains(string(b), `"value"`) {
 		t.Fatalf("keys: %s", b)
+	}
+}
+
+func TestGetRunStageAndLive(t *testing.T) {
+	srv, w, svc := setupBoth(t, 1024)
+	run := startRun(t, srv, svc)
+	get := func() map[string]any {
+		var d map[string]any
+		json.NewDecoder(do(t, "GET", srv.URL+"/api/runs/"+run.ID, "").Body).Decode(&d)
+		return d
+	}
+	d := get()
+	if d["stage"] != "running" || d["live"] != nil {
+		t.Fatalf("before frame: %v", d)
+	}
+	if r := do(t, "PUT", w.URL+"/live/"+run.Token, "\xff\xd8x"); r.StatusCode != 204 {
+		t.Fatalf("put live: %d", r.StatusCode)
+	}
+	if d = get(); d["stage"] != "running" || d["live"] != true {
+		t.Fatalf("after frame: %v", d)
+	}
+	if err := svc.Finish(context.Background(), run.Token, store.RunDone, "ok"); err != nil {
+		t.Fatal(err)
+	}
+	if d = get(); d["stage"] != nil || d["live"] != nil {
+		t.Fatalf("finished run: %v", d)
 	}
 }

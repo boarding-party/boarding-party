@@ -512,3 +512,47 @@ func TestWorkerDeviceTableMatches(t *testing.T) {
 		}
 	}
 }
+
+func TestStage(t *testing.T) {
+	cond := func(typ corev1.PodConditionType, st corev1.ConditionStatus) []corev1.PodCondition {
+		return []corev1.PodCondition{{Type: typ, Status: st}}
+	}
+	cases := []struct {
+		name string
+		pod  *corev1.Pod
+		want string
+	}{
+		{"no pod", nil, "starting"},
+		{"unscheduled", func() *corev1.Pod {
+			p := pod("bp", "p", "tiny-session", "bp-run-1")
+			p.Status.Conditions = cond(corev1.PodScheduled, corev1.ConditionFalse)
+			return p
+		}(), "waiting-for-node"},
+		{"pulling", func() *corev1.Pod {
+			p := pod("bp", "p", "tiny-session", "bp-run-1")
+			p.Spec.NodeName = "n1"
+			p.Status.Conditions = cond(corev1.PodReady, corev1.ConditionFalse)
+			return p
+		}(), "starting"},
+		{"ready", func() *corev1.Pod {
+			p := pod("bp", "p", "tiny-session", "bp-run-1")
+			p.Spec.NodeName = "n1"
+			p.Status.Conditions = cond(corev1.PodReady, corev1.ConditionTrue)
+			return p
+		}(), "running"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			tn := newTiny()
+			if c.pod != nil {
+				if err := tn.Client.Create(context.Background(), c.pod); err != nil {
+					t.Fatal(err)
+				}
+			}
+			got, err := tn.Stage(context.Background(), "bp-run-1")
+			if err != nil || got != c.want {
+				t.Errorf("Stage = %q %v, want %q", got, err, c.want)
+			}
+		})
+	}
+}

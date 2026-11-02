@@ -56,6 +56,31 @@ type Launcher struct {
 
 	mu       sync.Mutex
 	sessions map[string]string // session -> run ID
+	started  map[string]time.Time
+}
+
+// Fake start-up timeline so the board's pre-frame status can be seen:
+// waiting for a node, then starting, then running, then the first frame.
+const (
+	fakeNodeAfter    = 4 * time.Second
+	fakeRunningAfter = 8 * time.Second
+	fakeFrameAfter   = 11 * time.Second
+)
+
+func (l *Launcher) Stage(_ context.Context, session string) (string, error) {
+	l.mu.Lock()
+	t0, ok := l.started[session]
+	l.mu.Unlock()
+	if !ok {
+		return "starting", nil
+	}
+	switch d := time.Since(t0); {
+	case d < fakeNodeAfter:
+		return "waiting-for-node", nil
+	case d < fakeRunningAfter:
+		return "starting", nil
+	}
+	return "running", nil
 }
 
 func (l *Launcher) SessionName(runID string) string { return "fake-" + runID }
@@ -67,6 +92,10 @@ func (l *Launcher) Start(ctx context.Context, r store.Run, _ project.Project) (s
 		l.sessions = map[string]string{}
 	}
 	l.sessions[name] = r.ID
+	if l.started == nil {
+		l.started = map[string]time.Time{}
+	}
+	l.started[name] = time.Now()
 	l.mu.Unlock()
 	go l.finishLater(r)
 	if l.Hub != nil {
@@ -83,6 +112,9 @@ func (l *Launcher) publishFrames(r store.Run) {
 	for range tick.C {
 		if _, err := l.Svc.Active(r.Token); err != nil {
 			return
+		}
+		if time.Since(begin) < fakeFrameAfter {
+			continue
 		}
 		if b := fakeFrame(time.Since(begin)); b != nil {
 			l.Hub.Publish(r.ID, b)

@@ -10,11 +10,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/boarding-party/boardingparty/internal/artifacts"
 	"github.com/boarding-party/boardingparty/internal/project"
 	"github.com/boarding-party/boardingparty/internal/runs"
 	"github.com/boarding-party/boardingparty/internal/store"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 type fakeLauncher struct{ mu sync.Mutex }
@@ -278,3 +278,5 @@ func TestCrossRunIsolation(t *testing.T) {
 		t.Errorf("run B affected: %+v", rb)
 	}
 }
+
+func (f *fakeLauncher) Stage(context.Context, string) (string, error) { return "running", nil }

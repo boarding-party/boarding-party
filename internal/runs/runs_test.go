@@ -38,6 +38,8 @@ func (f *fakeLauncher) LivePods(context.Context) (int, error) {
 	return f.pods, f.podsErr
 }
 
+func (f *fakeLauncher) Stage(context.Context, string) (string, error) { return "running", nil }
+
 func (f *fakeLauncher) Sessions(context.Context) (map[string]string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

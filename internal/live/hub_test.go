@@ -87,3 +87,19 @@ func TestSweepKeepsSubscribedRuns(t *testing.T) {
 		t.Fatal("subscriber got nothing")
 	}
 }
+
+func TestHasFrame(t *testing.T) {
+	h := NewHub()
+	if h.HasFrame("r") {
+		t.Fatal("frame before publish")
+	}
+	_, cancel := h.Subscribe("r")
+	defer cancel()
+	if h.HasFrame("r") {
+		t.Fatal("subscribe alone is not a frame")
+	}
+	h.Publish("r", []byte("f"))
+	if !h.HasFrame("r") {
+		t.Fatal("no frame after publish")
+	}
+}
