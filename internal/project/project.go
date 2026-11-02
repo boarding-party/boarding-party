@@ -90,6 +90,8 @@ type Persona struct {
 	Name     string            `json:"name"`
 	Traits   []string          `json:"traits"`   // e.g. "impatient", "phone"
 	Identity map[string]string `json:"identity"` // synthetic: email, password, address...
+	// Profile is the persona's structured background (device, age, ...).
+	Profile Profile `json:"profile,omitempty"`
 }
 
 type Story struct {
@@ -172,6 +174,9 @@ func (p Project) validate() error {
 				return fmt.Errorf("duplicate persona %q", pe.Name)
 			}
 			personas[pe.Name] = true
+			if err := pe.Profile.validate(); err != nil {
+				return fmt.Errorf("persona %q: %w", pe.Name, err)
+			}
 		}
 		for _, st := range r.Stories {
 			if st.Goal == "" {

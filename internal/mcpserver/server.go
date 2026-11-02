@@ -56,6 +56,8 @@ type persona struct {
 	Role     string            `json:"role"`
 	Traits   []string          `json:"traits"`
 	Identity map[string]string `json:"identity"`
+	Profile  map[string]string `json:"profile"`
+	Guidance []string          `json:"guidance"`
 }
 
 type story struct {
@@ -122,6 +124,7 @@ func newServer(svc *runs.Service, st *store.Store, directorURL, token string) *m
 				for _, pe := range role.Personas {
 					if pe.Name == r.Persona {
 						a.Persona.Traits, a.Persona.Identity = pe.Traits, pe.Identity
+						a.Persona.Profile, a.Persona.Guidance = pe.Profile.Labels(), pe.Profile.Guidance()
 					}
 				}
 				for _, sy := range role.Stories {

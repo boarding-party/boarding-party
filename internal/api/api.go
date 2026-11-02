@@ -63,6 +63,7 @@ func admin(svc *runs.Service, maxBytes int64, token string, hub *live.Hub) (*ser
 	mux.HandleFunc("POST /api/project", s.putProject)
 	mux.HandleFunc("PUT /api/project", s.putProjectJSON)
 	mux.HandleFunc("GET /api/project", s.getProject)
+	mux.HandleFunc("GET /api/profile-fields", s.getProfileFields)
 	mux.HandleFunc("POST /api/runs", s.startRun)
 	mux.HandleFunc("GET /api/runs", s.listRuns)
 	mux.HandleFunc("GET /api/runs/{id}", s.getRun)
@@ -371,4 +372,30 @@ func (s *server) streamLive(w http.ResponseWriter, r *http.Request) {
 			fl.Flush()
 		}
 	}
+}
+
+// profileOption and profileField are the wire shape of project.ProfileFields;
+// the Guide sentences stay server-side.
+type profileOption struct {
+	Value string `json:"value"`
+	Label string `json:"label"`
+}
+
+type profileField struct {
+	Key     string          `json:"key"`
+	Label   string          `json:"label"`
+	Hint    string          `json:"hint"`
+	Options []profileOption `json:"options"`
+}
+
+func (s *server) getProfileFields(w http.ResponseWriter, _ *http.Request) {
+	out := make([]profileField, 0, len(project.ProfileFields))
+	for _, f := range project.ProfileFields {
+		pf := profileField{Key: f.Key, Label: f.Label, Hint: f.Hint, Options: make([]profileOption, 0, len(f.Options))}
+		for _, o := range f.Options {
+			pf.Options = append(pf.Options, profileOption{o.Value, o.Label})
+		}
+		out = append(out, pf)
+	}
+	writeJSON(w, http.StatusOK, out)
 }

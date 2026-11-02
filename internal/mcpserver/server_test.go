@@ -43,6 +43,7 @@ func setup(t *testing.T) (*runs.Service, *store.Store, *httptest.Server, store.R
 	p := project.Project{Name: "p", Sites: []string{"https://x.test"}, Roles: []project.Role{{
 		Name: "buyer",
 		Personas: []project.Persona{{Name: "ann", Traits: []string{"impatient"},
+			Profile:  project.Profile{Device: "iphone-15", Patience: "impatient"},
 			Identity: map[string]string{"email": "ann@example.test"}}},
 		Stories: []project.Story{{Name: "checkout", Goal: "buy a thing"}},
 	}}}
@@ -101,6 +102,8 @@ func TestNextAssignmentReturnsPersonaAndStory(t *testing.T) {
 			Role     string            `json:"role"`
 			Traits   []string          `json:"traits"`
 			Identity map[string]string `json:"identity"`
+			Profile  map[string]string `json:"profile"`
+			Guidance []string          `json:"guidance"`
 		} `json:"persona"`
 		Story struct {
 			Name string `json:"name"`
@@ -115,6 +118,9 @@ func TestNextAssignmentReturnsPersonaAndStory(t *testing.T) {
 	}
 	if got.Persona.Name != "ann" || got.Persona.Identity["email"] != "ann@example.test" || got.Persona.Traits[0] != "impatient" {
 		t.Errorf("persona: %+v", got.Persona)
+	}
+	if got.Persona.Profile["device"] != "iPhone 15" || got.Persona.Profile["patience"] != "Gives up quickly" || len(got.Persona.Profile) != 2 || len(got.Persona.Guidance) != 2 {
+		t.Errorf("profile: %+v", got.Persona)
 	}
 	if got.Story.Name != "checkout" || got.Story.Goal != "buy a thing" {
 		t.Errorf("story: %+v", got.Story)

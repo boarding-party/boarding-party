@@ -275,7 +275,7 @@ func TestStartRunUnknownPersonaIs400(t *testing.T) {
 
 const fullProject = `{"name":"shop","sites":["https://a.test","https://b.test"],"extraHosts":["cdn.test"],"model":"m-1","nodePool":"pool=runs","resources":{"cpu":"500m","memory":"2Gi"},
 "roles":[{"name":"buyer","description":"buys","canWatchRecordings":true,
-"personas":[{"name":"ann","traits":["impatient","phone"],"identity":{"email":"a@x.test","password":"pw"}}],
+"personas":[{"name":"ann","traits":["impatient","phone"],"profile":{"device":"iphone-15","techLevel":"new","assistive":"zoom"},"identity":{"email":"a@x.test","password":"pw"}}],
 "stories":[{"name":"checkout","goal":"buy a thing"}]}]}`
 
 func doJSON(t *testing.T, method, url, body string) *http.Response {
@@ -566,5 +566,24 @@ func TestWorkerUnaffectedByAdminGuard(t *testing.T) {
 	}
 	if c := raw(t, "GET", w.URL+"/healthz", "", h); c != 200 {
 		t.Errorf("worker healthz = %d", c)
+	}
+}
+
+func TestProfileFieldsEndpoint(t *testing.T) {
+	srv, _ := setup(t, 0)
+	r := do(t, "GET", srv.URL+"/api/profile-fields", "")
+	if r.StatusCode != 200 {
+		t.Fatalf("status %d", r.StatusCode)
+	}
+	b, _ := io.ReadAll(r.Body)
+	var got []struct {
+		Key, Label, Hint string
+		Options          []struct{ Value, Label string }
+	}
+	if err := json.Unmarshal(b, &got); err != nil || len(got) != len(project.ProfileFields) || got[0].Key != "device" || len(got[0].Options) == 0 {
+		t.Fatalf("%v: %s", err, b)
+	}
+	if strings.Contains(string(b), "uide") || !strings.Contains(string(b), `"key"`) || !strings.Contains(string(b), `"value"`) {
+		t.Fatalf("keys: %s", b)
 	}
 }
