@@ -350,7 +350,7 @@ function RunsTable({ runs }) {
             <tr class="click" key=${r.id} onClick=${open(r.id)}>
               <td><a href=${runHref(r.id)} onClick=${(e) => e.stopPropagation()}>${r.persona}</a>
                 ${r.role ? html`<div class="small muted">${r.role}</div>` : null}</td>
-              <td>${r.story}</td>
+              <td>${r.story}${ACTIVE.has(r.state) ? html` <a class="small" href=${runHref(r.id)} onClick=${(e) => e.stopPropagation()}>Watch</a>` : null}</td>
               <td><${StateTag} state=${r.state} /></td>
               <td class="when" title=${fmtFull(r.started)}>${fmtWhen(r.started)}</td>
               <td class="outcome" title=${firstLine(r.outcome)}>${firstLine(r.outcome) || html`<span class="muted">${ACTIVE.has(r.state) ? 'In progress' : '—'}</span>`}</td>
@@ -361,6 +361,32 @@ function RunsTable({ runs }) {
 }
 
 // ---- run detail ---------------------------------------------------------
+
+// The live screen: a multipart JPEG stream shown in an <img>. The stream can
+// end while the run is still going (the director caps one connection), so on
+// an error we check the run and, if it is still active, connect again.
+function LiveView({ id }) {
+  const [shown, setShown] = useState(false);
+  const [nonce, setNonce] = useState(0);
+  const timer = useRef(0);
+  useEffect(() => () => clearTimeout(timer.current), []);
+  const lost = async () => {
+    setShown(false);
+    clearTimeout(timer.current);
+    let again = true;
+    try {
+      const d = await api(`/api/runs/${encodeURIComponent(id)}`);
+      again = !!(d && d.run && ACTIVE.has(d.run.state));
+    } catch (e) { /* director unreachable: keep trying while this view is mounted */ }
+    if (again) timer.current = setTimeout(() => setNonce((n) => n + 1), 2000);
+  };
+  const src = `/api/runs/${encodeURIComponent(id)}/live` + (nonce ? `?t=${nonce}` : '');
+  return html`
+    <img class="livefeed" src=${src} alt="Live view of the run" onLoad=${() => setShown(true)} onError=${lost}
+      style=${shown ? '' : 'visibility:hidden'} />
+    <span class="livetag"><span class="dot live"></span> Live</span>
+    ${shown ? null : html`<p class="livewait">Waiting for the first frame…</p>`}`;
+}
 
 function RunPage({ id, onChange }) {
   const [data, setData] = useState(null);
@@ -426,10 +452,10 @@ function RunPage({ id, onChange }) {
       ${err ? html`<div class="note bad banner">Lost contact with the director: ${err}. ${gaveUp ? 'Reload the page to try again.' : 'Retrying.'}</div>` : null}
       <div class="grid g-side">
         <div class="stack">
-          <div class="player">
-            ${webm ? html`<video ref=${video} key=${webm} src=${artifactURL(run.id, webm)} controls preload="metadata" playsinline
+          <div class=${'player' + (ACTIVE.has(run.state) ? ' live' : '')}>
+            ${ACTIVE.has(run.state) ? html`<${LiveView} key=${run.id} id=${run.id} />` : webm ? html`<video ref=${video} key=${webm} src=${artifactURL(run.id, webm)} controls preload="metadata" playsinline
                 onLoadedMetadata=${(e) => { const d = e.currentTarget.duration; setDuration(d > 0 ? d : 0); }}></video>`
-              : html`<p>${ACTIVE.has(run.state) ? 'The recording appears here when the run finishes.' : 'This run has no recording.'}</p>`}
+              : html`<p>This run has no recording.</p>`}
           </div>
           <div class="card">
             <div class="row between"><h2>Bugs</h2><span class="small muted">${bugs.length && webm ? 'Click a bug with a time to jump to it.' : ''}</span></div>

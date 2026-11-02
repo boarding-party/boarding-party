@@ -12,6 +12,10 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"image"
+	"image/color"
+	"image/draw"
+	"image/jpeg"
 	"net"
 	"net/http"
 	"os"
@@ -48,6 +52,7 @@ const SampleArtifact = "run.webm"
 type Launcher struct {
 	Duration time.Duration
 	Svc      *runs.Service // set after the Service is built
+	Hub      *live.Hub     // receives a fake frame every 500 ms while a run is active
 
 	mu       sync.Mutex
 	sessions map[string]string // session -> run ID
@@ -64,7 +69,48 @@ func (l *Launcher) Start(ctx context.Context, r store.Run, _ project.Project) (s
 	l.sessions[name] = r.ID
 	l.mu.Unlock()
 	go l.finishLater(r)
+	if l.Hub != nil {
+		go l.publishFrames(r)
+	}
 	return name, nil
+}
+
+// publishFrames feeds the hub a generated frame twice a second until the run ends.
+func (l *Launcher) publishFrames(r store.Run) {
+	begin := time.Now()
+	tick := time.NewTicker(500 * time.Millisecond)
+	defer tick.Stop()
+	for range tick.C {
+		if _, err := l.Svc.Active(r.Token); err != nil {
+			return
+		}
+		if b := fakeFrame(time.Since(begin)); b != nil {
+			l.Hub.Publish(r.ID, b)
+		}
+	}
+}
+
+// fakeFrame draws a phone-shaped JPEG whose colour drifts with the elapsed
+// time and whose block row counts the seconds, so a live view visibly moves.
+func fakeFrame(elapsed time.Duration) []byte {
+	const w, h = 180, 320
+	secs := int(elapsed / time.Second)
+	img := image.NewRGBA(image.Rect(0, 0, w, h))
+	bg := color.RGBA{R: uint8(40 + secs*7%120), G: uint8(90 + secs*13%100), B: uint8(160 - secs*5%100), A: 255}
+	draw.Draw(img, img.Bounds(), &image.Uniform{bg}, image.Point{}, draw.Src)
+	white := &image.Uniform{color.RGBA{255, 255, 255, 255}}
+	for i := 0; i <= secs%30; i++ { // one block per elapsed second, wrapping
+		x, y := 8+(i%10)*17, 20+(i/10)*20
+		draw.Draw(img, image.Rect(x, y, x+12, y+14), white, image.Point{}, draw.Src)
+	}
+	// a block sweeping down the screen at half-second steps
+	y := int(elapsed/(500*time.Millisecond)) * 10 % (h - 20)
+	draw.Draw(img, image.Rect(0, 100+y%200, w, 110+y%200), &image.Uniform{color.RGBA{20, 20, 20, 255}}, image.Point{}, draw.Src)
+	var buf bytes.Buffer
+	if jpeg.Encode(&buf, img, &jpeg.Options{Quality: 60}) != nil {
+		return nil
+	}
+	return buf.Bytes()
 }
 
 func (l *Launcher) finishLater(r store.Run) {
@@ -156,7 +202,8 @@ func start(ctx context.Context, dir string, projectYAML []byte, duration time.Du
 		st.Close()
 		return nil, err
 	}
-	l := &Launcher{Duration: duration}
+	hub := live.NewHub()
+	l := &Launcher{Duration: duration, Hub: hub}
 	svc := &runs.Service{
 		Store:     st,
 		Artifacts: artifacts.NewFS(filepath.Join(dir, "artifacts"), api.MaxArtifactBytes),
@@ -174,7 +221,7 @@ func start(ctx context.Context, dir string, projectYAML []byte, duration time.Du
 		st.Close()
 		return nil, err
 	}
-	srv := &http.Server{Handler: api.Admin(svc, 0, token, live.NewHub()), ReadHeaderTimeout: 10 * time.Second}
+	srv := &http.Server{Handler: api.Admin(svc, 0, token, hub), ReadHeaderTimeout: 10 * time.Second}
 	go func() {
 		if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			fmt.Fprintln(os.Stderr, "dev director:", err)

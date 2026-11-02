@@ -677,3 +677,48 @@ func TestNewToken(t *testing.T) {
 		t.Errorf("tokens %q %q", a, b)
 	}
 }
+
+func TestProxyStreamsWithoutBuffering(t *testing.T) {
+	release := make(chan struct{})
+	dir := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "multipart/x-mixed-replace; boundary=frame")
+		io.WriteString(w, "--frame\r\nContent-Type: image/jpeg\r\nContent-Length: 4\r\n\r\nJPEG\r\n")
+		w.(http.Flusher).Flush()
+		select { // hold the stream open until the test has read the first part
+		case <-release:
+		case <-r.Context().Done():
+		}
+	}))
+	defer dir.Close()
+	defer close(release)
+	h, _ := newTestHandler(t, &fakeForwarder{bases: []string{dir.URL}})
+	front := httptest.NewServer(h)
+	defer front.Close()
+	req, _ := http.NewRequest(http.MethodGet, front.URL+"/api/runs/r1/live", nil)
+	req.Host = testHost
+	authed(h, req)
+	type result struct {
+		line string
+		err  error
+	}
+	got := make(chan result, 1)
+	go func() {
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			got <- result{err: err}
+			return
+		}
+		defer resp.Body.Close()
+		buf := make([]byte, len("--frame"))
+		_, err = io.ReadFull(resp.Body, buf)
+		got <- result{line: string(buf), err: err}
+	}()
+	select {
+	case r := <-got:
+		if r.err != nil || r.line != "--frame" {
+			t.Fatalf("first part = %q, %v", r.line, r.err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("first part not delivered within 1s: proxy is buffering the stream")
+	}
+}
