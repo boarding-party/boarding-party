@@ -1,0 +1,40 @@
+#!/bin/sh
+# MCP stdio launcher: starts the screen streamer once per pod, then execs Playwright MCP.
+# Nothing may be written to stdout here; it belongs to the MCP protocol.
+live=""
+device=""
+n=$#
+while [ "$n" -gt 0 ]; do
+  a="$1"; shift; n=$((n - 1))
+  case "$a" in
+    --live-url=*) live="${a#--live-url=}" ;;
+    --bp-device=*) device="${a#--bp-device=}" ;;
+    *) set -- "$@" "$a" ;;
+  esac
+done
+
+if [ -n "$live" ]; then
+  pid=""
+  [ -f /tmp/bp-screen.pid ] && pid=$(cat /tmp/bp-screen.pid 2>/dev/null)
+  if [ -z "$pid" ] || ! kill -0 "$pid" 2>/dev/null; then
+    node /opt/bp/bp-screen.mjs "--live-url=$live" >>/tmp/bp-screen.log 2>&1 &
+    echo $! >/tmp/bp-screen.pid
+  fi
+fi
+
+name=""
+case "$device" in
+  "") ;;
+  iphone-15) name="iPhone 15" ;;
+  iphone-15-pro-max) name="iPhone 15 Pro Max" ;;
+  pixel-7) name="Pixel 7" ;;
+  galaxy-s24) name="Galaxy S24" ;;
+  ipad) name="iPad (gen 11)" ;;
+  ipad-mini) name="iPad Mini" ;;
+  *) echo "bp-browser: ignoring unknown --bp-device value" >&2 ;;
+esac
+
+if [ -n "$name" ]; then
+  exec playwright-mcp --config /opt/bp/pw-config.json "$@" "--device=$name"
+fi
+exec playwright-mcp --config /opt/bp/pw-config.json "$@"

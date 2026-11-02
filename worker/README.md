@@ -82,3 +82,18 @@ All as `--user 1000 --cap-drop ALL --security-opt no-new-privileges` (Docker's d
 
 Not yet verified: running under tiny itself (needs push to ghcr and a cluster), and
 linux/amd64 (local build was arm64; build the pushed image for the cluster's architecture).
+
+## Live screen (`bp-browser`)
+
+The director launches Playwright MCP as `bp-browser --live-url=<url> [--bp-device=<key>] <playwright-mcp args>`.
+It starts `bp-screen` once per pod (pidfile `/tmp/bp-screen.pid`, log `/tmp/bp-screen.log`), then `exec`s
+`playwright-mcp --config /opt/bp/pw-config.json ...`. The config makes Chromium listen for CDP on
+`127.0.0.1:9222` (pod-local only). `bp-screen` attaches to the newest page, runs a CDP screencast
+(JPEG, quality 60, max 1280) and PUTs frames to the live URL: every 250 ms while the director reports
+watchers (`X-Bp-Watchers` > 0), otherwise every 5 s, one request in flight. A 404 or 410 means the run is over
+and it stops. The agent never sees frames. Nothing is written to stdout (MCP stdio owns it).
+
+`--bp-device` keys: `iphone-15`, `iphone-15-pro-max`, `pixel-7`, `galaxy-s24`, `ipad`, `ipad-mini`
+(mapped to Playwright `--device`); unknown values are ignored.
+
+Smoke test: `docker run --rm bp-worker:dev node /opt/bp/smoke/screen-smoke.mjs` (expects `ok N frames`).

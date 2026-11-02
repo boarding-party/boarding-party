@@ -61,3 +61,8 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha,scope=${{ matrix.image }}
           cache-to: type=gha,mode=max,scope=${{ matrix.image }}
+      - name: Smoke test worker screen streaming
+        if: matrix.image == 'worker'
+        run: |
+          docker buildx build --platform linux/amd64 --load -t bp-worker:smoke worker
+          docker run --rm bp-worker:smoke node /opt/bp/smoke/screen-smoke.mjs

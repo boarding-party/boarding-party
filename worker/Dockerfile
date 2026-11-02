@@ -20,4 +20,13 @@ RUN npm i -g @playwright/mcp@${PLAYWRIGHT_MCP_VERSION} && npm cache clean --forc
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 RUN playwright-mcp install-browser chrome-for-testing \
     && chmod -R a+rX /ms-playwright
+
+# Live-screen streaming: bp-browser launches bp-screen and then Playwright MCP.
+# /opt/bp is also mounted over by the smoke test (docker run -v worker:/opt/bp).
+COPY bp-screen.mjs pw-config.json /opt/bp/
+COPY smoke/ /opt/bp/smoke/
+COPY bp-browser /opt/bp/bp-browser
+COPY bp-browser /usr/local/bin/bp-browser
+RUN chmod 0755 /opt/bp/bp-browser /usr/local/bin/bp-browser && chmod -R a+rX /opt/bp
+
 WORKDIR /workspace
