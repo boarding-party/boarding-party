@@ -21,6 +21,7 @@ import (
 
 	"github.com/boarding-party/boardingparty/internal/api"
 	"github.com/boarding-party/boardingparty/internal/artifacts"
+	"github.com/boarding-party/boardingparty/internal/live"
 	"github.com/boarding-party/boardingparty/internal/project"
 	"github.com/boarding-party/boardingparty/internal/runs"
 	"github.com/boarding-party/boardingparty/internal/store"
@@ -173,7 +174,7 @@ func start(ctx context.Context, dir string, projectYAML []byte, duration time.Du
 		st.Close()
 		return nil, err
 	}
-	srv := &http.Server{Handler: api.Admin(svc, 0, token), ReadHeaderTimeout: 10 * time.Second}
+	srv := &http.Server{Handler: api.Admin(svc, 0, token, live.NewHub()), ReadHeaderTimeout: 10 * time.Second}
 	go func() {
 		if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			fmt.Fprintln(os.Stderr, "dev director:", err)

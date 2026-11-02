@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	"github.com/boarding-party/boardingparty/internal/artifacts"
+	"github.com/boarding-party/boardingparty/internal/live"
 	"github.com/boarding-party/boardingparty/internal/project"
 	"github.com/boarding-party/boardingparty/internal/runs"
 	"github.com/boarding-party/boardingparty/internal/store"
@@ -55,9 +56,10 @@ func setupBoth(t *testing.T, maxBytes int64) (*httptest.Server, *httptest.Server
 	}
 	t.Cleanup(func() { st.Close() })
 	svc := &runs.Service{Store: st, Artifacts: artifacts.NewFS(t.TempDir(), maxBytes), Launcher: noopLauncher{}}
-	srv := httptest.NewServer(Admin(svc, maxBytes, testToken))
+	hub := live.NewHub()
+	srv := httptest.NewServer(Admin(svc, maxBytes, testToken, hub))
 	t.Cleanup(srv.Close)
-	wsrv := httptest.NewServer(Worker(svc, maxBytes))
+	wsrv := httptest.NewServer(Worker(svc, maxBytes, hub))
 	t.Cleanup(wsrv.Close)
 	return srv, wsrv, svc
 }
@@ -485,7 +487,7 @@ func TestAdminEmptyTokenDeniesAll(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer st.Close()
-	srv := httptest.NewServer(Admin(&runs.Service{Store: st, Artifacts: artifacts.NewFS(t.TempDir(), 0), Launcher: noopLauncher{}}, 0, ""))
+	srv := httptest.NewServer(Admin(&runs.Service{Store: st, Artifacts: artifacts.NewFS(t.TempDir(), 0), Launcher: noopLauncher{}}, 0, "", live.NewHub()))
 	defer srv.Close()
 	for _, a := range []string{"", "Bearer ", "Bearer"} {
 		if c := raw(t, "GET", srv.URL+"/api/runs", "", map[string]string{"Authorization": a}); c != 401 {

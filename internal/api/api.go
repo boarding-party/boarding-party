@@ -2,15 +2,20 @@
 package api
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"path"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/boarding-party/boardingparty/internal/artifacts"
+	"github.com/boarding-party/boardingparty/internal/live"
 	"github.com/boarding-party/boardingparty/internal/project"
 	"github.com/boarding-party/boardingparty/internal/runs"
 	"github.com/boarding-party/boardingparty/internal/store"
@@ -19,9 +24,22 @@ import (
 // MaxArtifactBytes is the default per-artifact upload limit (500 MB).
 const MaxArtifactBytes int64 = 500 << 20
 
+// MaxFrameBytes caps one live frame.
+const MaxFrameBytes = 512 << 10
+
 type server struct {
 	svc      *runs.Service
 	maxBytes int64
+	hub      *live.Hub
+
+	// Live stream limits; fields so tests can shrink them.
+	liveMax   time.Duration // longest a single stream stays open
+	liveCheck time.Duration // how often the run is re-checked for activity
+}
+
+func newServer(svc *runs.Service, maxBytes int64, hub *live.Hub) *server {
+	return &server{svc: svc, maxBytes: normalise(maxBytes), hub: hub,
+		liveMax: 15 * time.Minute, liveCheck: 5 * time.Second}
 }
 
 func normalise(maxBytes int64) int64 {
@@ -34,8 +52,13 @@ func normalise(maxBytes int64) int64 {
 // Admin is the operator API (/api/*). Serve it on a loopback-only listener;
 // workers must never be able to reach it. Every request needs
 // "Authorization: Bearer <token>"; an empty token refuses all requests.
-func Admin(svc *runs.Service, maxBytes int64, token string) http.Handler {
-	s := &server{svc: svc, maxBytes: normalise(maxBytes)}
+func Admin(svc *runs.Service, maxBytes int64, token string, hub *live.Hub) http.Handler {
+	_, h := admin(svc, maxBytes, token, hub)
+	return h
+}
+
+func admin(svc *runs.Service, maxBytes int64, token string, hub *live.Hub) (*server, http.Handler) {
+	s := newServer(svc, maxBytes, hub)
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/project", s.putProject)
 	mux.HandleFunc("PUT /api/project", s.putProjectJSON)
@@ -44,14 +67,16 @@ func Admin(svc *runs.Service, maxBytes int64, token string) http.Handler {
 	mux.HandleFunc("GET /api/runs", s.listRuns)
 	mux.HandleFunc("GET /api/runs/{id}", s.getRun)
 	mux.HandleFunc("GET /api/runs/{id}/artifacts/{name}", s.getArtifact)
-	return guardAdmin(token, mux)
+	mux.HandleFunc("GET /api/runs/{id}/live", s.streamLive)
+	return s, guardAdmin(token, mux)
 }
 
 // Worker is the surface reachable by worker pods: artifact upload and health only.
-func Worker(svc *runs.Service, maxBytes int64) http.Handler {
-	s := &server{svc: svc, maxBytes: normalise(maxBytes)}
+func Worker(svc *runs.Service, maxBytes int64, hub *live.Hub) http.Handler {
+	s := newServer(svc, maxBytes, hub)
 	mux := http.NewServeMux()
 	mux.HandleFunc("PUT /artifacts/{token}/{name}", s.putArtifact)
+	mux.HandleFunc("PUT /live/{token}", s.putLive)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
 	return mux
 }
@@ -261,4 +286,89 @@ func (s *server) putArtifact(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusCreated)
+}
+
+// putLive takes the newest screen frame from a worker.
+func (s *server) putLive(w http.ResponseWriter, r *http.Request) {
+	run, err := s.svc.Active(r.PathValue("token"))
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	b, err := io.ReadAll(http.MaxBytesReader(w, r.Body, MaxFrameBytes))
+	if err != nil {
+		var mbe *http.MaxBytesError
+		if errors.As(err, &mbe) {
+			http.Error(w, "too large", http.StatusRequestEntityTooLarge)
+		} else {
+			http.Error(w, "unreadable body", http.StatusBadRequest)
+		}
+		return
+	}
+	if !bytes.HasPrefix(b, []byte{0xFF, 0xD8}) {
+		http.Error(w, "not a jpeg", http.StatusBadRequest)
+		return
+	}
+	n := s.hub.Publish(run.ID, b)
+	w.Header().Set("X-Bp-Watchers", strconv.Itoa(n))
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func isActive(st store.RunState) bool { return st == store.RunPending || st == store.RunRunning }
+
+// streamLive serves a run's screen as multipart/x-mixed-replace JPEG parts.
+func (s *server) streamLive(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	run, err := s.svc.Store.RunByID(id)
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	if !isActive(run.State) {
+		writeJSON(w, http.StatusGone, map[string]string{"error": "run finished"})
+		return
+	}
+	fl, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
+		return
+	}
+	frames, cancel := s.hub.Subscribe(id)
+	defer cancel()
+
+	h := w.Header()
+	h.Set("Content-Type", "multipart/x-mixed-replace; boundary=frame")
+	h.Set("Cache-Control", "no-store")
+	h.Set("X-Content-Type-Options", "nosniff")
+	w.WriteHeader(http.StatusOK)
+	fl.Flush()
+
+	deadline := time.NewTimer(s.liveMax)
+	defer deadline.Stop()
+	check := time.NewTicker(s.liveCheck)
+	defer check.Stop()
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case <-deadline.C:
+			return
+		case <-check.C:
+			cur, err := s.svc.Store.RunByID(id)
+			if err != nil || !isActive(cur.State) {
+				return
+			}
+		case f := <-frames:
+			if _, err := fmt.Fprintf(w, "--frame\r\nContent-Type: image/jpeg\r\nContent-Length: %d\r\n\r\n", len(f)); err != nil {
+				return
+			}
+			if _, err := w.Write(f); err != nil {
+				return
+			}
+			if _, err := io.WriteString(w, "\r\n"); err != nil {
+				return
+			}
+			fl.Flush()
+		}
+	}
 }

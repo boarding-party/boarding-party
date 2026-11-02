@@ -29,6 +29,7 @@ import (
 	"github.com/boarding-party/boardingparty/internal/api"
 	"github.com/boarding-party/boardingparty/internal/artifacts"
 	"github.com/boarding-party/boardingparty/internal/launcher"
+	"github.com/boarding-party/boardingparty/internal/live"
 	"github.com/boarding-party/boardingparty/internal/mcpserver"
 	"github.com/boarding-party/boardingparty/internal/runs"
 	"github.com/boarding-party/boardingparty/internal/store"
@@ -97,11 +98,11 @@ func newScheme() (*runtime.Scheme, error) {
 // newServers builds the two handlers. The admin one (/api/*) must only be
 // served on loopback; the worker one is reachable by worker pods and carries
 // artifact upload, health and the per-run MCP endpoint, nothing from /api/*.
-func newServers(cfg config, svc *runs.Service, st *store.Store) (admin, worker http.Handler) {
-	admin = api.Admin(svc, cfg.MaxArtifactBytes, cfg.AdminToken)
+func newServers(cfg config, svc *runs.Service, st *store.Store, hub *live.Hub) (admin, worker http.Handler) {
+	admin = api.Admin(svc, cfg.MaxArtifactBytes, cfg.AdminToken, hub)
 	mux := http.NewServeMux()
 	mux.Handle("/mcp/run/", mcpserver.Handler(svc, st, cfg.DirectorURL))
-	mux.Handle("/", api.Worker(svc, cfg.MaxArtifactBytes))
+	mux.Handle("/", api.Worker(svc, cfg.MaxArtifactBytes, hub))
 	return admin, mux
 }
 
@@ -203,11 +204,27 @@ func run() error {
 	}
 	go svc.Watch(ctx, runs.DefaultPollInterval, cfg.RunTimeout)
 
-	admin, worker := newServers(cfg, svc, st)
+	hub := live.NewHub()
+	go sweepLive(ctx, hub, 30*time.Second)
+	admin, worker := newServers(cfg, svc, st, hub)
 	return serve(ctx, []*http.Server{
 		{Addr: cfg.AdminAddr, Handler: admin, ReadHeaderTimeout: 10 * time.Second},
 		{Addr: cfg.WorkerAddr, Handler: worker, ReadHeaderTimeout: 10 * time.Second},
 	})
+}
+
+// sweepLive drops idle runs' frames from the hub until ctx ends.
+func sweepLive(ctx context.Context, hub *live.Hub, every time.Duration) {
+	t := time.NewTicker(every)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case now := <-t.C:
+			hub.Sweep(now)
+		}
+	}
 }
 
 // serve runs the servers until ctx ends or one fails to listen/serve, then
