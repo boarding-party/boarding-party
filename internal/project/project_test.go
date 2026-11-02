@@ -110,3 +110,21 @@ func TestResourcesRejected(t *testing.T) {
 		}
 	}
 }
+
+func TestNodePool(t *testing.T) {
+	p, err := LoadJSON([]byte(`{"name":"p","sites":["https://x.test"],"nodePool":"boardingparty.io/run=true"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if k, v, ok := p.Pool(); !ok || k != "boardingparty.io/run" || v != "true" {
+		t.Errorf("Pool() = %q %q %v", k, v, ok)
+	}
+	if _, _, ok := (Project{}).Pool(); ok {
+		t.Error("unset nodePool reports a pool")
+	}
+	for _, bad := range []string{"runs", "=true", "pool=", "bad key=x", "pool=a b", "pool=x=y"} {
+		if _, err := LoadJSON([]byte(`{"name":"p","sites":["https://x.test"],"nodePool":"` + bad + `"}`)); err == nil {
+			t.Errorf("accepted nodePool %q", bad)
+		}
+	}
+}

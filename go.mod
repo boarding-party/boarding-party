@@ -8,7 +8,7 @@ require (
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/modelcontextprotocol/go-sdk v1.8.0
 	github.com/spf13/cobra v1.10.2
-	github.com/tiny-systems/tiny v0.11.0
+	github.com/tiny-systems/tiny v0.12.1
 	golang.org/x/term v0.45.0
 	k8s.io/api v0.36.0
 	k8s.io/apiextensions-apiserver v0.36.0

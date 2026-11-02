@@ -173,18 +173,29 @@ if you raise `resources.cpu`.
 The director's Role is limited to its own namespace: sessions
 (get/list/watch/create/delete), persistent volume claims and deployments
 (get/create, which tiny needs to build a session), configmaps and services
-(get), and pods (list, for the one-run-at-a-time check).
+(get), and pods (list, for the one-run-at-a-time check and to spot a run
+pod no node can take).
+
+A run pod that no node can schedule fails its run after five minutes, with the
+scheduler's reason, instead of waiting for the run timeout. Five minutes leaves
+room for a pool to scale up from zero.
 
 ## Requirements
 
 - A dedicated node pool for run pods when the cluster also runs production
   workloads. Limits stop one run starving a node, but a browser and a coding
-  agent are heavy neighbours. Pinning run pods to a pool with a nodeSelector
-  and toleration is future work.
+  agent are heavy neighbours. Give the pool a label and a matching
+  `NoSchedule` taint, both `boardingparty.io/run=true` for example, and set
+  `nodePool: boardingparty.io/run=true` in the project. Runs then go only to
+  that pool, and nothing else lands on it. A pool with nodes of at least
+  2 CPU and 8GB fits a run; it can scale to zero between runs, and spot
+  nodes work if a lost run now and then is fine.
 - Kubernetes with a CNI that enforces NetworkPolicy. Without that, the
   allow-list is only advisory.
-- tiny v0.11.0 or later. Earlier versions lack `spec.mcpServers` and the
-  `pkg/session` package the director uses.
+- tiny v0.12.1 or later. Earlier versions lack `spec.mcpServers`,
+  placement (`nodeSelector`, `tolerations`) and the `pkg/session` package
+  the director uses. A run with `nodePool` set fails with a hint if the
+  cluster's Session CRD is too old to keep it.
 - A metered Anthropic API key. Runs are automated, so a Claude Pro or Max
   subscription isn't the right fit under the provider's terms.
 - Images: `ghcr.io/boarding-party/director` and `ghcr.io/boarding-party/worker`,

@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"k8s.io/apimachinery/pkg/types"
 
@@ -361,5 +362,83 @@ func TestStartSetsResources(t *testing.T) {
 	}
 	if got := getSession(t, tn, name).Spec.Resources; got == nil || got.CPU != "500m" || got.Memory != "5Gi" {
 		t.Errorf("override resources = %+v", got)
+	}
+}
+
+func TestStartPlacesRunOnNodePool(t *testing.T) {
+	tn := newTiny()
+	name, err := tn.Start(context.Background(), store.Run{ID: "cccccccc11", Token: "t"}, project.Project{NodePool: "boardingparty.io/run=true"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := getSession(t, tn, name)
+	if s.Spec.NodeSelector["boardingparty.io/run"] != "true" {
+		t.Errorf("nodeSelector = %v", s.Spec.NodeSelector)
+	}
+	want := corev1.Toleration{Key: "boardingparty.io/run", Operator: corev1.TolerationOpEqual, Value: "true", Effect: corev1.TaintEffectNoSchedule}
+	if len(s.Spec.Tolerations) != 1 || s.Spec.Tolerations[0] != want {
+		t.Errorf("tolerations = %v", s.Spec.Tolerations)
+	}
+	tn = newTiny()
+	name, _ = tn.Start(context.Background(), store.Run{ID: "dddddddd11", Token: "t"}, project.Project{})
+	if s := getSession(t, tn, name); s.Spec.NodeSelector != nil || s.Spec.Tolerations != nil {
+		t.Error("run without nodePool got placement")
+	}
+}
+
+func TestStartRefusesWhenClusterDropsPlacement(t *testing.T) {
+	tn := newTiny()
+	base := tn.Client
+	// An old CRD prunes unknown fields: the stored Session comes back without them.
+	tn.Client = interceptor.NewClient(base.(client.WithWatch), interceptor.Funcs{
+		Create: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.CreateOption) error {
+			if s, ok := obj.(*agentsv1.Session); ok {
+				s.Spec.NodeSelector, s.Spec.Tolerations = nil, nil
+			}
+			return c.Create(ctx, obj, opts...)
+		},
+	})
+	_, err := tn.Start(context.Background(), store.Run{ID: "eeeeeeee11", Token: "t"}, project.Project{NodePool: "pool=runs"})
+	if err == nil || !strings.Contains(err.Error(), "tiny init") {
+		t.Fatalf("err = %v, want a tiny init hint", err)
+	}
+	l := &agentsv1.SessionList{}
+	if err := tn.Client.List(context.Background(), l); err != nil {
+		t.Fatal(err)
+	}
+	if len(l.Items) != 0 {
+		t.Errorf("session left behind: %d", len(l.Items))
+	}
+}
+
+func TestPhaseFailsUnschedulablePodAfterGrace(t *testing.T) {
+	tn := newTiny()
+	name, _ := tn.Start(context.Background(), store.Run{ID: "ffffffff11", Token: "t"}, project.Project{})
+	pod := func(age time.Duration) *corev1.Pod {
+		return &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Namespace: "bp", Name: name + "-pod", CreationTimestamp: metav1.NewTime(time.Now().Add(-age)),
+				Labels: map[string]string{podAppLabel: podAppValue, "tinysystems.io/session": name}},
+			Status: corev1.PodStatus{Phase: corev1.PodPending, Conditions: []corev1.PodCondition{{
+				Type: corev1.PodScheduled, Status: corev1.ConditionFalse, Reason: corev1.PodReasonUnschedulable,
+				Message: "0/8 nodes are available: 7 Insufficient memory.",
+			}}},
+		}
+	}
+	p := pod(time.Minute)
+	if err := tn.Client.Create(context.Background(), p); err != nil {
+		t.Fatal(err)
+	}
+	if ph, _, _, err := tn.Phase(context.Background(), name); err != nil || ph == "Failed" {
+		t.Fatalf("young pending pod: phase %q err %v, want left alone", ph, err)
+	}
+	if err := tn.Client.Delete(context.Background(), p); err != nil {
+		t.Fatal(err)
+	}
+	if err := tn.Client.Create(context.Background(), pod(10*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	ph, ok, msg, err := tn.Phase(context.Background(), name)
+	if err != nil || !ok || ph != "Failed" || !strings.Contains(msg, "Insufficient memory") {
+		t.Errorf("got %q %v %q %v", ph, ok, msg, err)
 	}
 }

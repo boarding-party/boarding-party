@@ -6,8 +6,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"strings"
 
 	"k8s.io/apimachinery/pkg/api/resource"
+	"k8s.io/apimachinery/pkg/util/validation"
 
 	"sigs.k8s.io/yaml"
 )
@@ -21,6 +23,17 @@ type Project struct {
 	// Resources sizes each run pod's agent container. Optional; see
 	// Project.RunResources for the defaults and bounds.
 	Resources *Resources `json:"resources,omitempty"`
+	// NodePool pins run pods to a dedicated node pool, named by one node
+	// label as "key=value". The pool carries the same key=value as a
+	// NoSchedule taint, which runs tolerate. Optional; empty schedules runs
+	// anywhere.
+	NodePool string `json:"nodePool,omitempty"`
+}
+
+// Pool splits NodePool into its label key and value; ok is false when unset.
+func (p Project) Pool() (key, value string, ok bool) {
+	key, value, ok = strings.Cut(p.NodePool, "=")
+	return key, value, ok && key != ""
 }
 
 // Resources is the run pod's CPU and memory, as Kubernetes quantities.
@@ -133,6 +146,12 @@ func (p Project) validate() error {
 			if err := checkQuantity("memory", r.Memory, minMemory, maxMemory); err != nil {
 				return err
 			}
+		}
+	}
+	if p.NodePool != "" {
+		k, v, ok := p.Pool()
+		if !ok || len(validation.IsQualifiedName(k)) > 0 || v == "" || len(validation.IsValidLabelValue(v)) > 0 {
+			return fmt.Errorf("nodePool %q must be a node label as key=value, such as boardingparty.io/run=true", p.NodePool)
 		}
 	}
 	seen := map[string]bool{}

@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -28,6 +29,10 @@ const (
 	podAppValue   = "tiny-session"
 	runNamePrefix = "bp-run-"
 )
+
+// unschedulableGrace is how long a run pod may wait for a node before the run
+// fails. It covers a node pool scaling up from zero, which takes a minute or two.
+const unschedulableGrace = 5 * time.Minute
 
 // Tiny launches runs as tiny Sessions. tiny has no manager, so Start creates
 // the Session and its workload (workspace PVC and Deployment) itself through
@@ -97,11 +102,24 @@ func (t *Tiny) Start(ctx context.Context, r store.Run, p project.Project) (strin
 			},
 		},
 	}
+	if k, v, ok := p.Pool(); ok {
+		s.Spec.NodeSelector = map[string]string{k: v}
+		s.Spec.Tolerations = []corev1.Toleration{{Key: k, Operator: corev1.TolerationOpEqual, Value: v, Effect: corev1.TaintEffectNoSchedule}}
+	}
 	if t.Owner != nil {
 		s.OwnerReferences = []metav1.OwnerReference{*t.Owner}
 	}
 	if err := session.Create(ctx, t.Client, s); err != nil {
 		return "", fmt.Errorf("create session %s: %w", name, err)
+	}
+	// A Session CRD from before tiny v0.12 drops placement without an error,
+	// and the run would land on any node. Create decodes the stored object
+	// back into s, so a missing selector here means the cluster pruned it.
+	if p.NodePool != "" && len(s.Spec.NodeSelector) == 0 {
+		if err := t.Stop(ctx, name); err != nil {
+			return "", fmt.Errorf("stop session %s: %w", name, err)
+		}
+		return "", fmt.Errorf("tiny on this cluster is older than v0.12 and ignores nodePool; update it with tiny init, then start the run again")
 	}
 	return name, nil
 }
@@ -129,7 +147,38 @@ func (t *Tiny) Phase(ctx context.Context, name string) (string, bool, string, er
 	if err != nil {
 		return "", false, "", fmt.Errorf("get session %s: %w", name, err)
 	}
+	if s.Status.Phase == agentsv1.SessionFailed || s.Status.Phase == agentsv1.SessionDone {
+		return string(s.Status.Phase), true, s.Status.Message, nil
+	}
+	// A pod no node can take would otherwise sit Pending until the run
+	// timeout; past the grace it fails the run with the scheduler's reason.
+	if msg, err := t.unschedulable(ctx, name, time.Now()); err != nil {
+		return "", false, "", err
+	} else if msg != "" {
+		return string(agentsv1.SessionFailed), true, "no node can run it: " + msg, nil
+	}
 	return string(s.Status.Phase), true, s.Status.Message, nil
+}
+
+// unschedulable returns the scheduler's message for a session pod that has
+// been unschedulable for longer than unschedulableGrace, or "".
+func (t *Tiny) unschedulable(ctx context.Context, name string, now time.Time) (string, error) {
+	l := &corev1.PodList{}
+	if err := t.Client.List(ctx, l, client.InNamespace(t.Namespace),
+		client.MatchingLabels{podAppLabel: podAppValue, session.SessionLabel: name}); err != nil {
+		return "", fmt.Errorf("list pods: %w", err)
+	}
+	for _, p := range l.Items {
+		if p.Spec.NodeName != "" || now.Sub(p.CreationTimestamp.Time) < unschedulableGrace {
+			continue
+		}
+		for _, c := range p.Status.Conditions {
+			if c.Type == corev1.PodScheduled && c.Status == corev1.ConditionFalse && c.Reason == corev1.PodReasonUnschedulable {
+				return c.Message, nil
+			}
+		}
+	}
+	return "", nil
 }
 
 // Sessions lists run sessions (those labelled boardingparty.io/run) as

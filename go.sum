@@ -164,6 +164,10 @@ github.com/stretchr/testify v1.11.1 h1:7s2iGBzp5EwR7/aIZr8ao5+dra3wiQyKjjFuvgVKu
 github.com/stretchr/testify v1.11.1/go.mod h1:wZwfW3scLgRK+23gO65QZefKpKQRnfz6sD981Nm4B6U=
 github.com/tiny-systems/tiny v0.11.0 h1:Akue5Q0g0aNCGhTUJRvJGjR9bTOHjSOvy8l2hFk9ST0=
 github.com/tiny-systems/tiny v0.11.0/go.mod h1:TFfK5Hev+oEwOR2VDOTCySc+ZGtAsUO24x2g6dMKtVM=
+github.com/tiny-systems/tiny v0.12.0 h1:8915Nl2/tx6OVgs1zuTQkjD5oYv+/EwSUJSxmdiwfJY=
+github.com/tiny-systems/tiny v0.12.0/go.mod h1:TFfK5Hev+oEwOR2VDOTCySc+ZGtAsUO24x2g6dMKtVM=
+github.com/tiny-systems/tiny v0.12.1 h1:nl86Pc3nGd5fEA5NIUsqJgst5CDEv2m8PG/zTBFh/r0=
+github.com/tiny-systems/tiny v0.12.1/go.mod h1:TFfK5Hev+oEwOR2VDOTCySc+ZGtAsUO24x2g6dMKtVM=
 github.com/x448/float16 v0.8.4 h1:qLwI1I70+NjRFUR3zs1JPUCgaCXSh3SW62uAKT1mSBM=
 github.com/x448/float16 v0.8.4/go.mod h1:14CWIYCyZA/cWjXOioeEpHeN/83MdbZDRQHoFcYsOfg=
 github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e h1:JVG44RsyaB9T2KIHavMF/ppJZNG9ZpyihvCd0w101no=

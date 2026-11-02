@@ -26,6 +26,9 @@ function fromProject(p) {
     sites: sites.length ? sites : [row()],
     extraHosts: (p.extraHosts || []).map(row),
     model: p.model || '',
+    nodePool: p.nodePool || '',
+    // Not edited here, but carried so a save never drops it.
+    resources: p.resources || null,
     roles: (p.roles || []).map((r) => ({
       id: nid(),
       name: r.name || '',
@@ -67,6 +70,8 @@ function toJSON(d) {
     sites: vals(d.sites),
     extraHosts: vals(d.extraHosts),
     model: d.model.trim(),
+    nodePool: d.nodePool.trim(),
+    ...(d.resources ? { resources: d.resources } : {}),
     roles: d.roles.map((r) => ({
       name: r.name.trim(),
       description: r.description.trim(),
@@ -245,6 +250,12 @@ export function ProjectPage({ onSaved, onDirty }) {
               <input id="pj-model" value=${draft.model} placeholder="Default"
                 onInput=${(e) => { const v = e.currentTarget.value; edit((d) => { d.model = v; }); }} />
               <span class="hint">Leave empty to use the default model.</span>
+            </div>
+            <div class="field">
+              <label for="pj-pool">Node pool</label>
+              <input id="pj-pool" value=${draft.nodePool} placeholder="boardingparty.io/run=true"
+                onInput=${(e) => { const v = e.currentTarget.value; edit((d) => { d.nodePool = v; }); }} />
+              <span class="hint">Node label for the pool runs use, as key=value. The pool needs the same key=value as a NoSchedule taint. Leave empty to run on any node.</span>
             </div>
           </div>
           <${ListField} label="Sites" hint="Staging URLs the cast may open, starting with https://. Never point it at production."
