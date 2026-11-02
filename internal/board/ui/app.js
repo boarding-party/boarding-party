@@ -528,7 +528,7 @@ function RunPage({ id, onChange }) {
           </div>
           <div class="card">
             <div class="row between"><h2>Bugs</h2><span class="small muted">${bugs.length && webm ? 'Click a bug with a time to jump to it.' : ''}</span></div>
-            ${bugs.length ? html`<ul class="bugs">${bugs.map((b) => html`<li key=${b.id}><${Bug} bug=${b} duration=${webm ? duration : 0} onSeek=${seek} /></li>`)}</ul>`
+            ${bugs.length ? html`<ul class="bugs">${bugs.map((b) => html`<li key=${b.id}><${Bug} bug=${b} runId=${run.id} artifacts=${artifacts} duration=${webm ? duration : 0} onSeek=${seek} /></li>`)}</ul>`
               : html`<p class="muted small" style="margin:0">${ACTIVE.has(run.state) ? 'No bugs reported so far.' : 'No bugs reported.'}</p>`}
           </div>
         </div>
@@ -568,7 +568,7 @@ const SEVERITY_TAG = new Map([['high', 'bad'], ['critical', 'bad'], ['medium', '
 // A bug seeks only when its text carries a time that fits inside the
 // recording; that also keeps clock times such as "Wed 16:00" from seeking.
 // A live-recorded webm can report Infinity, which lets every time through.
-function Bug({ bug, duration, onSeek }) {
+function Bug({ bug, runId, artifacts, duration, onSeek }) {
   const found = stampOf(bug);
   const secs = found !== null && duration > 0 && found <= Math.ceil(duration) ? found : null;
   const seekable = secs !== null;
@@ -579,10 +579,15 @@ function Bug({ bug, duration, onSeek }) {
     ${bug.step ? html`<span class="meta"><b>Step:</b> ${bug.step}</span>` : null}
     ${bug.evidence ? html`<span class="meta"><b>Evidence:</b> ${bug.evidence}</span>` : null}
     ${bug.note ? html`<span class="meta"><b>Note:</b> ${bug.note}</span>` : null}`;
-  return seekable
+  const shot = IMAGE_EXT.test(bug.evidence || '') && artifacts.includes(bug.evidence.trim()) ? bug.evidence.trim() : '';
+  return html`${seekable
     ? html`<button type="button" class="bug seek" title=${'Jump to ' + fmtStamp(secs)} onClick=${() => onSeek(secs)}>${body}</button>`
-    : html`<div class="bug">${body}</div>`;
+    : html`<div class="bug">${body}</div>`}
+    ${shot ? html`<a class="bug-shot" href=${artifactURL(runId, shot)} target="_blank" rel="noopener" title="Open the full screenshot">
+      <img src=${artifactURL(runId, shot)} alt=${'Screenshot for: ' + bug.summary} loading="lazy" /></a>` : null}`;
 }
+
+const IMAGE_EXT = /\.(png|jpe?g)\s*$/i;
 
 // Clear the static "Loading…" placeholder: render() appends, it doesn't replace.
 const root = document.getElementById('root');

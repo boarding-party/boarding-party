@@ -343,7 +343,7 @@ func TestArtifactRangeAndTypes(t *testing.T) {
 	srv, svc := setup(t, 1<<20)
 	run := startRun(t, srv, svc)
 	data := "0123456789abcdefghij"
-	for _, n := range []string{"rec.webm", "shots.zip", "a.png", "x.bin"} {
+	for _, n := range []string{"rec.webm", "shots.zip", "a.png", "bug-1.png", "b.jpg", "c.jpeg", "x.bin"} {
 		if _, err := svc.Artifacts.Put(run.ID, n, strings.NewReader(data)); err != nil {
 			t.Fatal(err)
 		}
@@ -366,7 +366,7 @@ func TestArtifactRangeAndTypes(t *testing.T) {
 	if cd := resp.Header.Get("Content-Disposition"); cd != "inline" {
 		t.Fatalf("webm disposition %q", cd)
 	}
-	for name, ct := range map[string]string{"rec.webm": "video/webm", "shots.zip": "application/zip", "a.png": "image/png", "x.bin": "application/octet-stream"} {
+	for name, ct := range map[string]string{"rec.webm": "video/webm", "shots.zip": "application/zip", "a.png": "image/png", "bug-1.png": "image/png", "b.jpg": "image/jpeg", "c.jpeg": "image/jpeg", "x.bin": "application/octet-stream"} {
 		r := do(t, "GET", srv.URL+"/api/runs/"+run.ID+"/artifacts/"+name, "")
 		if r.StatusCode != 200 || r.Header.Get("Content-Type") != ct {
 			t.Fatalf("%s: %d %q", name, r.StatusCode, r.Header.Get("Content-Type"))

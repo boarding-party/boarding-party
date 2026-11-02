@@ -194,3 +194,5 @@ dialog.confirm p { margin: 0 0 14px; font-size: 14px; }
   td.outcome { max-width: 200px; }
   .tablewrap { overflow-x: auto; }
 }
+.bug-shot { display: block; width: fit-content; max-width: 240px; margin: 0 8px 10px; }
+.bug-shot img { display: block; max-width: 100%; height: auto; border: 1px solid var(--line); border-radius: 6px; }

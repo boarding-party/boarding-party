@@ -16,6 +16,7 @@ import (
 	"image/color"
 	"image/draw"
 	"image/jpeg"
+	"image/png"
 	"net"
 	"net/http"
 	"os"
@@ -145,6 +146,21 @@ func fakeFrame(elapsed time.Duration) []byte {
 	return buf.Bytes()
 }
 
+// fakeScreenshot draws a small PNG standing in for a bug screenshot.
+func fakeScreenshot() []byte {
+	img := image.NewRGBA(image.Rect(0, 0, 640, 400))
+	draw.Draw(img, img.Bounds(), &image.Uniform{color.RGBA{238, 241, 244, 255}}, image.Point{}, draw.Src)
+	draw.Draw(img, image.Rect(40, 40, 600, 80), &image.Uniform{color.RGBA{60, 110, 190, 255}}, image.Point{}, draw.Src)
+	for i := 0; i < 3; i++ {
+		draw.Draw(img, image.Rect(40, 110+i*60, 600, 150+i*60), &image.Uniform{color.RGBA{255, 255, 255, 255}}, image.Point{}, draw.Src)
+	}
+	var buf bytes.Buffer
+	if png.Encode(&buf, img) != nil {
+		return nil
+	}
+	return buf.Bytes()
+}
+
 func (l *Launcher) finishLater(r store.Run) {
 	time.Sleep(l.Duration)
 	if _, err := l.Svc.Active(r.Token); err != nil {
@@ -154,11 +170,14 @@ func (l *Launcher) finishLater(r store.Run) {
 		_ = l.Svc.Finish(context.Background(), r.Token, store.RunFailed, "fake run: "+err.Error())
 		return
 	}
+	if shot := fakeScreenshot(); shot != nil {
+		_, _ = l.Svc.Artifacts.Put(r.ID, "bug-1.png", bytes.NewReader(shot))
+	}
 	_ = l.Svc.Store.AddBug(store.Bug{
 		ID: "bug-" + r.ID, RunID: r.ID,
 		Summary:  "Counter still says 3 items left after completing one",
 		Step:     "00:02 ticked the first todo; the counter did not change",
-		Evidence: "the footer reads \"3 items left\" with one item struck through",
+		Evidence: "bug-1.png",
 		Severity: "medium",
 		Note:     "I expected 2 items left, so I stopped trusting the count.",
 		Created:  time.Now().UTC(),
