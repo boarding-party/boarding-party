@@ -39,7 +39,7 @@ func Handler(svc *runs.Service, st *store.Store, directorURL string, mail *inbox
 type mailbox interface {
 	Status() inbox.Status
 	Poke()
-	Wait(ctx context.Context, persona string, since time.Time, match func(store.Message) bool) (store.Message, bool, error)
+	WaitAfter(ctx context.Context, persona string, since time.Time, afterID string, match func(store.Message) bool) (store.Message, bool, error)
 }
 
 func handler(svc *runs.Service, st *store.Store, directorURL string, mail mailbox) http.Handler {
@@ -280,6 +280,7 @@ type readArgs struct {
 type waitArgs struct {
 	FromContains    string `json:"from_contains,omitempty" jsonschema:"only a message whose sender contains this text (case-insensitive); empty = any"`
 	SubjectContains string `json:"subject_contains,omitempty" jsonschema:"only a message whose subject contains this text (case-insensitive); empty = any"`
+	AfterID         string `json:"after_id,omitempty" jsonschema:"only a message that arrived after the message with this id; use it to wait for a new email after one you already read"`
 	TimeoutSeconds  int    `json:"timeout_seconds,omitempty" jsonschema:"how long to wait, 1 to 120, default 60"`
 }
 
@@ -316,17 +317,20 @@ func allowedHosts(p project.Project) map[string]bool {
 		}
 	}
 	for _, h := range p.ExtraHosts {
-		hosts[strings.ToLower(strings.TrimSpace(h))] = true
+		if h = strings.ToLower(strings.TrimSpace(h)); h != "" {
+			hosts[h] = true
+		}
 	}
 	return hosts
 }
 
 func linkAllowed(link string, hosts map[string]bool) bool {
 	u, err := url.Parse(link)
-	if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Opaque != "" || u.Host == "" {
 		return false
 	}
-	return hosts[strings.ToLower(u.Hostname())]
+	h := strings.ToLower(u.Hostname())
+	return h != "" && hosts[h]
 }
 
 // mailUnavailable is the tool error for a missing or unreachable mailbox, or "" when usable.
@@ -398,7 +402,7 @@ func addMailTools(s *mcp.Server, st *store.Store, mail mailbox, active func() (s
 		})
 
 	mcp.AddTool(s, &mcp.Tool{Name: "message_wait",
-		Description: "Wait for a new email that arrived during this run, optionally matching sender or subject text. Returns the message summary, or says none arrived yet."},
+		Description: "Wait for a new email that arrived during this run, optionally matching sender or subject text. To wait for another email after one you already read, pass its id as after_id. Returns the message summary, or says none arrived yet."},
 		func(ctx context.Context, _ *mcp.CallToolRequest, in waitArgs) (*mcp.CallToolResult, any, error) {
 			r, bad, err := active()
 			if bad != nil || err != nil {
@@ -411,10 +415,19 @@ func addMailTools(s *mcp.Server, st *store.Store, mail mailbox, active func() (s
 			match := func(m store.Message) bool {
 				return strings.Contains(strings.ToLower(m.From), from) && strings.Contains(strings.ToLower(m.Subject), subj)
 			}
+			if in.AfterID != "" {
+				am, err := st.Message(in.AfterID)
+				if errors.Is(err, store.ErrNotFound) || (err == nil && (am.Persona != r.Persona || am.Filtered != "")) {
+					return toolErr(errNoMessage)
+				}
+				if err != nil {
+					return nil, nil, err
+				}
+			}
 			mail.Poke()
 			wctx, cancel := context.WithTimeout(ctx, clampWait(in.TimeoutSeconds))
 			defer cancel()
-			m, ok, err := mail.Wait(wctx, r.Persona, r.Started, match)
+			m, ok, err := mail.WaitAfter(wctx, r.Persona, r.Started, in.AfterID, match)
 			if err != nil {
 				return nil, nil, err
 			}

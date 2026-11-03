@@ -31,7 +31,8 @@ type MessageQuery struct {
 	Persona  string // "" = all personas
 	Filtered bool   // false: only delivered mail; true: only filtered mail
 	Since    time.Time
-	Limit    int // default 50, max 200
+	AfterID  string // only messages after this one in (stored, insertion) order
+	Limit    int    // default 50, max 200
 }
 
 const msgCols = `id, uidvalidity, uid, persona, sender, recipients, subject, body, links, received, stored, filtered`
@@ -100,6 +101,10 @@ func (s *Store) Messages(q MessageQuery) ([]Message, error) {
 	if !q.Since.IsZero() {
 		query += ` AND stored >= ?`
 		args = append(args, ts(q.Since))
+	}
+	if q.AfterID != "" {
+		query += ` AND (stored, rowid) > (SELECT stored, rowid FROM messages WHERE id = ?)`
+		args = append(args, q.AfterID)
 	}
 	query += ` ORDER BY stored DESC, rowid DESC LIMIT ?`
 	args = append(args, limit)

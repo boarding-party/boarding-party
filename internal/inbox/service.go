@@ -205,9 +205,14 @@ func (s *Service) wakeCh() <-chan struct{} {
 // Wait returns the newest delivered (unfiltered) message for persona stored at or after
 // since that match accepts (nil accepts all). When ctx ends first it returns (zero, false, nil).
 func (s *Service) Wait(ctx context.Context, persona string, since time.Time, match func(store.Message) bool) (store.Message, bool, error) {
+	return s.WaitAfter(ctx, persona, since, "", match)
+}
+
+// WaitAfter is Wait limited to messages stored strictly after the message afterID ("" = no limit).
+func (s *Service) WaitAfter(ctx context.Context, persona string, since time.Time, afterID string, match func(store.Message) bool) (store.Message, bool, error) {
 	for {
 		wake := s.wakeCh() // taken before the read so a message stored meanwhile still wakes us
-		msgs, err := s.Store.Messages(store.MessageQuery{Persona: persona, Since: since, Limit: 200})
+		msgs, err := s.Store.Messages(store.MessageQuery{Persona: persona, Since: since, AfterID: afterID, Limit: 200})
 		if err != nil {
 			return store.Message{}, false, err
 		}

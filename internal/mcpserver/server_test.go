@@ -507,3 +507,56 @@ func TestMailToolsErrorWhenMailboxUnreachable(t *testing.T) {
 		t.Error("message_wait blocked")
 	}
 }
+
+func TestMessageWaitAfterID(t *testing.T) {
+	st, srv, run, mb := setupMail(t, "ok")
+	cs := connect(t, srv, run.Token)
+	addMsg(t, st, "first", "ann", "")
+	addMsg(t, st, "theirs", "bob", "")
+	addMsg(t, st, "spam", "ann", "sender-not-allowed")
+	for _, id := range []string{"nope", "theirs", "spam"} {
+		out, isErr := call(t, cs, "message_wait", map[string]any{"after_id": id, "timeout_seconds": 1})
+		if !isErr || out != "message not found" {
+			t.Errorf("%s: %v %q", id, isErr, out)
+		}
+	}
+	waitUnit = 10 * time.Millisecond
+	t.Cleanup(func() { waitUnit = time.Second })
+	out, isErr := call(t, cs, "message_wait", map[string]any{"after_id": "first", "timeout_seconds": 5})
+	if isErr || out != "no matching message yet" {
+		t.Fatalf("nothing after first: %v %q", isErr, out)
+	}
+	waitUnit = time.Second
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		addMsg(t, st, "second", "ann", "")
+		mb.Notify()
+	}()
+	out, isErr = call(t, cs, "message_wait", map[string]any{"after_id": "first", "timeout_seconds": 10})
+	if isErr || !strings.Contains(out, `"id":"second"`) {
+		t.Fatalf("after first: %v %q", isErr, out)
+	}
+	out, isErr = call(t, cs, "message_wait", map[string]any{"timeout_seconds": 10})
+	if isErr || !strings.Contains(out, `"id":"second"`) { // without after_id: newest
+		t.Fatalf("plain: %v %q", isErr, out)
+	}
+	out, _ = call(t, cs, "message_wait", map[string]any{"after_id": "second", "timeout_seconds": 1})
+	if out != "no matching message yet" {
+		t.Fatalf("after newest: %q", out)
+	}
+}
+
+func TestLinkAllowedRejectsOpaqueAndHostless(t *testing.T) {
+	hosts := allowedHosts(project.Project{Sites: []string{"https://x.test"}, ExtraHosts: []string{"", "  "}})
+	if hosts[""] || len(hosts) != 1 {
+		t.Fatalf("hosts = %v", hosts)
+	}
+	for _, l := range []string{"http:foo", "https:///x", "https://:443/x", "http:x.test", "https:"} {
+		if linkAllowed(l, hosts) {
+			t.Errorf("%q allowed", l)
+		}
+	}
+	if !linkAllowed("https://X.test/a", hosts) {
+		t.Error("real link not allowed")
+	}
+}
