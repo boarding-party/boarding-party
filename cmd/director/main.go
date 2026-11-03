@@ -103,7 +103,7 @@ func newScheme() (*runtime.Scheme, error) {
 func newServers(cfg config, svc *runs.Service, st *store.Store, hub *live.Hub, mail *inbox.Service) (admin, worker http.Handler) {
 	admin = api.Admin(svc, cfg.MaxArtifactBytes, cfg.AdminToken, hub, mail)
 	mux := http.NewServeMux()
-	mux.Handle("/mcp/run/", mcpserver.Handler(svc, st, cfg.DirectorURL))
+	mux.Handle("/mcp/run/", mcpserver.Handler(svc, st, cfg.DirectorURL, mail))
 	mux.Handle("/", api.Worker(svc, cfg.MaxArtifactBytes, hub))
 	return admin, mux
 }

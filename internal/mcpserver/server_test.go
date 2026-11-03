@@ -12,6 +12,7 @@ import (
 
 	"github.com/boarding-party/boardingparty/internal/artifacts"
 	"github.com/boarding-party/boardingparty/internal/files"
+	"github.com/boarding-party/boardingparty/internal/inbox"
 	"github.com/boarding-party/boardingparty/internal/project"
 	"github.com/boarding-party/boardingparty/internal/runs"
 	"github.com/boarding-party/boardingparty/internal/store"
@@ -56,7 +57,7 @@ func setup(t *testing.T) (*runs.Service, *store.Store, *httptest.Server, store.R
 	if err != nil {
 		t.Fatal(err)
 	}
-	srv := httptest.NewServer(Handler(svc, st, director))
+	srv := httptest.NewServer(Handler(svc, st, director, nil))
 	t.Cleanup(srv.Close)
 	return svc, st, srv, run
 }
@@ -243,7 +244,7 @@ func TestCrossRunIsolation(t *testing.T) {
 	if err := st.SavePersonaState("bob", json.RawMessage(`{"owner":"bob"}`)); err != nil {
 		t.Fatal(err)
 	}
-	srv := httptest.NewServer(Handler(svc, st, director))
+	srv := httptest.NewServer(Handler(svc, st, director, nil))
 	t.Cleanup(srv.Close)
 
 	cs := connect(t, srv, a.Token)
@@ -311,5 +312,175 @@ func TestNextAssignmentFilesEmptyIsList(t *testing.T) {
 	text, _ := call(t, connect(t, srv, run.Token), "next_assignment", nil)
 	if !strings.Contains(text, `"files":[]`) {
 		t.Errorf("want an empty files list, got %s", text)
+	}
+}
+
+// fakeMail is a real inbox.Service (for Wait/Poke) whose status the test controls.
+type fakeMail struct {
+	*inbox.Service
+	state string
+}
+
+func (f fakeMail) Status() inbox.Status { return inbox.Status{State: f.state} }
+
+func setupMail(t *testing.T, state string) (*store.Store, *httptest.Server, store.Run, fakeMail) {
+	t.Helper()
+	svc, st, _, run := setup(t)
+	mb := fakeMail{Service: &inbox.Service{Store: st}, state: state}
+	srv := httptest.NewServer(handler(svc, st, director, mb))
+	t.Cleanup(srv.Close)
+	return st, srv, run, mb
+}
+
+func addMsg(t *testing.T, st *store.Store, id, persona, filtered string, links ...string) {
+	t.Helper()
+	_, err := st.AddMessage(store.Message{ID: id, UIDValidity: 1, UID: uint32(len(id)) + uint32(id[0]), Persona: persona,
+		From: "Shop <hi@shop.test>", Subject: "Welcome " + id, Text: "body " + id, Links: links,
+		Received: time.Now(), Filtered: filtered})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestMessagesListOnlyOwnPersona(t *testing.T) {
+	st, srv, run, _ := setupMail(t, "ok")
+	addMsg(t, st, "mine", "ann", "")
+	addMsg(t, st, "theirs", "bob", "")
+	addMsg(t, st, "spam", "ann", "sender-not-allowed")
+	out, isErr := call(t, connect(t, srv, run.Token), "messages_list", nil)
+	if isErr {
+		t.Fatal(out)
+	}
+	var got []map[string]string
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("%v: %s", err, out)
+	}
+	if len(got) != 1 || got[0]["id"] != "mine" || got[0]["subject"] == "" || got[0]["from"] == "" || got[0]["received"] == "" {
+		t.Fatalf("got %s", out)
+	}
+}
+
+func TestMessageReadOtherPersonaNotFound(t *testing.T) {
+	st, srv, run, _ := setupMail(t, "ok")
+	addMsg(t, st, "theirs", "bob", "")
+	addMsg(t, st, "spam", "ann", "sender-not-allowed")
+	cs := connect(t, srv, run.Token)
+	for _, id := range []string{"theirs", "spam", "nope"} {
+		out, isErr := call(t, cs, "message_read", map[string]any{"id": id})
+		if !isErr || out != "message not found" {
+			t.Errorf("%s: isErr=%v out=%q", id, isErr, out)
+		}
+	}
+}
+
+func TestMessageReadMarksAllowedLinks(t *testing.T) {
+	st, srv, run, _ := setupMail(t, "ok")
+	if err := st.PutProject(project.Project{Name: "p", Sites: []string{"https://x.test"}, ExtraHosts: []string{"auth.test"},
+		Roles: []project.Role{{Name: "buyer", Personas: []project.Persona{{Name: "ann"}},
+			Stories: []project.Story{{Name: "checkout"}}}}}); err != nil {
+		t.Fatal(err)
+	}
+	addMsg(t, st, "m1", "ann", "", "https://X.test/verify?t=1", "https://auth.test/x", "https://evil.test/x",
+		"https://sub.x.test/", "ftp://x.test/f", "not a url")
+	out, isErr := call(t, connect(t, srv, run.Token), "message_read", map[string]any{"id": "m1"})
+	if isErr {
+		t.Fatal(out)
+	}
+	var got struct {
+		Text  string `json:"text"`
+		Links []struct {
+			URL     string `json:"url"`
+			Allowed bool   `json:"allowed"`
+		} `json:"links"`
+	}
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatal(err)
+	}
+	want := []bool{true, true, false, false, false, false}
+	if got.Text != "body m1" || len(got.Links) != len(want) {
+		t.Fatalf("got %s", out)
+	}
+	for i, l := range got.Links {
+		if l.Allowed != want[i] {
+			t.Errorf("%s allowed=%v want %v", l.URL, l.Allowed, want[i])
+		}
+	}
+}
+
+func TestMessageWaitClampsAndMatches(t *testing.T) {
+	if clampWait(0) != 60*time.Second || clampWait(-5) != 60*time.Second || clampWait(999) != 120*time.Second ||
+		clampWait(1) != time.Second || clampWait(30) != 30*time.Second {
+		t.Fatal("clampWait")
+	}
+	st, srv, run, mb := setupMail(t, "ok")
+	cs := connect(t, srv, run.Token)
+
+	waitUnit = 10 * time.Millisecond // 999 -> 120 units = 1.2s
+	t.Cleanup(func() { waitUnit = time.Second })
+	out, isErr := call(t, cs, "message_wait", map[string]any{"timeout_seconds": 999})
+	if isErr || out != "no matching message yet" {
+		t.Fatalf("timeout: %v %q", isErr, out)
+	}
+
+	waitUnit = time.Second
+	go func() {
+		time.Sleep(200 * time.Millisecond)
+		addMsg(t, st, "other", "ann", "")
+		addMsg(t, st, "verify", "ann", "")
+		mb.Notify() // the poller does this after storing mail
+	}()
+	out, isErr = call(t, cs, "message_wait", map[string]any{"subject_contains": "WELCOME VER", "from_contains": "shop.TEST", "timeout_seconds": 10})
+	if isErr || !strings.Contains(out, `"id":"verify"`) {
+		t.Fatalf("match: %v %q", isErr, out)
+	}
+}
+
+func TestAssignmentInboxFlag(t *testing.T) {
+	flag := func(srv *httptest.Server, run store.Run) bool {
+		out, isErr := call(t, connect(t, srv, run.Token), "next_assignment", nil)
+		if isErr {
+			t.Fatal(out)
+		}
+		var a struct {
+			Inbox bool `json:"inbox"`
+		}
+		if err := json.Unmarshal([]byte(out), &a); err != nil {
+			t.Fatal(err)
+		}
+		return a.Inbox
+	}
+	_, srv, run, _ := setupMail(t, "ok")
+	if !flag(srv, run) {
+		t.Error("ok mailbox + email: want true")
+	}
+	_, srv, run, _ = setupMail(t, "error")
+	if !flag(srv, run) {
+		t.Error("configured but erroring mailbox: want true")
+	}
+	_, srv, run, _ = setupMail(t, "off")
+	if flag(srv, run) {
+		t.Error("off: want false")
+	}
+	_, _, srv, run = setup(t) // nil mail
+	if flag(srv, run) {
+		t.Error("nil mail: want false")
+	}
+	out, isErr := call(t, connect(t, srv, run.Token), "messages_list", nil)
+	if !isErr || out != "no mailbox is set up for this project" {
+		t.Errorf("nil mail tool: %v %q", isErr, out)
+	}
+}
+
+func TestMailToolsInactiveToken(t *testing.T) {
+	_, srv, _, _ := setupMail(t, "ok")
+	cs := connect(t, srv, "bogus")
+	for _, n := range []string{"messages_list", "message_read", "message_wait"} {
+		var args map[string]any
+		if n == "message_read" {
+			args = map[string]any{"id": "x"}
+		}
+		if out, isErr := call(t, cs, n, args); !isErr || out != errNotActive {
+			t.Errorf("%s: %v %q", n, isErr, out)
+		}
 	}
 }
