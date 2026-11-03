@@ -376,6 +376,16 @@ function Thumb({ id, stage, live }) {
     </a>`;
 }
 
+// The screen a finished run ended on, or a dark box when there is none.
+function EndedThumb({ id }) {
+  const [ok, setOk] = useState(true);
+  return html`
+    <a class="thumb" href=${runHref(id)} onClick=${(e) => e.stopPropagation()} title="Open this run">
+      ${ok ? html`<img src=${artifactURL(id, 'last-frame.jpg')} alt="Last screen of the run" loading="lazy" onError=${() => setOk(false)} />`
+        : html`<span>Session over</span>`}
+    </a>`;
+}
+
 function RunsTable({ runs }) {
   const open = (id) => () => { location.hash = runHref(id); };
   return html`
@@ -385,7 +395,7 @@ function RunsTable({ runs }) {
         <tbody>
           ${runs.map((r) => html`
             <tr class="click" key=${r.id} onClick=${open(r.id)}>
-              <td class="thumbcell">${ACTIVE.has(r.state) ? html`<${Thumb} key=${r.id} id=${r.id} stage=${r.stage} live=${r.live} />` : null}</td>
+              <td class="thumbcell">${ACTIVE.has(r.state) ? html`<${Thumb} key=${r.id} id=${r.id} stage=${r.stage} live=${r.live} />` : html`<${EndedThumb} key=${'end-' + r.id} id=${r.id} />`}</td>
               <td><a href=${runHref(r.id)} onClick=${(e) => e.stopPropagation()}>${r.persona}</a>
                 ${r.role ? html`<div class="small muted">${r.role}</div>` : null}</td>
               <td>${r.story}${ACTIVE.has(r.state) ? html` <a class="small" href=${runHref(r.id)} onClick=${(e) => e.stopPropagation()}>Watch</a>` : null}</td>

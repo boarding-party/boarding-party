@@ -200,13 +200,15 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, os.Interrupt)
 	defer stop()
 
+	hub := live.NewHub()
+	svc.LastFrame = hub.Latest
+
 	// Re-adopt runs that were active before a restart.
 	if err := svc.Reconcile(ctx, time.Now(), cfg.RunTimeout); err != nil {
 		log.Printf("startup reconcile: %v", err)
 	}
 	go svc.Watch(ctx, runs.DefaultPollInterval, cfg.RunTimeout)
 
-	hub := live.NewHub()
 	go sweepLive(ctx, hub, 10*time.Second)
 	admin, worker := newServers(cfg, svc, st, hub)
 	return serve(ctx, []*http.Server{

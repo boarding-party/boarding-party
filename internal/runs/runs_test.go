@@ -3,6 +3,7 @@ package runs
 import (
 	"context"
 	"errors"
+	"io"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -309,5 +310,35 @@ func TestStartBusyWhileSessionIsDeleting(t *testing.T) {
 		Client: fake.NewClientBuilder().WithScheme(sc).WithObjects(deleting).Build()}
 	if _, err := svc.Start(context.Background(), "ann", "checkout"); !errors.Is(err, ErrBusy) {
 		t.Fatalf("err = %v, want ErrBusy", err)
+	}
+}
+
+func TestFinishKeepsLastFrame(t *testing.T) {
+	svc, _ := newSvc(t)
+	svc.LastFrame = func(id string) []byte { return []byte("jpeg-" + id) }
+	r, _ := svc.Start(context.Background(), "ann", "checkout")
+	if err := svc.Finish(context.Background(), r.Token, store.RunDone, "ok"); err != nil {
+		t.Fatal(err)
+	}
+	f, err := svc.Artifacts.Open(r.ID, LastFrameName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	b, _ := io.ReadAll(f)
+	if string(b) != "jpeg-"+r.ID {
+		t.Fatalf("frame: %q", b)
+	}
+}
+
+func TestFinishWithoutFrameSavesNothing(t *testing.T) {
+	svc, _ := newSvc(t)
+	svc.LastFrame = func(string) []byte { return nil }
+	r, _ := svc.Start(context.Background(), "ann", "checkout")
+	if err := svc.Finish(context.Background(), r.Token, store.RunDone, "ok"); err != nil {
+		t.Fatal(err)
+	}
+	if names, _ := svc.Artifacts.List(r.ID); len(names) != 0 {
+		t.Fatalf("artifacts: %v", names)
 	}
 }

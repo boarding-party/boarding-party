@@ -2,6 +2,7 @@
 package runs
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -24,6 +25,20 @@ const (
 )
 
 var ErrNotActive = errors.New("run not active")
+
+// LastFrameName is the artifact holding the screen a run ended on.
+const LastFrameName = "last-frame.jpg"
+
+// keepLastFrame saves the run's newest live frame, if any. Best effort: a run
+// without a frame simply has no picture.
+func (s *Service) keepLastFrame(runID string) {
+	if s.LastFrame == nil || s.Artifacts == nil {
+		return
+	}
+	if f := s.LastFrame(runID); len(f) > 0 {
+		_, _ = s.Artifacts.Put(runID, LastFrameName, bytes.NewReader(f))
+	}
+}
 
 // ErrInvalid means the request names a persona or story that does not exist.
 var ErrInvalid = errors.New("invalid run request")
@@ -60,6 +75,9 @@ type Service struct {
 	Artifacts artifacts.Store
 	Files     *files.Store // test fixtures personas may upload in the site; may be nil
 	Launcher  Launcher
+	// LastFrame returns the run's newest live screen frame, or nil. When set,
+	// a finished run keeps it as the artifact LastFrameName.
+	LastFrame func(runID string) []byte
 
 	startMu sync.Mutex // makes the one-active-run check and CreateRun atomic
 }
@@ -191,6 +209,7 @@ func (s *Service) Finish(ctx context.Context, token string, state store.RunState
 	if !won {
 		return ErrNotActive
 	}
+	s.keepLastFrame(r.ID)
 	if r.Session == "" {
 		return nil
 	}

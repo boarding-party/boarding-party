@@ -261,6 +261,7 @@ func start(ctx context.Context, dir string, projectYAML []byte, duration time.Du
 		Artifacts: artifacts.NewFS(filepath.Join(dir, "artifacts"), api.MaxArtifactBytes),
 		Files:     files.New(filepath.Join(dir, "files")),
 		Launcher:  l,
+		LastFrame: hub.Latest,
 	}
 	l.Svc = svc
 	b := make([]byte, 32)
