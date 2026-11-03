@@ -128,3 +128,20 @@ func TestNodePool(t *testing.T) {
 		}
 	}
 }
+
+func TestInboxAllowFrom(t *testing.T) {
+	base := "name: p\nsites: [\"https://x.test\"]\n"
+	p, err := Load([]byte(base + "inbox:\n  allowFrom: [Example.com, A@B.test]\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := p.Inbox.AllowFrom; len(got) != 2 || got[0] != "example.com" || got[1] != "a@b.test" {
+		t.Errorf("allowFrom = %v", got)
+	}
+	for _, bad := range []string{`["not a domain"]`, `["@x"]`} {
+		_, err := Load([]byte(base + "inbox:\n  allowFrom: " + bad + "\n"))
+		if err == nil || !strings.Contains(err.Error(), "inbox.allowFrom") {
+			t.Errorf("%s: err = %v", bad, err)
+		}
+	}
+}

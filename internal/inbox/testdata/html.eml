@@ -1,0 +1,7 @@
+From: no-reply@smesolutions.uk
+To: john@ex.test
+Subject: HTML only
+MIME-Version: 1.0
+Content-Type: text/html; charset=utf-8
+
+<html><head><style>p{color:red}</style><script>var secret=1;</script></head><body><p>Hello there</p><p>Click <a href="https://smesolutions.uk/a">here</a> or <a href="mailto:help@example.test">mail us</a> or <a href="http://example.test/b">b</a></p></body></html>

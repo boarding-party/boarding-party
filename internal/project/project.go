@@ -5,7 +5,9 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"net/mail"
 	"net/url"
+	"regexp"
 	"strings"
 
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -28,6 +30,36 @@ type Project struct {
 	// NoSchedule taint, which runs tolerate. Optional; empty schedules runs
 	// anywhere.
 	NodePool string `json:"nodePool,omitempty"`
+	// Inbox configures inbound persona email. Optional; without it every
+	// received message is filtered.
+	Inbox *Inbox `json:"inbox,omitempty"`
+}
+
+// Inbox is the project's inbound email policy.
+type Inbox struct {
+	// AllowFrom lists senders whose mail reaches personas: a bare domain
+	// (matches it and its subdomains) or a full address. Lower-cased on load.
+	AllowFrom []string `json:"allowFrom"`
+}
+
+var hostRe = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$`)
+
+// normalise lower-cases and validates inbox.allowFrom.
+func (in *Inbox) normalise() error {
+	for i, e := range in.AllowFrom {
+		e = strings.ToLower(strings.TrimSpace(e))
+		in.AllowFrom[i] = e
+		if strings.Contains(e, "@") {
+			a, err := mail.ParseAddress(e)
+			local, domain, _ := strings.Cut(e, "@")
+			if err != nil || a.Address != e || local == "" || !hostRe.MatchString(domain) {
+				return fmt.Errorf("inbox.allowFrom %q is not a valid email address", e)
+			}
+		} else if !hostRe.MatchString(e) {
+			return fmt.Errorf("inbox.allowFrom %q is not a valid domain", e)
+		}
+	}
+	return nil
 }
 
 // Pool splits NodePool into its label key and value; ok is false when unset.
@@ -148,6 +180,11 @@ func (p Project) validate() error {
 			if err := checkQuantity("memory", r.Memory, minMemory, maxMemory); err != nil {
 				return err
 			}
+		}
+	}
+	if p.Inbox != nil {
+		if err := p.Inbox.normalise(); err != nil {
+			return err
 		}
 	}
 	if p.NodePool != "" {
