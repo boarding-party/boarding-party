@@ -29,6 +29,7 @@ import (
 	"github.com/boarding-party/boardingparty/internal/api"
 	"github.com/boarding-party/boardingparty/internal/artifacts"
 	"github.com/boarding-party/boardingparty/internal/files"
+	"github.com/boarding-party/boardingparty/internal/inbox"
 	"github.com/boarding-party/boardingparty/internal/launcher"
 	"github.com/boarding-party/boardingparty/internal/live"
 	"github.com/boarding-party/boardingparty/internal/mcpserver"
@@ -99,8 +100,8 @@ func newScheme() (*runtime.Scheme, error) {
 // newServers builds the two handlers. The admin one (/api/*) must only be
 // served on loopback; the worker one is reachable by worker pods and carries
 // artifact upload, health and the per-run MCP endpoint, nothing from /api/*.
-func newServers(cfg config, svc *runs.Service, st *store.Store, hub *live.Hub) (admin, worker http.Handler) {
-	admin = api.Admin(svc, cfg.MaxArtifactBytes, cfg.AdminToken, hub)
+func newServers(cfg config, svc *runs.Service, st *store.Store, hub *live.Hub, mail *inbox.Service) (admin, worker http.Handler) {
+	admin = api.Admin(svc, cfg.MaxArtifactBytes, cfg.AdminToken, hub, mail)
 	mux := http.NewServeMux()
 	mux.Handle("/mcp/run/", mcpserver.Handler(svc, st, cfg.DirectorURL))
 	mux.Handle("/", api.Worker(svc, cfg.MaxArtifactBytes, hub))
@@ -210,7 +211,9 @@ func run() error {
 	go svc.Watch(ctx, runs.DefaultPollInterval, cfg.RunTimeout)
 
 	go sweepLive(ctx, hub, 10*time.Second)
-	admin, worker := newServers(cfg, svc, st, hub)
+	mail := &inbox.Service{Store: st, Secrets: inbox.NewSecretStore(kc, cfg.Namespace)}
+	go mail.Run(ctx)
+	admin, worker := newServers(cfg, svc, st, hub, mail)
 	return serve(ctx, []*http.Server{
 		{Addr: cfg.AdminAddr, Handler: admin, ReadHeaderTimeout: 10 * time.Second},
 		{Addr: cfg.WorkerAddr, Handler: worker, ReadHeaderTimeout: 10 * time.Second},

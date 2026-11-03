@@ -19,14 +19,17 @@ import (
 	"image/png"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/boarding-party/boardingparty/internal/api"
 	"github.com/boarding-party/boardingparty/internal/artifacts"
 	"github.com/boarding-party/boardingparty/internal/files"
+	"github.com/boarding-party/boardingparty/internal/inbox"
 	"github.com/boarding-party/boardingparty/internal/live"
 	"github.com/boarding-party/boardingparty/internal/project"
 	"github.com/boarding-party/boardingparty/internal/runs"
@@ -53,8 +56,11 @@ const SampleArtifact = "run.webm"
 // finishes "done" after Duration with a sample recording and one bug.
 type Launcher struct {
 	Duration time.Duration
-	Svc      *runs.Service // set after the Service is built
-	Hub      *live.Hub     // receives a fake frame every 500 ms while a run is active
+	Svc      *runs.Service  // set after the Service is built
+	Hub      *live.Hub      // receives a fake frame every 500 ms while a run is active
+	Mail     *inbox.Service // receives fake mail when a run starts; nil = none
+
+	mailUID atomic.Uint32
 
 	mu       sync.Mutex
 	sessions map[string]string // session -> run ID
@@ -87,7 +93,7 @@ func (l *Launcher) Stage(_ context.Context, session string) (string, string, err
 
 func (l *Launcher) SessionName(runID string) string { return "fake-" + runID }
 
-func (l *Launcher) Start(ctx context.Context, r store.Run, _ project.Project) (string, error) {
+func (l *Launcher) Start(ctx context.Context, r store.Run, p project.Project) (string, error) {
 	name := l.SessionName(r.ID)
 	l.mu.Lock()
 	if l.sessions == nil {
@@ -100,10 +106,36 @@ func (l *Launcher) Start(ctx context.Context, r store.Run, _ project.Project) (s
 	l.started[name] = time.Now()
 	l.mu.Unlock()
 	go l.finishLater(r)
+	l.fakeMail(r, p)
 	if l.Hub != nil {
 		go l.publishFrames(r)
 	}
 	return name, nil
+}
+
+// fakeMail stores what a real mailbox would hold after a sign-up: a welcome
+// message routed to the run's persona and one that the router filtered.
+func (l *Launcher) fakeMail(r store.Run, p project.Project) {
+	if l.Mail == nil || len(p.Sites) == 0 {
+		return
+	}
+	site := p.Sites[0]
+	host := site
+	if u, err := url.Parse(site); err == nil && u.Host != "" {
+		host = u.Hostname()
+	}
+	now := time.Now().UTC()
+	add := func(from, subject, text, filtered string, links []string) {
+		uid := l.mailUID.Add(1)
+		_, _ = l.Svc.Store.AddMessage(store.Message{
+			ID: fmt.Sprintf("fake-%s-%d", r.ID, uid), UIDValidity: 1, UID: uid, Persona: r.Persona,
+			From: from, To: []string{r.Persona + "@" + host}, Subject: subject, Text: text, Links: links,
+			Received: now, Stored: now, Filtered: filtered,
+		})
+	}
+	add("hello@"+host, "Welcome to "+p.Name, "Thanks for signing up. Start here: "+site, "", []string{site})
+	add("spam@example.test", "You won a prize", "Claim it now.", "sender not allowed", nil)
+	l.Mail.Notify()
 }
 
 // publishFrames feeds the hub a generated frame twice a second until the run ends.
@@ -255,7 +287,17 @@ func start(ctx context.Context, dir string, projectYAML []byte, duration time.Du
 		return nil, err
 	}
 	hub := live.NewHub()
-	l := &Launcher{Duration: duration, Hub: hub}
+	mail := &inbox.Service{
+		Store:   st,
+		Secrets: &memSecrets{},
+		CheckFunc: func(_ context.Context, c inbox.Config) error {
+			if c.Host != "imap.example.test" {
+				return fmt.Errorf("dev director accepts only imap.example.test")
+			}
+			return nil
+		},
+	}
+	l := &Launcher{Duration: duration, Hub: hub, Mail: mail}
 	svc := &runs.Service{
 		Store:     st,
 		Artifacts: artifacts.NewFS(filepath.Join(dir, "artifacts"), api.MaxArtifactBytes),
@@ -275,7 +317,7 @@ func start(ctx context.Context, dir string, projectYAML []byte, duration time.Du
 		st.Close()
 		return nil, err
 	}
-	srv := &http.Server{Handler: api.Admin(svc, 0, token, hub), ReadHeaderTimeout: 10 * time.Second}
+	srv := &http.Server{Handler: api.Admin(svc, 0, token, hub, mail), ReadHeaderTimeout: 10 * time.Second}
 	go func() {
 		if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			fmt.Fprintln(os.Stderr, "dev director:", err)
@@ -283,6 +325,33 @@ func start(ctx context.Context, dir string, projectYAML []byte, duration time.Du
 	}()
 	go svc.Watch(ctx, time.Second, 10*time.Minute)
 	return &Director{Base: "http://" + ln.Addr().String(), Token: token, srv: srv, st: st, dir: dir}, nil
+}
+
+// memSecrets keeps the mailbox login in memory for the dev director.
+type memSecrets struct {
+	mu  sync.Mutex
+	c   inbox.Config
+	set bool
+}
+
+func (m *memSecrets) Load(context.Context) (inbox.Config, bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.c, m.set, nil
+}
+
+func (m *memSecrets) Save(_ context.Context, c inbox.Config) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.c, m.set = c, true
+	return nil
+}
+
+func (m *memSecrets) Delete(context.Context) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.c, m.set = inbox.Config{}, false
+	return nil
 }
 
 // Close stops the server and removes the temp data.

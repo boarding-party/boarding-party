@@ -57,7 +57,7 @@ func TestServerRoutes(t *testing.T) {
 	defer st.Close()
 	cfg := config{DirectorURL: "http://bp-director:8080", MaxArtifactBytes: 1 << 20, AdminToken: "admin-secret"}
 	svc := &runs.Service{Store: st, Artifacts: artifacts.NewFS(t.TempDir(), cfg.MaxArtifactBytes), Launcher: fakeLauncher{}}
-	admin, worker := newServers(cfg, svc, st, live.NewHub())
+	admin, worker := newServers(cfg, svc, st, live.NewHub(), nil)
 
 	// worker listener: health yes, operator API no.
 	if c := do(t, worker, "GET", "/healthz", "").Code; c != 200 {
@@ -99,7 +99,7 @@ func TestAdminNeedsTheSecret(t *testing.T) {
 	defer st.Close()
 	cfg := config{DirectorURL: "http://bp-director:8080", MaxArtifactBytes: 1 << 20, AdminToken: "admin-secret"}
 	svc := &runs.Service{Store: st, Artifacts: artifacts.NewFS(t.TempDir(), cfg.MaxArtifactBytes), Launcher: fakeLauncher{}}
-	admin, _ := newServers(cfg, svc, st, live.NewHub())
+	admin, _ := newServers(cfg, svc, st, live.NewHub(), nil)
 	req := httptest.NewRequest("GET", "/api/runs", nil)
 	req.Host = "127.0.0.1:8081"
 	rec := httptest.NewRecorder()

@@ -43,7 +43,7 @@ func setupLive(t *testing.T) (*httptest.Server, *httptest.Server, *runs.Service)
 	t.Cleanup(func() { st.Close() })
 	svc := &runs.Service{Store: st, Artifacts: artifacts.NewFS(t.TempDir(), 1024), Launcher: noopLauncher{}}
 	hub := live.NewHub()
-	as, ah := admin(svc, 1024, testToken, hub)
+	as, ah := admin(svc, 1024, testToken, hub, nil)
 	as.liveCheck = 20 * time.Millisecond
 	asrv := httptest.NewServer(ah)
 	t.Cleanup(asrv.Close)
@@ -181,7 +181,7 @@ func TestLiveStreamEndsAtMaxDuration(t *testing.T) {
 	t.Cleanup(func() { st.Close() })
 	svc := &runs.Service{Store: st, Artifacts: artifacts.NewFS(t.TempDir(), 1024), Launcher: noopLauncher{}}
 	hub := live.NewHub()
-	as, ah := admin(svc, 1024, testToken, hub)
+	as, ah := admin(svc, 1024, testToken, hub, nil)
 	as.liveMax = 100 * time.Millisecond
 	asrv := httptest.NewServer(ah)
 	t.Cleanup(asrv.Close)

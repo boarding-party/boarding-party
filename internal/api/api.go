@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/boarding-party/boardingparty/internal/artifacts"
+	"github.com/boarding-party/boardingparty/internal/inbox"
 	"github.com/boarding-party/boardingparty/internal/live"
 	"github.com/boarding-party/boardingparty/internal/project"
 	"github.com/boarding-party/boardingparty/internal/runs"
@@ -32,6 +33,7 @@ type server struct {
 	svc      *runs.Service
 	maxBytes int64
 	hub      *live.Hub
+	mail     *inbox.Service // nil: mailbox routes answer 404
 
 	// Live stream limits; fields so tests can shrink them.
 	liveMax   time.Duration // longest a single stream stays open
@@ -53,13 +55,14 @@ func normalise(maxBytes int64) int64 {
 // Admin is the operator API (/api/*). Serve it on a loopback-only listener;
 // workers must never be able to reach it. Every request needs
 // "Authorization: Bearer <token>"; an empty token refuses all requests.
-func Admin(svc *runs.Service, maxBytes int64, token string, hub *live.Hub) http.Handler {
-	_, h := admin(svc, maxBytes, token, hub)
+func Admin(svc *runs.Service, maxBytes int64, token string, hub *live.Hub, mail *inbox.Service) http.Handler {
+	_, h := admin(svc, maxBytes, token, hub, mail)
 	return h
 }
 
-func admin(svc *runs.Service, maxBytes int64, token string, hub *live.Hub) (*server, http.Handler) {
+func admin(svc *runs.Service, maxBytes int64, token string, hub *live.Hub, mail *inbox.Service) (*server, http.Handler) {
 	s := newServer(svc, maxBytes, hub)
+	s.mail = mail
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/project", s.putProject)
 	mux.HandleFunc("PUT /api/project", s.putProjectJSON)
@@ -74,6 +77,11 @@ func admin(svc *runs.Service, maxBytes int64, token string, hub *live.Hub) (*ser
 	mux.HandleFunc("GET /api/files", s.listFiles)
 	mux.HandleFunc("PUT /api/files/{name}", s.putFile)
 	mux.HandleFunc("DELETE /api/files/{name}", s.deleteFile)
+	mux.HandleFunc("GET /api/mailbox", s.getMailbox)
+	mux.HandleFunc("PUT /api/mailbox", s.putMailbox)
+	mux.HandleFunc("DELETE /api/mailbox", s.deleteMailbox)
+	mux.HandleFunc("GET /api/messages", s.listMessages)
+	mux.HandleFunc("GET /api/messages/{id}", s.getMessage)
 	return s, guardAdmin(token, mux)
 }
 

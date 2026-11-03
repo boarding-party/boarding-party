@@ -102,3 +102,29 @@ func TestRunLifecycle(t *testing.T) {
 		t.Fatalf("start after finish: got %d", resp.StatusCode)
 	}
 }
+
+func TestRunStoresFakeMail(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	d, err := Start(ctx, sample(t), 300*time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	resp, b := do(t, d, "POST", "/api/runs", "application/json", d.Token, `{"persona":"Ada","story":"todos"}`)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("start: %d %s", resp.StatusCode, b)
+	}
+	_, b = do(t, d, "GET", "/api/messages?persona=Ada", "", d.Token, "")
+	if !strings.Contains(string(b), "Welcome to") || strings.Contains(string(b), "spam@") {
+		t.Fatalf("delivered: %s", b)
+	}
+	_, b = do(t, d, "GET", "/api/messages?filtered=1", "", d.Token, "")
+	if !strings.Contains(string(b), "sender not allowed") {
+		t.Fatalf("filtered: %s", b)
+	}
+	if resp, b := do(t, d, "PUT", "/api/mailbox", "application/json", d.Token,
+		`{"host":"imap.example.test","port":993,"username":"u","password":"p"}`); resp.StatusCode != 200 {
+		t.Fatalf("mailbox: %d %s", resp.StatusCode, b)
+	}
+}

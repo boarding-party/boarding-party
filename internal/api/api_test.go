@@ -62,7 +62,7 @@ func setupBoth(t *testing.T, maxBytes int64) (*httptest.Server, *httptest.Server
 	t.Cleanup(func() { st.Close() })
 	svc := &runs.Service{Store: st, Artifacts: artifacts.NewFS(t.TempDir(), maxBytes), Launcher: noopLauncher{}}
 	hub := live.NewHub()
-	srv := httptest.NewServer(Admin(svc, maxBytes, testToken, hub))
+	srv := httptest.NewServer(Admin(svc, maxBytes, testToken, hub, nil))
 	t.Cleanup(srv.Close)
 	wsrv := httptest.NewServer(Worker(svc, maxBytes, hub))
 	t.Cleanup(wsrv.Close)
@@ -492,7 +492,7 @@ func TestAdminEmptyTokenDeniesAll(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer st.Close()
-	srv := httptest.NewServer(Admin(&runs.Service{Store: st, Artifacts: artifacts.NewFS(t.TempDir(), 0), Launcher: noopLauncher{}}, 0, "", live.NewHub()))
+	srv := httptest.NewServer(Admin(&runs.Service{Store: st, Artifacts: artifacts.NewFS(t.TempDir(), 0), Launcher: noopLauncher{}}, 0, "", live.NewHub(), nil))
 	defer srv.Close()
 	for _, a := range []string{"", "Bearer ", "Bearer"} {
 		if c := raw(t, "GET", srv.URL+"/api/runs", "", map[string]string{"Authorization": a}); c != 401 {
