@@ -161,3 +161,34 @@ func TestParseDelivered(t *testing.T) {
 		t.Errorf("delivered = %v", m.Delivered)
 	}
 }
+
+func withAR(ar string) []byte {
+	return []byte("From: Shop <no-reply@smesolutions.uk>\r\nTo: john@ex.test\r\nSubject: s\r\nAuthentication-Results: " + ar + "\r\n\r\nhi\r\n")
+}
+
+func TestParseAuthenticationResults(t *testing.T) {
+	tests := []struct {
+		name, ar string
+		verified bool
+		serv     string
+	}{
+		{"gmail", "mx.google.com; dmarc=pass (p=NONE) header.from=smesolutions.uk", true, "mx.google.com"},
+		{"version and case", "MX.Google.com 1; DMARC=PASS header.from=SMESolutions.uk", true, "mx.google.com"},
+		{"quoted semicolon", `mx.google.com; spf=fail reason="x; dmarc=pass header.from=smesolutions.uk"`, false, "mx.google.com"},
+		{"nested comment", "mx.google.com; spf=fail (a (b) dmarc=pass header.from=smesolutions.uk)", false, "mx.google.com"},
+		{"dmarc other domain", "mx.google.com; dmarc=pass header.from=other.test", false, "mx.google.com"},
+		{"dmarc no header.from", "mx.google.com; dmarc=pass", false, "mx.google.com"},
+		{"dkim parent domain", "mx.google.com; dkim=pass header.d=smesolutions.uk", true, "mx.google.com"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			m, err := Parse(withAR(tc.ar))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if m.Verified != tc.verified || m.AuthServ != tc.serv {
+				t.Errorf("Verified=%v AuthServ=%q, want %v %q", m.Verified, m.AuthServ, tc.verified, tc.serv)
+			}
+		})
+	}
+}

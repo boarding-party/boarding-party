@@ -34,7 +34,7 @@ func TestRoute(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			persona, filtered := Route(Message{From: tc.from, Verified: !tc.unverified, To: []string{"x@y.test", tc.to}}, tc.p)
+			persona, filtered := Route(Message{From: tc.from, Verified: !tc.unverified, AuthServ: "mx.google.com", To: []string{"x@y.test", tc.to}}, tc.p)
 			if persona != tc.persona || filtered != tc.filtered {
 				t.Errorf("got (%q, %q), want (%q, %q)", persona, filtered, tc.persona, tc.filtered)
 			}
@@ -50,8 +50,35 @@ func TestRoutePrefersDelivered(t *testing.T) {
 		}}},
 		Inbox: &project.Inbox{AllowFrom: []string{"example.test"}},
 	}
-	m := Message{From: "s@example.test", Verified: true, To: []string{"a@ex.test", "b@ex.test"}, Delivered: []string{"b@ex.test"}}
+	m := Message{From: "s@example.test", Verified: true, AuthServ: "mx.google.com", To: []string{"a@ex.test", "b@ex.test"}, Delivered: []string{"b@ex.test"}}
 	if got, _ := Route(m, p); got != "B" {
 		t.Errorf("persona = %q, want B", got)
+	}
+}
+
+func TestRouteTrustedAuthServ(t *testing.T) {
+	mk := func(id string) project.Project {
+		return project.Project{
+			Roles: []project.Role{{Name: "r", Personas: []project.Persona{{Name: "A", Identity: map[string]string{"email": "a@ex.test"}}}}},
+			Inbox: &project.Inbox{AllowFrom: []string{"example.test"}, AuthServID: id},
+		}
+	}
+	m := func(serv string) Message {
+		return Message{From: "s@example.test", To: []string{"a@ex.test"}, Verified: true, AuthServ: serv}
+	}
+	tests := []struct {
+		name, trusted, serv, filtered string
+	}{
+		{"default accepts google", "", "mx.google.com", ""},
+		{"default rejects other", "", "evil.test", "sender not verified"},
+		{"custom accepts own", "mx.example.test", "mx.example.test", ""},
+		{"custom rejects google", "mx.example.test", "mx.google.com", "sender not verified"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, f := Route(m(tc.serv), mk(tc.trusted)); f != tc.filtered {
+				t.Errorf("filtered = %q, want %q", f, tc.filtered)
+			}
+		})
 	}
 }

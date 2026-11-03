@@ -40,12 +40,19 @@ type Inbox struct {
 	// AllowFrom lists senders whose mail reaches personas: a bare domain
 	// (matches it and its subdomains) or a full address. Lower-cased on load.
 	AllowFrom []string `json:"allowFrom"`
+	// AuthServID is the authserv-id of the Authentication-Results header whose verdict is
+	// trusted: the one your mail provider adds. Empty means mx.google.com.
+	AuthServID string `json:"authServId,omitempty"`
 }
 
 var hostRe = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$`)
 
 // normalise lower-cases and validates inbox.allowFrom.
 func (in *Inbox) normalise() error {
+	in.AuthServID = strings.ToLower(strings.TrimSpace(in.AuthServID))
+	if in.AuthServID != "" && !hostRe.MatchString(in.AuthServID) {
+		return fmt.Errorf("inbox.authServId %q is not a valid hostname", in.AuthServID)
+	}
 	for i, e := range in.AllowFrom {
 		e = strings.ToLower(strings.TrimSpace(e))
 		in.AllowFrom[i] = e

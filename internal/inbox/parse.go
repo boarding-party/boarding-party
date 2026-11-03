@@ -41,7 +41,8 @@ func Parse(raw []byte) (Message, error) {
 		return Message{}, errors.New("parse message: no valid From header")
 	}
 	m := Message{From: from[0]}
-	m.Verified = len(from) == 1 && authenticated(h.Get("Authentication-Results"), domainOf(from[0]))
+	verified, authServ := authenticated(h.Get("Authentication-Results"), domainOf(from[0]))
+	m.Verified, m.AuthServ = verified && len(from) == 1, authServ
 	m.Subject, _ = h.Text("Subject")
 	if t, err := mail.ParseDate(h.Get("Date")); err == nil {
 		m.Received = t
@@ -179,18 +180,76 @@ func domainOf(addr string) string {
 	return d
 }
 
-var commentRe = regexp.MustCompile(`\([^)]*\)`)
-
-// authenticated reports whether an Authentication-Results header (the topmost one, added by the
-// receiving provider) shows dmarc=pass, or dkim=pass signed by the From domain or a parent of it.
-func authenticated(ar, fromDomain string) bool {
-	if ar == "" || fromDomain == "" {
-		return false
+// arClauses splits an Authentication-Results value into its top-level ";" clauses, each a list of
+// whitespace-separated tokens. Comments (which nest) are dropped; quoted strings stay in one token.
+func arClauses(ar string) [][]string {
+	var clauses [][]string
+	var toks []string
+	var cur strings.Builder
+	flushTok := func() {
+		if cur.Len() > 0 {
+			toks = append(toks, cur.String())
+			cur.Reset()
+		}
 	}
-	ar = commentRe.ReplaceAllString(strings.ToLower(ar), " ")
-	clauses := strings.Split(ar, ";")
-	for _, c := range clauses[1:] { // first clause is the authserv-id
-		fields := strings.Fields(c)
+	depth, quoted := 0, false
+	for i := 0; i < len(ar); i++ {
+		c := ar[i]
+		switch {
+		case quoted:
+			cur.WriteByte(c)
+			if c == '\\' && i+1 < len(ar) {
+				i++
+				cur.WriteByte(ar[i])
+			} else if c == '"' {
+				quoted = false
+			}
+		case depth > 0:
+			switch c {
+			case '\\':
+				i++
+			case '(':
+				depth++
+			case ')':
+				depth--
+			}
+		case c == '(':
+			depth++
+			flushTok()
+		case c == '"':
+			quoted = true
+			cur.WriteByte(c)
+		case c == ';':
+			flushTok()
+			clauses = append(clauses, toks)
+			toks = nil
+		case c == ' ' || c == '\t' || c == '\r' || c == '\n':
+			flushTok()
+		default:
+			cur.WriteByte(c)
+		}
+	}
+	flushTok()
+	return append(clauses, toks)
+}
+
+func unquote(v string) string {
+	return strings.Trim(v, `"`)
+}
+
+// authenticated reads the topmost Authentication-Results header (added by the receiving provider).
+// It returns the lower-cased authserv-id and whether the header shows dmarc=pass for the From
+// domain, or dkim=pass signed by the From domain or a parent of it.
+func authenticated(ar, fromDomain string) (verified bool, authServ string) {
+	clauses := arClauses(strings.ToLower(ar))
+	if len(clauses) == 0 || len(clauses[0]) == 0 {
+		return false, ""
+	}
+	authServ = unquote(clauses[0][0])
+	if fromDomain == "" {
+		return false, authServ
+	}
+	for _, fields := range clauses[1:] {
 		if len(fields) == 0 {
 			continue
 		}
@@ -198,26 +257,26 @@ func authenticated(ar, fromDomain string) bool {
 		if !ok || result != "pass" {
 			continue
 		}
-		switch method {
-		case "dmarc":
-			return true
-		case "dkim":
-			for _, f := range fields[1:] {
-				k, v, _ := strings.Cut(f, "=")
-				if k != "header.d" && k != "header.i" {
-					continue
+		for _, f := range fields[1:] {
+			k, v, _ := strings.Cut(f, "=")
+			v = unquote(v)
+			switch {
+			case method == "dmarc" && k == "header.from":
+				if v == fromDomain {
+					return true, authServ
 				}
+			case method == "dkim" && (k == "header.d" || k == "header.i"):
 				d := v
 				if strings.Contains(v, "@") {
 					d = domainOf(v)
 				}
 				if d != "" && (fromDomain == d || strings.HasSuffix(fromDomain, "."+d)) {
-					return true
+					return true, authServ
 				}
 			}
 		}
 	}
-	return false
+	return false, authServ
 }
 
 var blankRuns = regexp.MustCompile(`\n[ \t]*(\n[ \t]*)+`)

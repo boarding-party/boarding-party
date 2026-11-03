@@ -17,6 +17,8 @@ type Message struct {
 	Received  time.Time `json:"received"`
 	// Verified is true when the receiving provider's Authentication-Results vouch for the From domain.
 	Verified bool `json:"verified"`
+	// AuthServ is the lower-cased authserv-id of that header, naming the system that made the verdict.
+	AuthServ string `json:"authServ"`
 	// Filtered is why the message was not delivered to the persona; empty when delivered.
 	Filtered string `json:"filtered"`
 }

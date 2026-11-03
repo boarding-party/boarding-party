@@ -39,7 +39,7 @@ func Route(m Message, p project.Project) (persona, filtered string) {
 	if p.Inbox == nil || !senderAllowed(m.From, p.Inbox.AllowFrom) {
 		return persona, FilteredSenderDenied
 	}
-	if !m.Verified {
+	if !m.Verified || m.AuthServ != trustedAuthServ(p) {
 		return persona, FilteredUnverified
 	}
 	return persona, ""
@@ -63,4 +63,14 @@ func senderAllowed(from string, allow []string) bool {
 		}
 	}
 	return false
+}
+
+// DefaultAuthServID is the authserv-id trusted when the project sets none: Gmail, where persona mailboxes live.
+const DefaultAuthServID = "mx.google.com"
+
+func trustedAuthServ(p project.Project) string {
+	if p.Inbox != nil && p.Inbox.AuthServID != "" {
+		return p.Inbox.AuthServID
+	}
+	return DefaultAuthServID
 }

@@ -145,3 +145,20 @@ func TestInboxAllowFrom(t *testing.T) {
 		}
 	}
 }
+
+func TestInboxAuthServID(t *testing.T) {
+	base := "name: p\nsites: [\"https://x.test\"]\ninbox:\n  allowFrom: [a.test]\n"
+	p, err := Load([]byte(base + "  authServId: MX.Example.test\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Inbox.AuthServID != "mx.example.test" {
+		t.Errorf("authServId = %q", p.Inbox.AuthServID)
+	}
+	for _, bad := range []string{"not a host", "nodot"} {
+		_, err := Load([]byte(base + "  authServId: \"" + bad + "\"\n"))
+		if err == nil || !strings.Contains(err.Error(), "inbox.authServId") {
+			t.Errorf("%q: err = %v", bad, err)
+		}
+	}
+}
