@@ -49,6 +49,11 @@ func (c Config) Validate() error {
 	return nil
 }
 
+// key identifies the mailbox account for deduping stored mail.
+func (c Config) key() string {
+	return strings.ToLower(c.Host) + "|" + strings.ToLower(c.Username)
+}
+
 func (c Config) addr() string {
 	port := c.Port
 	if port == 0 {
@@ -136,7 +141,7 @@ func (s *Service) poll(ctx context.Context, c Config) error {
 	}
 	stop := context.AfterFunc(ctx, func() { cl.Terminate() })
 	defer stop()
-	if err := s.fetchNew(ctx, cl); err != nil {
+	if err := s.fetchNew(ctx, cl, c.key()); err != nil {
 		cl.Terminate()
 		return err
 	}
@@ -150,7 +155,7 @@ type meta struct {
 	env  *imap.Envelope
 }
 
-func (s *Service) fetchNew(ctx context.Context, cl *client.Client) error {
+func (s *Service) fetchNew(ctx context.Context, cl *client.Client, mailbox string) error {
 	mb, err := cl.Select("INBOX", true) // EXAMINE
 	if err != nil {
 		return fmt.Errorf("examine INBOX: %w", err)
@@ -198,7 +203,7 @@ func (s *Service) fetchNew(ctx context.Context, cl *client.Client) error {
 		if err != nil {
 			return err
 		}
-		m.UIDValidity = validity
+		m.UIDValidity, m.Mailbox = validity, mailbox
 		added, err := s.Store.AddMessage(m)
 		if err != nil {
 			return err

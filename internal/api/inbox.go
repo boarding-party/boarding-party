@@ -71,17 +71,17 @@ func (s *server) putMailbox(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
+	old, hadOld, err := m.Secrets.Load(r.Context())
+	if err != nil {
+		fail(w, err)
+		return
+	}
 	if c.Password == "" {
-		old, ok, err := m.Secrets.Load(r.Context())
-		if err != nil {
-			fail(w, err)
-			return
-		}
-		if !ok || old.Password == "" {
+		if !hadOld || old.Password == "" {
 			jsonError(w, http.StatusBadRequest, "imap password is required")
 			return
 		}
-		if !strings.EqualFold(c.Host, old.Host) || portOrDefault(c.Port) != portOrDefault(old.Port) || c.Username != old.Username {
+		if !sameMailbox(c, old) {
 			jsonError(w, http.StatusBadRequest, "Enter the app password again to change the server or username.")
 			return
 		}
@@ -101,6 +101,12 @@ func (s *server) putMailbox(w http.ResponseWriter, r *http.Request) {
 		fail(w, err)
 		return
 	}
+	if !hadOld || !sameMailbox(c, old) { // a different mailbox has its own UID space
+		if err := m.Store.ClearMailCursor(); err != nil {
+			fail(w, err)
+			return
+		}
+	}
 	m.Kick()
 	writeJSON(w, http.StatusOK, view(c, true, m.Status()))
 }
@@ -111,6 +117,10 @@ func (s *server) deleteMailbox(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := m.Secrets.Delete(r.Context()); err != nil {
+		fail(w, err)
+		return
+	}
+	if err := m.Store.ClearMailCursor(); err != nil {
 		fail(w, err)
 		return
 	}
@@ -183,6 +193,11 @@ func (s *server) getMessage(w http.ResponseWriter, r *http.Request) {
 		f.Links = []string{}
 	}
 	writeJSON(w, http.StatusOK, f)
+}
+
+// sameMailbox reports whether a and b name the same server account.
+func sameMailbox(a, b inbox.Config) bool {
+	return strings.EqualFold(a.Host, b.Host) && portOrDefault(a.Port) == portOrDefault(b.Port) && a.Username == b.Username
 }
 
 func portOrDefault(p int) int {

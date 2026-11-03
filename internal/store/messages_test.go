@@ -1,7 +1,9 @@
 package store
 
 import (
+	"database/sql"
 	"errors"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -116,4 +118,81 @@ func TestPruneMessages(t *testing.T) {
 	if _, err := s.Message("old"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("old survived: %v", err)
 	}
+}
+
+func TestClearMailCursor(t *testing.T) {
+	s := open(t)
+	if err := s.ClearMailCursor(); err != nil { // nothing to clear is fine
+		t.Fatal(err)
+	}
+	s.SetMailCursor(7, 42)
+	if err := s.ClearMailCursor(); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, ok, err := s.MailCursor(); err != nil || ok {
+		t.Fatalf("ok=%v err=%v, want cleared", ok, err)
+	}
+}
+
+func TestDedupeIncludesMailbox(t *testing.T) {
+	s := open(t)
+	now := time.Now().UTC()
+	a, b := msg("a", 5, "ada", "", now), msg("b", 5, "ada", "", now)
+	a.Mailbox, b.Mailbox = "imap.a.test|u", "imap.b.test|u"
+	for _, m := range []Message{a, b} {
+		if added, err := s.AddMessage(m); err != nil || !added {
+			t.Fatalf("%s: added=%v err=%v", m.ID, added, err)
+		}
+	}
+	dup := msg("c", 5, "ada", "", now)
+	dup.Mailbox = a.Mailbox
+	if added, err := s.AddMessage(dup); err != nil || added {
+		t.Fatalf("same mailbox dup: added=%v err=%v", added, err)
+	}
+}
+
+func TestOpenMigratesMessagesWithoutMailbox(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "old.db")
+	db, err := sql.Open("sqlite", "file:"+path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.Exec(`CREATE TABLE messages (
+  id TEXT PRIMARY KEY, uidvalidity INTEGER NOT NULL DEFAULT 0, uid INTEGER NOT NULL DEFAULT 0,
+  persona TEXT NOT NULL DEFAULT '', sender TEXT NOT NULL DEFAULT '', recipients TEXT NOT NULL DEFAULT '[]',
+  subject TEXT NOT NULL DEFAULT '', body TEXT NOT NULL DEFAULT '', links TEXT NOT NULL DEFAULT '[]',
+  received INTEGER NOT NULL DEFAULT 0, stored INTEGER NOT NULL DEFAULT 0, filtered TEXT NOT NULL DEFAULT '',
+  UNIQUE(uidvalidity, uid));
+CREATE INDEX messages_persona_received ON messages(persona, received);
+INSERT INTO messages(id, uidvalidity, uid, persona, subject, stored) VALUES('old', 1, 5, 'ada', 'kept', 100);`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	db.Close()
+
+	s, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	m, err := s.Message("old")
+	if err != nil || m.Subject != "kept" || m.UID != 5 {
+		t.Fatalf("old row lost: %+v %v", m, err)
+	}
+	// Unique key is now per mailbox: the same ids from a named mailbox are new; from '' they are duplicates.
+	n := msg("new", 5, "ada", "", time.Now())
+	n.Mailbox = "h|u"
+	if added, err := s.AddMessage(n); err != nil || !added {
+		t.Fatalf("new mailbox: %v %v", added, err)
+	}
+	d := msg("dup", 5, "ada", "", time.Now())
+	if added, err := s.AddMessage(d); err != nil || added {
+		t.Fatalf("legacy mailbox dup: %v %v", added, err)
+	}
+	s.Close()
+	s2, err := Open(path) // second open: nothing to migrate
+	if err != nil {
+		t.Fatal(err)
+	}
+	s2.Close()
 }

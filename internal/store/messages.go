@@ -22,6 +22,9 @@ type Message struct {
 	Received    time.Time `json:"received"`
 	Stored      time.Time `json:"stored"` // when the director saved it
 	Filtered    string    `json:"filtered"`
+	// Mailbox identifies the account the message came from (lower host|lower username), so
+	// the same UIDVALIDITY and UID in another mailbox is not mistaken for a duplicate.
+	Mailbox string `json:"-"`
 }
 
 type MessageQuery struct {
@@ -41,14 +44,14 @@ func jsonList(v []string) string {
 	return string(b)
 }
 
-// AddMessage stores m; added is false when (UIDValidity, UID) was already stored.
+// AddMessage stores m; added is false when (Mailbox, UIDValidity, UID) was already stored.
 func (s *Store) AddMessage(m Message) (bool, error) {
 	if m.Stored.IsZero() {
 		m.Stored = time.Now()
 	}
-	res, err := s.db.Exec(`INSERT OR IGNORE INTO messages(`+msgCols+`) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`,
+	res, err := s.db.Exec(`INSERT OR IGNORE INTO messages(`+msgCols+`, mailbox) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		m.ID, m.UIDValidity, m.UID, m.Persona, m.From, jsonList(m.To), m.Subject, m.Text,
-		jsonList(m.Links), ts(m.Received), ts(m.Stored), m.Filtered)
+		jsonList(m.Links), ts(m.Received), ts(m.Stored), m.Filtered, m.Mailbox)
 	if err != nil {
 		return false, err
 	}
@@ -61,7 +64,7 @@ func scanMessage(sc interface{ Scan(...any) error }) (Message, error) {
 	var to, links string
 	var received, stored int64
 	if err := sc.Scan(&m.ID, &m.UIDValidity, &m.UID, &m.Persona, &m.From, &to, &m.Subject, &m.Text,
-		&links, &received, &stored, &m.Filtered); err != nil {
+		&links, &received, &stored, &m.Filtered, &m.Mailbox); err != nil {
 		return Message{}, err
 	}
 	if err := json.Unmarshal([]byte(to), &m.To); err != nil {
@@ -83,7 +86,7 @@ func (s *Store) Messages(q MessageQuery) ([]Message, error) {
 	if limit > 200 {
 		limit = 200
 	}
-	query := `SELECT ` + msgCols + ` FROM messages WHERE 1=1`
+	query := `SELECT ` + msgCols + `, mailbox FROM messages WHERE 1=1`
 	var args []any
 	if q.Persona != "" {
 		query += ` AND persona = ?`
@@ -117,7 +120,7 @@ func (s *Store) Messages(q MessageQuery) ([]Message, error) {
 }
 
 func (s *Store) Message(id string) (Message, error) {
-	m, err := scanMessage(s.db.QueryRow(`SELECT `+msgCols+` FROM messages WHERE id = ?`, id))
+	m, err := scanMessage(s.db.QueryRow(`SELECT `+msgCols+`, mailbox FROM messages WHERE id = ?`, id))
 	if errors.Is(err, sql.ErrNoRows) {
 		return Message{}, ErrNotFound
 	}
@@ -139,6 +142,12 @@ func (s *Store) MailCursor() (validity, last uint32, ok bool, err error) {
 func (s *Store) SetMailCursor(validity, last uint32) error {
 	_, err := s.db.Exec(`INSERT INTO mail_cursor(id, validity, last) VALUES(1,?,?)
 		ON CONFLICT(id) DO UPDATE SET validity=excluded.validity, last=excluded.last`, validity, last)
+	return err
+}
+
+// ClearMailCursor forgets the IMAP position, so the next poll starts at the mailbox's UIDNEXT.
+func (s *Store) ClearMailCursor() error {
+	_, err := s.db.Exec(`DELETE FROM mail_cursor WHERE id = 1`)
 	return err
 }
 

@@ -64,11 +64,47 @@ func Open(path string) (*Store, error) {
 	}
 	// One writer connection avoids SQLITE_BUSY between our own goroutines.
 	db.SetMaxOpenConns(1)
+	legacy, err := messagesLacksMailbox(db)
+	if err != nil {
+		db.Close()
+		return nil, err
+	}
+	if legacy { // the unique key changed; SQLite cannot alter it, so move the table aside
+		if _, err := db.Exec(`ALTER TABLE messages RENAME TO messages_old; DROP INDEX IF EXISTS messages_persona_received`); err != nil {
+			db.Close()
+			return nil, fmt.Errorf("migrate messages: %w", err)
+		}
+	}
 	if _, err := db.Exec(schema); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("apply schema: %w", err)
 	}
+	if legacy {
+		if _, err := db.Exec(`INSERT INTO messages(` + msgCols + `, mailbox) SELECT ` + msgCols + `, '' FROM messages_old; DROP TABLE messages_old`); err != nil {
+			db.Close()
+			return nil, fmt.Errorf("migrate messages: %w", err)
+		}
+	}
 	return &Store{db: db}, nil
+}
+
+// messagesLacksMailbox reports whether messages exists without the mailbox column.
+func messagesLacksMailbox(db *sql.DB) (bool, error) {
+	rows, err := db.Query(`SELECT name FROM pragma_table_info('messages')`)
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+	n, has := 0, false
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return false, err
+		}
+		n++
+		has = has || name == "mailbox"
+	}
+	return n > 0 && !has, rows.Err()
 }
 
 func (s *Store) Close() error { return s.db.Close() }

@@ -231,6 +231,9 @@ func TestNewMailIsRoutedAndStored(t *testing.T) {
 	if m.Persona != "John" || m.Filtered != "" || m.Subject != "welcome" || m.UID != 7 || m.UIDValidity != 1 {
 		t.Fatalf("message = %+v", m)
 	}
+	if m.Mailbox != strings.ToLower(ts.host)+"|"+testUser {
+		t.Fatalf("mailbox = %q", m.Mailbox)
+	}
 	if len(m.ID) != 16 || strings.Trim(m.ID, "0123456789abcdef") != "" {
 		t.Fatalf("id %q is not 16 hex chars", m.ID)
 	}
@@ -391,5 +394,24 @@ func TestConfigValidate(t *testing.T) {
 		if err := c.Validate(); err == nil {
 			t.Errorf("%s: no error", name)
 		}
+	}
+}
+
+func TestClearedCursorStartsAtUIDNextAgain(t *testing.T) {
+	ts := startServer(t)
+	s := newService(t, ts, testPass)
+	runCycle(t, s)
+	ts.add(t, goodMail("one"))
+	runCycle(t, s)
+	if err := s.Store.ClearMailCursor(); err != nil {
+		t.Fatal(err)
+	}
+	ts.add(t, goodMail("two")) // arrives while the cursor is gone
+	runCycle(t, s)             // starts at UIDNEXT-1: imports nothing
+	if got := all(t, s); len(got) != 1 || got[0].Subject != "one" {
+		t.Fatalf("stored %+v, want only 'one'", got)
+	}
+	if _, last, ok, _ := s.Store.MailCursor(); !ok || last != 8 {
+		t.Fatalf("cursor last=%d ok=%v, want 8", last, ok)
 	}
 }

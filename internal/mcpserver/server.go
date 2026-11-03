@@ -256,6 +256,7 @@ func newServer(svc *runs.Service, st *store.Store, directorURL, token string, ma
 }
 
 const errNoMailbox = "no mailbox is set up for this project"
+const errMailDown = "the mailbox can't be reached right now"
 const errNoMessage = "message not found"
 
 // waitUnit is the unit of message_wait's timeout_seconds; tests shorten it.
@@ -333,8 +334,8 @@ func mailUnavailable(mail mailbox) string {
 	if mail == nil {
 		return errNoMailbox
 	}
-	if st := mail.Status(); st.State == "error" {
-		return "the mailbox can't be reached right now: " + st.Error
+	if mail.Status().State == "error" {
+		return errMailDown // generic on purpose: the detail can name the host and user, and stays on the admin API
 	}
 	return ""
 }

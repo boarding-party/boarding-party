@@ -499,7 +499,7 @@ func TestMailToolsErrorWhenMailboxUnreachable(t *testing.T) {
 		"messages_list": nil, "message_read": {"id": "m1"}, "message_wait": {"timeout_seconds": 30},
 	} {
 		out, isErr := call(t, cs, n, args)
-		if !isErr || out != "the mailbox can't be reached right now: login failed" {
+		if !isErr || out != "the mailbox can't be reached right now" || strings.Contains(out, "login failed") {
 			t.Errorf("%s: %v %q", n, isErr, out)
 		}
 	}

@@ -43,7 +43,8 @@ CREATE TABLE IF NOT EXISTS messages (
   received    INTEGER NOT NULL DEFAULT 0,
   stored      INTEGER NOT NULL DEFAULT 0,
   filtered    TEXT NOT NULL DEFAULT '',
-  UNIQUE(uidvalidity, uid)
+  mailbox     TEXT NOT NULL DEFAULT '',
+  UNIQUE(mailbox, uidvalidity, uid)
 );
 CREATE INDEX IF NOT EXISTS messages_persona_received ON messages(persona, received);
 CREATE TABLE IF NOT EXISTS mail_cursor (

@@ -217,3 +217,34 @@ func TestMailboxRoutesWithoutService404(t *testing.T) {
 		t.Fatalf("put %d", code)
 	}
 }
+
+func TestMailboxChangeAndDeleteClearCursor(t *testing.T) {
+	srv, _, sec, st := setupMail(t, okCheck)
+	ctx := context.Background()
+	sec.Save(ctx, inbox.Config{Host: "imap.example.test", Port: 993, Username: "u@example.test", Password: "s3cret-pw"})
+	hasCursor := func() bool { _, _, ok, _ := st.MailCursor(); return ok }
+	reset := func() { st.SetMailCursor(1, 10) }
+
+	reset()
+	if code, body := mailDo(t, "PUT", srv.URL+"/api/mailbox", putBody); code != 200 || !hasCursor() {
+		t.Fatalf("same mailbox: %d %s cursor=%v", code, body, hasCursor())
+	}
+	if code, body := mailDo(t, "PUT", srv.URL+"/api/mailbox", `{"host":"IMAP.example.test","port":0,"username":"u@example.test","password":"new-pw"}`); code != 200 || !hasCursor() {
+		t.Fatalf("same mailbox, new password: %d %s cursor=%v", code, body, hasCursor())
+	}
+	for _, b := range []string{
+		`{"host":"imap.other.test","port":993,"username":"u@example.test","password":"pw"}`,
+		`{"host":"imap.example.test","port":143,"username":"u@example.test","password":"pw"}`,
+		`{"host":"imap.example.test","port":993,"username":"v@example.test","password":"pw"}`,
+	} {
+		reset()
+		sec.Save(ctx, inbox.Config{Host: "imap.example.test", Port: 993, Username: "u@example.test", Password: "s3cret-pw"})
+		if code, body := mailDo(t, "PUT", srv.URL+"/api/mailbox", b); code != 200 || hasCursor() {
+			t.Fatalf("%s: %d %s cursor=%v", b, code, body, hasCursor())
+		}
+	}
+	reset()
+	if code, _ := mailDo(t, "DELETE", srv.URL+"/api/mailbox", ""); code != 204 || hasCursor() {
+		t.Fatalf("delete: %d cursor=%v", code, hasCursor())
+	}
+}
