@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/boarding-party/boardingparty/internal/inbox"
@@ -78,6 +79,10 @@ func (s *server) putMailbox(w http.ResponseWriter, r *http.Request) {
 		}
 		if !ok || old.Password == "" {
 			jsonError(w, http.StatusBadRequest, "imap password is required")
+			return
+		}
+		if !strings.EqualFold(c.Host, old.Host) || portOrDefault(c.Port) != portOrDefault(old.Port) || c.Username != old.Username {
+			jsonError(w, http.StatusBadRequest, "Enter the app password again to change the server or username.")
 			return
 		}
 		c.Password = old.Password
@@ -178,4 +183,11 @@ func (s *server) getMessage(w http.ResponseWriter, r *http.Request) {
 		f.Links = []string{}
 	}
 	writeJSON(w, http.StatusOK, f)
+}
+
+func portOrDefault(p int) int {
+	if p == 0 {
+		return inbox.DefaultPort
+	}
+	return p
 }

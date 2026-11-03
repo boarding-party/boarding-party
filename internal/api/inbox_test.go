@@ -101,19 +101,35 @@ func TestMailboxPutChecksBeforeSaving(t *testing.T) {
 }
 
 func TestMailboxPutKeepsPassword(t *testing.T) {
+	calls := 0
 	var got inbox.Config
-	srv, _, sec, _ := setupMail(t, func(_ context.Context, c inbox.Config) error { got = c; return nil })
+	srv, _, sec, _ := setupMail(t, func(_ context.Context, c inbox.Config) error { calls++; got = c; return nil })
 	if code, body := mailDo(t, "PUT", srv.URL+"/api/mailbox", `{"host":"h.test","username":"u","password":""}`); code != 400 {
 		t.Fatalf("no saved password: %d %s", code, body)
 	}
-	sec.Save(context.Background(), inbox.Config{Host: "old.test", Port: 993, Username: "u", Password: "kept"})
-	code, body := mailDo(t, "PUT", srv.URL+"/api/mailbox", `{"host":"h.test","port":143,"username":"u2","password":""}`)
-	if code != 200 {
-		t.Fatalf("%d %s", code, body)
+	saved := inbox.Config{Host: "Imap.Test", Port: 0, Username: "u", Password: "kept"}
+	sec.Save(context.Background(), saved)
+	calls = 0
+	for _, b := range []string{
+		`{"host":"other.test","port":993,"username":"u","password":""}`,
+		`{"host":"imap.test","port":143,"username":"u","password":""}`,
+		`{"host":"imap.test","port":993,"username":"u2","password":""}`,
+	} {
+		code, body := mailDo(t, "PUT", srv.URL+"/api/mailbox", b)
+		if code != 400 || !strings.Contains(body, "Enter the app password again to change the server or username.") {
+			t.Fatalf("%s -> %d %s", b, code, body)
+		}
 	}
-	c, _, _ := sec.Load(context.Background())
-	if got.Password != "kept" || c.Password != "kept" || c.Host != "h.test" || c.Port != 143 || c.Username != "u2" {
-		t.Fatalf("checked %+v saved %+v", got, c)
+	if c, _, _ := sec.Load(context.Background()); c != saved || calls != 0 {
+		t.Fatalf("saved %+v, check calls %d", c, calls)
+	}
+	// Same mailbox (host case-insensitive, port defaulting to 993) keeps the password.
+	code, body := mailDo(t, "PUT", srv.URL+"/api/mailbox", `{"host":"IMAP.test","port":993,"username":"u","password":""}`)
+	if code != 200 || got.Password != "kept" {
+		t.Fatalf("%d %s %+v", code, body, got)
+	}
+	if c, _, _ := sec.Load(context.Background()); c.Password != "kept" {
+		t.Fatalf("saved %+v", c)
 	}
 }
 
