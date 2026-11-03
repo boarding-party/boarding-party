@@ -296,6 +296,8 @@ var artifactTypes = map[string]string{
 	".jpg":  "image/jpeg",
 	".jpeg": "image/jpeg",
 	".json": "application/json",
+	".pdf":  "application/pdf",
+	".csv":  "text/csv; charset=utf-8",
 	".txt":  "text/plain; charset=utf-8",
 }
 
