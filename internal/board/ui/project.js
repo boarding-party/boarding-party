@@ -29,6 +29,8 @@ function fromProject(p) {
     nodePool: p.nodePool || '',
     // Not edited here, but carried so a save never drops it.
     resources: p.resources || null,
+    allowFrom: [...((p.inbox && p.inbox.allowFrom) || [])],
+    authServId: (p.inbox && p.inbox.authServId) || '',
     roles: (p.roles || []).map((r) => ({
       id: nid(),
       name: r.name || '',
@@ -73,6 +75,7 @@ function toJSON(d) {
     model: d.model.trim(),
     nodePool: d.nodePool.trim(),
     ...(d.resources ? { resources: d.resources } : {}),
+    ...(d.allowFrom.length || d.authServId.trim() ? { inbox: { allowFrom: d.allowFrom, ...(d.authServId.trim() ? { authServId: d.authServId.trim() } : {}) } } : {}),
     roles: d.roles.map((r) => ({
       name: r.name.trim(),
       description: r.description.trim(),
@@ -269,6 +272,9 @@ export function ProjectPage({ onSaved, onDirty }) {
             onChange=${(fn) => edit((d) => fn(d.extraHosts))} />
         </div>
 
+        <${InboxCard} allowFrom=${draft.allowFrom} authServId=${draft.authServId}
+          onChange=${(fn) => edit((d) => fn(d))} />
+
         <${FilesCard} personas=${savedPersonas(baseline)} />
 
         ${draft.roles.map((r, i) => html`<${RoleCard} key=${r.id} role=${r} n=${i + 1} profileFields=${profileFields}
@@ -458,7 +464,7 @@ function StoryRow({ story, onChange, onRemove }) {
 
 // Tags edits a list of short strings: Enter or comma adds, Backspace on an
 // empty input removes the last one.
-function Tags({ tags, label, placeholder, onChange }) {
+function Tags({ tags, label, placeholder, more = 'Add trait', onChange }) {
   const [text, setText] = useState('');
   // add reads the input itself: a key can arrive before the render that
   // would have updated text.
@@ -486,7 +492,7 @@ function Tags({ tags, label, placeholder, onChange }) {
     <div class="tags" aria-label=${label}>
       ${tags.map((t, i) => html`<span class="chip" key=${i + ':' + t}>${t}
         <button type="button" aria-label=${'Remove ' + t} onClick=${() => onChange((l) => { l.splice(i, 1); })}>×</button></span>`)}
-      <input value=${text} placeholder=${tags.length ? 'Add trait' : placeholder} aria-label=${'Add to ' + label}
+      <input value=${text} placeholder=${tags.length ? more : placeholder} aria-label=${'Add to ' + label}
         onInput=${input}
         onKeyDown=${(e) => {
           if (e.key === 'Enter') { e.preventDefault(); add(e); }
@@ -634,5 +640,116 @@ function FilesCard({ personas }) {
       </div>
       ${personas.length ? null : html`<p class="hint">To limit a file to one persona, add the persona and save the project first.</p>`}
       ${err ? html`<div class="note bad" role="alert">${err}</div>` : null}
+    </div>`;
+}
+
+// ---- inbox ----------------------------------------------------------------
+// One mailbox for all personas. The mailbox itself is saved straight away
+// with "Save and test" (never with the project, which must not carry the
+// password); "Accept mail from" and "Verifying server" belong to the project
+// draft and save with it.
+
+const fmtChecked = (s) => {
+  const d = new Date(s);
+  if (Number.isNaN(d.getTime()) || d.getUTCFullYear() < 2000) return '';
+  return d.toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+};
+
+function InboxCard({ allowFrom, authServId, onChange }) {
+  const [mb, setMb] = useState(null); // the saved mailbox, as the director reports it
+  const [loadErr, setLoadErr] = useState('');
+  const [host, setHost] = useState('');
+  const [port, setPort] = useState('993');
+  const [user, setUser] = useState('');
+  const [pass, setPass] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+
+  const adopt = (m) => {
+    setMb(m);
+    setHost(m.host || ''); setPort(String(m.port || 993)); setUser(m.username || ''); setPass('');
+  };
+  const load = async () => {
+    try { adopt(await api('/api/mailbox')); setLoadErr(''); } catch (e) { setLoadErr(e.message); }
+  };
+  useEffect(() => { load(); }, []);
+  // The status line follows the poller, so refresh it while the page is open.
+  useEffect(() => {
+    const t = setInterval(async () => {
+      if (document.hidden || busy) return;
+      try { const m = await api('/api/mailbox'); setMb((cur) => (cur ? { ...cur, status: m.status } : cur)); } catch (_) { /* keep the last status */ }
+    }, 10000);
+    return () => clearInterval(t);
+  }, [busy]);
+
+  const saved = !!(mb && mb.host);
+  const save = async () => {
+    if (busy) return;
+    const n = Number(port);
+    if (!host.trim() || !user.trim()) { setErr('Enter the IMAP server and the username.'); return; }
+    if (!Number.isInteger(n) || n < 1 || n > 65535) { setErr('The port must be a number from 1 to 65535.'); return; }
+    setBusy(true); setErr('');
+    try {
+      adopt(await api('/api/mailbox', {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ host: host.trim(), port: n, username: user.trim(), password: pass }),
+      }));
+    } catch (e) { setErr(e.message); } finally { setBusy(false); }
+  };
+  const remove = async () => {
+    if (!(await confirmDialog('Remove the mailbox? Personas stop receiving mail. Mail already received stays on the Inbox page.', { confirm: 'Remove mailbox', danger: true }))) return;
+    setBusy(true); setErr('');
+    try { await api('/api/mailbox', { method: 'DELETE' }); await load(); } catch (e) { setErr(e.message); } finally { setBusy(false); }
+  };
+
+  const st = mb && mb.status;
+  const line = !st ? null
+    : st.state === 'ok' ? { cls: 'ok', text: `Connected${fmtChecked(st.checked) ? ', checked ' + fmtChecked(st.checked) : ''}` }
+    : st.state === 'error' ? { cls: 'bad', text: `Can't connect: ${st.error || 'unknown error'}` }
+    : { cls: '', text: 'Not connected' };
+
+  return html`
+    <div class="card" id="inbox-card">
+      <h2>Inbox</h2>
+      <p class="hint">One mailbox for all personas. Each persona gets mail at its own address, such as cast+john@yourdomain.com. Use a mailbox nobody uses for real work.</p>
+      ${loadErr ? html`<div class="note bad" role="alert">Could not load the mailbox: ${loadErr}</div>` : null}
+      ${line ? html`<p class="mbstatus"><span class=${'dot ' + line.cls}></span>${line.text}</p>` : null}
+      <div class="mbform">
+        <div class="field">
+          <label for="mb-host">IMAP server</label>
+          <input id="mb-host" value=${host} placeholder="imap.gmail.com" autocomplete="off" onInput=${(e) => setHost(e.currentTarget.value)} />
+        </div>
+        <div class="field">
+          <label for="mb-port">Port</label>
+          <input id="mb-port" value=${port} inputmode="numeric" onInput=${(e) => setPort(e.currentTarget.value)} />
+        </div>
+        <div class="field">
+          <label for="mb-user">Username</label>
+          <input id="mb-user" value=${user} placeholder="cast@yourdomain.com" autocomplete="off" onInput=${(e) => setUser(e.currentTarget.value)} />
+        </div>
+        <div class="field">
+          <label for="mb-pass">App password</label>
+          <input id="mb-pass" type="password" value=${pass} autocomplete="new-password"
+            placeholder=${mb && mb.passwordSet ? 'Saved' : ''} onInput=${(e) => setPass(e.currentTarget.value)} />
+        </div>
+      </div>
+      <div class="row" style="margin-top:12px">
+        <button class="btn primary" type="button" disabled=${busy} onClick=${save}>${busy ? 'Checking…' : 'Save and test'}</button>
+        ${saved ? html`<button class="btn danger-ghost" type="button" disabled=${busy} onClick=${remove}>Remove</button>` : null}
+      </div>
+      ${err ? html`<div class="note bad" role="alert">${err}</div>` : null}
+
+      <div class="field" style="margin-top:16px">
+        <label>Accept mail from</label>
+        <span class="hint">Senders or domains your site mails from, such as smesolutions.uk. Mail from anyone else is kept out of the personas' reach.</span>
+        <${Tags} tags=${allowFrom} label="Accept mail from" placeholder="smesolutions.uk" more="Add sender"
+          onChange=${(fn) => onChange((d) => fn(d.allowFrom))} />
+      </div>
+      <div class="field" style="margin-top:14px">
+        <label for="mb-auth">Verifying server <span class="hint">(optional)</span></label>
+        <input id="mb-auth" value=${authServId} placeholder="mx.google.com" autocomplete="off"
+          onInput=${(e) => { const v = e.currentTarget.value; onChange((d) => { d.authServId = v; }); }} />
+        <span class="hint">The server name your mail provider puts in Authentication-Results. Leave empty for Gmail and Google Workspace. Mail whose sender isn't verified by that server is kept out.</span>
+      </div>
     </div>`;
 }

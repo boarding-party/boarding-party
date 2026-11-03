@@ -277,6 +277,31 @@ is told it may upload those and nothing else. A persona's file wins over a
 project file with the same name. Files of a persona you later remove stay until
 you delete them, and still count toward the total.
 
+### Inbox
+
+Some sites send mail the persona has to act on, such as a confirmation link.
+Bring a mailbox and the personas can read it.
+
+1. Make a mailbox nobody uses for real work, and turn on plus-addressing
+   (Gmail and Google Workspace have it) or set up a catch-all. Each persona
+   then gets its own address, such as `cast+john@yourdomain.com`, and uses it
+   when a form asks for an email.
+2. Create an app password for it, not the normal one.
+3. On the Project page, fill in the Inbox card (IMAP server, username, app
+   password) and press Save and test. The board signs in once to check.
+4. Under "Accept mail from", list the senders or domains your site mails from.
+   Mail from anyone else is kept out. If your provider doesn't put
+   `mx.google.com` in Authentication-Results, set "Verifying server" to the
+   name it uses; mail whose sender it didn't verify is also kept out.
+
+The Inbox page shows what arrived for each persona, and under "Kept out" what
+was refused and why. Links in a message are shown as plain text so you don't
+use up a one-time link the persona needs.
+
+Agents can read the mail sent to their own persona's address, and nothing
+else: not other personas' mail, not kept-out mail, and not the mailbox
+password, which stays with the director.
+
 ### Scripting and CI
 
 Everything the board does is also a command:

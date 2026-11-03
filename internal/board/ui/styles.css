@@ -204,3 +204,21 @@ dialog.confirm p { margin: 0 0 14px; font-size: 14px; }
 .filetab .btn.danger-ghost { align-self: auto; padding: 4px 10px; font-size: 12px; }
 .fileup { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, 1fr) auto; gap: 12px; align-items: end; margin-top: 12px; }
 @media (max-width: 760px) { .fileup { grid-template-columns: minmax(0, 1fr); } }
+
+/* inbox */
+.mbform { display: grid; grid-template-columns: minmax(0, 1.4fr) 90px minmax(0, 1.2fr) minmax(0, 1.2fr); gap: 12px; align-items: start; }
+.mbstatus { display: flex; align-items: center; gap: 8px; margin: 10px 0 12px; font-size: 13px; }
+.inboxbar { align-items: flex-end; gap: 16px; }
+.inboxbar .field { min-width: 200px; }
+.tabs { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; background: var(--surface); }
+.tabs button { border: 0; background: none; padding: 7px 14px; font-size: 13px; font-weight: 500; color: var(--muted); }
+.tabs button + button { border-left: 1px solid var(--line); }
+.tabs button.on { background: var(--accent-soft); color: var(--accent); }
+.mailtab td.from, .mailtab td.subj { overflow-wrap: anywhere; }
+.mailtab tr.sel td { background: #F7F9FB; }
+.mailtab tr.detail td { padding: 0 8px 12px; background: #F7F9FB; }
+.msgtext { margin: 6px 0 0; padding: 10px 12px; background: #fff; border: 1px solid var(--line-soft); border-radius: 6px; font: 12.5px/1.5 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 360px; overflow: auto; }
+.msglinks { margin-top: 10px; }
+.msglinks ul { margin: 4px 0; padding-left: 18px; font: 12.5px/1.5 var(--mono); overflow-wrap: anywhere; }
+.msglinks p { margin: 4px 0 0; }
+@media (max-width: 860px) { .mbform { grid-template-columns: minmax(0, 1fr); } .inboxbar .field { min-width: 0; flex: 1; } }
