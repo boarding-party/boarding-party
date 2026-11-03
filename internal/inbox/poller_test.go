@@ -365,8 +365,8 @@ func TestRunStopsWithContext(t *testing.T) {
 	s := newService(t, ts, testPass)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
+	ts.add(t, goodMail("x")) // before Run: the memory backend is not safe for concurrent use
 	go func() { s.Run(ctx); close(done) }()
-	ts.add(t, goodMail("x")) // may or may not land before the first cycle
 	s.Poke()
 	cancel()
 	select {
@@ -413,5 +413,33 @@ func TestClearedCursorStartsAtUIDNextAgain(t *testing.T) {
 	}
 	if _, last, ok, _ := s.Store.MailCursor(); !ok || last != 8 {
 		t.Fatalf("cursor last=%d ok=%v, want 8", last, ok)
+	}
+}
+
+func TestConnectHonoursContextOnSilentServer(t *testing.T) {
+	cert, _ := selfSigned(t)
+	ln, err := tls.Listen("tcp", "127.0.0.1:0", &tls.Config{Certificates: []tls.Certificate{cert}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	go func() { // completes the TLS handshake, never sends the IMAP greeting
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			go func() { c.(*tls.Conn).Handshake() }()
+		}
+	}()
+	host, port, _ := net.SplitHostPort(ln.Addr().String())
+	p, _ := strconv.Atoi(port)
+	s := &Service{TLS: &tls.Config{InsecureSkipVerify: true}}
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	_, err = s.connect(ctx, Config{Host: host, Port: p, Username: "u", Password: "p"})
+	if err == nil || time.Since(start) > 5*time.Second {
+		t.Fatalf("err=%v after %v, want a prompt error", err, time.Since(start))
 	}
 }

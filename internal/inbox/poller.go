@@ -117,18 +117,37 @@ func (s *Service) connect(ctx context.Context, c Config) (*client.Client, error)
 		cfg.MinVersion = tls.VersionTLS12
 	}
 	d := &net.Dialer{Timeout: dialTimeout}
-	cl, err := client.DialWithDialerTLS(d, c.addr(), cfg)
+	conn, err := d.DialContext(ctx, "tcp", c.addr())
 	if err != nil {
 		return nil, fmt.Errorf("connect to %s: %w", c.addr(), err)
 	}
-	cl.Timeout = commandTimeout
-	if err := ctx.Err(); err != nil {
-		cl.Terminate()
-		return nil, err
+	// Closing the connection on cancel unblocks the handshake, greeting and login reads.
+	stop := context.AfterFunc(ctx, func() { conn.Close() })
+	tc := tls.Client(conn, cfg)
+	var cl *client.Client
+	if err = tc.HandshakeContext(ctx); err == nil {
+		cl, err = client.New(tc)
 	}
+	if err != nil {
+		stop()
+		conn.Close()
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		return nil, fmt.Errorf("connect to %s: %w", c.addr(), err)
+	}
+	cl.Timeout = commandTimeout
 	if err := cl.Login(c.Username, c.Password); err != nil {
+		stop()
 		cl.Terminate()
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return nil, fmt.Errorf("login as %s: %w", c.Username, err)
+	}
+	if !stop() { // cancelled during login: the connection is already closed
+		cl.Terminate()
+		return nil, ctx.Err()
 	}
 	return cl, nil
 }
