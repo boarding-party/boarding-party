@@ -3,6 +3,7 @@ package inbox
 import (
 	"context"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -71,5 +72,75 @@ func TestWaitTimesOut(t *testing.T) {
 	m, ok, err := s.Wait(ctx, "John", time.Now(), nil)
 	if err != nil || ok || m.ID != "" {
 		t.Fatalf("Wait = %+v %v %v, want zero, false, nil", m, ok, err)
+	}
+}
+
+type countSecrets struct {
+	*memSecrets
+	loads atomic.Int32
+}
+
+func (c *countSecrets) Load(ctx context.Context) (Config, bool, error) {
+	c.loads.Add(1)
+	return c.memSecrets.Load(ctx)
+}
+
+func TestPokeDoesNotBypassErrorBackoff(t *testing.T) {
+	ts := startServer(t)
+	s := newService(t, ts, "wrong-password")
+	cs := &countSecrets{memSecrets: s.Secrets.(*memSecrets)}
+	s.Secrets = cs
+	s.Backoff = 400 * time.Millisecond
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan struct{})
+	go func() { s.Run(ctx); close(done) }()
+	defer func() { cancel(); <-done }()
+
+	deadline := time.Now().Add(3 * time.Second)
+	for s.Status().State != "error" && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if s.Status().State != "error" {
+		t.Fatal("never reached error")
+	}
+	for i := 0; i < 10; i++ {
+		s.Poke()
+		time.Sleep(5 * time.Millisecond)
+	}
+	time.Sleep(100 * time.Millisecond)
+	if n := cs.loads.Load(); n != 1 {
+		t.Fatalf("cycles during backoff = %d, want 1", n)
+	}
+	deadline = time.Now().Add(3 * time.Second)
+	for cs.loads.Load() < 2 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if cs.loads.Load() < 2 {
+		t.Fatal("no retry after the backoff")
+	}
+}
+
+func TestKickBypassesErrorBackoff(t *testing.T) {
+	ts := startServer(t)
+	s := newService(t, ts, "wrong-password")
+	cs := &countSecrets{memSecrets: s.Secrets.(*memSecrets)}
+	s.Secrets = cs
+	s.Backoff = time.Hour
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { s.Run(ctx); close(done) }()
+	defer func() { cancel(); <-done }()
+	deadline := time.Now().Add(3 * time.Second)
+	for s.Status().State != "error" && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	s.Kick()
+	deadline = time.Now().Add(3 * time.Second)
+	for cs.loads.Load() < 2 && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if cs.loads.Load() < 2 {
+		t.Fatal("Kick did not start a cycle")
 	}
 }

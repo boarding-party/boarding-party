@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"log"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/boarding-party/boardingparty/internal/store"
@@ -29,7 +30,8 @@ type Service struct {
 
 	initOnce  sync.Once
 	poke      chan struct{}
-	cycleMu   sync.Mutex // one cycle at a time
+	forced    atomic.Bool // set by Kick: this poke overrides the error backoff
+	cycleMu   sync.Mutex  // one cycle at a time
 	mu        sync.Mutex
 	status    Status
 	wake      chan struct{} // closed and replaced by Notify
@@ -70,13 +72,24 @@ func (s *Service) Run(ctx context.Context) {
 	for {
 		wait := s.cycle(ctx)
 		t := time.NewTimer(wait)
-		select {
-		case <-ctx.Done():
-			t.Stop()
-			return
-		case <-s.poke:
-			t.Stop()
-		case <-t.C:
+	sleep:
+		for {
+			select {
+			case <-ctx.Done():
+				t.Stop()
+				return
+			case <-s.poke:
+				// A plain poke must not defeat the backoff after a failed cycle: repeated
+				// failed logins can get the mailbox locked. Kick overrides it.
+				if s.Status().State == "error" && !s.forced.Swap(false) {
+					continue
+				}
+				s.forced.Store(false)
+				t.Stop()
+				break sleep
+			case <-t.C:
+				break sleep
+			}
 		}
 	}
 }
@@ -155,7 +168,16 @@ func (s *Service) Status() Status {
 	return s.status
 }
 
-// Poke starts the next cycle now. It never blocks; pokes during a cycle coalesce into one.
+// Kick starts the next cycle now, even during the error backoff. Use it after the mailbox
+// settings changed and the new login was already checked.
+func (s *Service) Kick() {
+	s.init()
+	s.forced.Store(true)
+	s.Poke()
+}
+
+// Poke starts the next cycle now, unless the last cycle failed and the backoff has not
+// elapsed. It never blocks; pokes during a cycle coalesce into one.
 func (s *Service) Poke() {
 	s.init()
 	select {

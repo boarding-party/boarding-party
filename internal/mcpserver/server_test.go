@@ -321,7 +321,12 @@ type fakeMail struct {
 	state string
 }
 
-func (f fakeMail) Status() inbox.Status { return inbox.Status{State: f.state} }
+func (f fakeMail) Status() inbox.Status {
+	if f.state == "error" {
+		return inbox.Status{State: "error", Error: "login failed"}
+	}
+	return inbox.Status{State: f.state}
+}
 
 func setupMail(t *testing.T, state string) (*store.Store, *httptest.Server, store.Run, fakeMail) {
 	t.Helper()
@@ -454,8 +459,8 @@ func TestAssignmentInboxFlag(t *testing.T) {
 		t.Error("ok mailbox + email: want true")
 	}
 	_, srv, run, _ = setupMail(t, "error")
-	if !flag(srv, run) {
-		t.Error("configured but erroring mailbox: want true")
+	if flag(srv, run) {
+		t.Error("erroring mailbox: want false")
 	}
 	_, srv, run, _ = setupMail(t, "off")
 	if flag(srv, run) {
@@ -482,5 +487,23 @@ func TestMailToolsInactiveToken(t *testing.T) {
 		if out, isErr := call(t, cs, n, args); !isErr || out != errNotActive {
 			t.Errorf("%s: %v %q", n, isErr, out)
 		}
+	}
+}
+
+func TestMailToolsErrorWhenMailboxUnreachable(t *testing.T) {
+	st, srv, run, _ := setupMail(t, "error")
+	addMsg(t, st, "m1", "ann", "")
+	cs := connect(t, srv, run.Token)
+	start := time.Now()
+	for n, args := range map[string]map[string]any{
+		"messages_list": nil, "message_read": {"id": "m1"}, "message_wait": {"timeout_seconds": 30},
+	} {
+		out, isErr := call(t, cs, n, args)
+		if !isErr || out != "the mailbox can't be reached right now: login failed" {
+			t.Errorf("%s: %v %q", n, isErr, out)
+		}
+	}
+	if time.Since(start) > 5*time.Second {
+		t.Error("message_wait blocked")
 	}
 }

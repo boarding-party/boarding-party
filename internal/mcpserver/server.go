@@ -165,7 +165,7 @@ func newServer(svc *runs.Service, st *store.Store, directorURL, token string, ma
 					}
 				}
 			}
-			a.Inbox = mail != nil && mail.Status().State != "off" && a.Persona.Identity["email"] != ""
+			a.Inbox = mail != nil && mail.Status().State == "ok" && a.Persona.Identity["email"] != ""
 			state, err := st.PersonaState(r.Persona)
 			if err != nil {
 				return nil, nil, err
@@ -328,6 +328,17 @@ func linkAllowed(link string, hosts map[string]bool) bool {
 	return hosts[strings.ToLower(u.Hostname())]
 }
 
+// mailUnavailable is the tool error for a missing or unreachable mailbox, or "" when usable.
+func mailUnavailable(mail mailbox) string {
+	if mail == nil {
+		return errNoMailbox
+	}
+	if st := mail.Status(); st.State == "error" {
+		return "the mailbox can't be reached right now: " + st.Error
+	}
+	return ""
+}
+
 func addMailTools(s *mcp.Server, st *store.Store, mail mailbox, active func() (store.Run, *mcp.CallToolResult, error)) {
 	mcp.AddTool(s, &mcp.Tool{Name: "messages_list",
 		Description: "List your persona's recent email, newest first (id, from, subject, received)."},
@@ -336,8 +347,8 @@ func addMailTools(s *mcp.Server, st *store.Store, mail mailbox, active func() (s
 			if bad != nil || err != nil {
 				return bad, nil, err
 			}
-			if mail == nil {
-				return toolErr(errNoMailbox)
+			if msg := mailUnavailable(mail); msg != "" {
+				return toolErr(msg)
 			}
 			msgs, err := st.Messages(store.MessageQuery{Persona: r.Persona, Limit: 20})
 			if err != nil {
@@ -357,8 +368,8 @@ func addMailTools(s *mcp.Server, st *store.Store, mail mailbox, active func() (s
 			if bad != nil || err != nil {
 				return bad, nil, err
 			}
-			if mail == nil {
-				return toolErr(errNoMailbox)
+			if msg := mailUnavailable(mail); msg != "" {
+				return toolErr(msg)
 			}
 			m, err := st.Message(in.ID)
 			if errors.Is(err, store.ErrNotFound) || (err == nil && (m.Persona != r.Persona || m.Filtered != "")) {
@@ -392,8 +403,8 @@ func addMailTools(s *mcp.Server, st *store.Store, mail mailbox, active func() (s
 			if bad != nil || err != nil {
 				return bad, nil, err
 			}
-			if mail == nil {
-				return toolErr(errNoMailbox)
+			if msg := mailUnavailable(mail); msg != "" {
+				return toolErr(msg)
 			}
 			from, subj := strings.ToLower(in.FromContains), strings.ToLower(in.SubjectContains)
 			match := func(m store.Message) bool {

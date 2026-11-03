@@ -101,7 +101,7 @@ func (s *server) putMailbox(w http.ResponseWriter, r *http.Request) {
 		fail(w, err)
 		return
 	}
-	m.Poke()
+	m.Kick()
 	writeJSON(w, http.StatusOK, view(c, true, m.Status()))
 }
 
@@ -114,7 +114,7 @@ func (s *server) deleteMailbox(w http.ResponseWriter, r *http.Request) {
 		fail(w, err)
 		return
 	}
-	m.Poke()
+	m.Kick()
 	w.WriteHeader(http.StatusNoContent)
 }
 
