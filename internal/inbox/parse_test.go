@@ -109,3 +109,55 @@ func TestParseGarbage(t *testing.T) {
 		t.Error("want error")
 	}
 }
+
+func TestParseVerified(t *testing.T) {
+	tests := []struct {
+		file string
+		want bool
+	}{
+		{"verified.eml", true},
+		{"wrongdomain.eml", false},
+		{"forged.eml", false},
+		{"plain.eml", false},
+		{"twofrom.eml", false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.file, func(t *testing.T) {
+			m, err := Parse(fixture(t, tc.file))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if m.Verified != tc.want {
+				t.Errorf("Verified = %v, want %v", m.Verified, tc.want)
+			}
+		})
+	}
+	m, _ := Parse(fixture(t, "twofrom.eml"))
+	if m.From != "a@smesolutions.uk" {
+		t.Errorf("from = %q", m.From)
+	}
+}
+
+func TestParseHTMLLinksWithPlain(t *testing.T) {
+	m, err := Parse(fixture(t, "buttons.eml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"https://example.test/button", "https://example.test/plain"}
+	if !slices.Equal(m.Links, want) {
+		t.Errorf("links = %v, want %v", m.Links, want)
+	}
+	if strings.Contains(m.Text, "button") {
+		t.Errorf("text should be the plain part: %q", m.Text)
+	}
+}
+
+func TestParseDelivered(t *testing.T) {
+	m, err := Parse(fixture(t, "delivered.eml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(m.Delivered, []string{"ada-b@ex.test"}) {
+		t.Errorf("delivered = %v", m.Delivered)
+	}
+}

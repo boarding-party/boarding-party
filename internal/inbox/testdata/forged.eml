@@ -1,0 +1,7 @@
+From: no-reply@smesolutions.uk
+To: john@ex.test
+Subject: s
+Authentication-Results: mx.google.com; dmarc=fail header.from=smesolutions.uk
+Authentication-Results: forged.example.test; dmarc=pass header.from=smesolutions.uk
+
+hi

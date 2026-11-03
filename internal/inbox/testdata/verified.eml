@@ -1,0 +1,9 @@
+From: Shop <no-reply@smesolutions.uk>
+To: john@ex.test
+Subject: s
+Authentication-Results: mx.google.com;
+       dkim=pass header.i=@smesolutions.uk header.s=s1 header.b=abc;
+       spf=pass smtp.mailfrom=smesolutions.uk;
+       dmarc=pass (p=NONE sp=NONE dis=NONE) header.from=smesolutions.uk
+
+hello https://smesolutions.uk/x

@@ -2,6 +2,7 @@ package inbox
 
 import (
 	"net/mail"
+	"slices"
 	"strings"
 
 	"github.com/boarding-party/boardingparty/internal/project"
@@ -11,6 +12,7 @@ import (
 const (
 	FilteredNoPersona    = "no persona has this address"
 	FilteredSenderDenied = "sender not allowed"
+	FilteredUnverified   = "sender not verified"
 )
 
 // Route finds the persona a message is addressed to and checks the sender against
@@ -25,7 +27,7 @@ func Route(m Message, p project.Project) (persona, filtered string) {
 			}
 		}
 	}
-	for _, to := range m.To {
+	for _, to := range append(slices.Clone(m.Delivered), m.To...) {
 		if name, ok := owner[strings.ToLower(to)]; ok {
 			persona = name
 			break
@@ -36,6 +38,9 @@ func Route(m Message, p project.Project) (persona, filtered string) {
 	}
 	if p.Inbox == nil || !senderAllowed(m.From, p.Inbox.AllowFrom) {
 		return persona, FilteredSenderDenied
+	}
+	if !m.Verified {
+		return persona, FilteredUnverified
 	}
 	return persona, ""
 }

@@ -1,0 +1,15 @@
+From: no-reply@smesolutions.uk
+To: john@ex.test
+Subject: s
+MIME-Version: 1.0
+Content-Type: multipart/alternative; boundary="B"
+
+--B
+Content-Type: text/plain
+
+Plain https://example.test/plain
+--B
+Content-Type: text/html
+
+<a href="https://example.test/button">Go</a> <a href="https://example.test/plain">dup</a>
+--B--

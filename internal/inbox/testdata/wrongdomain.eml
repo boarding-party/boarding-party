@@ -1,0 +1,6 @@
+From: no-reply@smesolutions.uk
+To: john@ex.test
+Subject: s
+Authentication-Results: mx.google.com; dkim=pass header.d=evil.test; spf=fail
+
+hi

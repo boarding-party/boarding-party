@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/mail"
 	"regexp"
+	"slices"
 	"strings"
 	"unicode/utf8"
 
@@ -40,6 +41,7 @@ func Parse(raw []byte) (Message, error) {
 		return Message{}, errors.New("parse message: no valid From header")
 	}
 	m := Message{From: from[0]}
+	m.Verified = len(from) == 1 && authenticated(h.Get("Authentication-Results"), domainOf(from[0]))
 	m.Subject, _ = h.Text("Subject")
 	if t, err := mail.ParseDate(h.Get("Date")); err == nil {
 		m.Received = t
@@ -50,6 +52,11 @@ func Parse(raw []byte) (Message, error) {
 		for f := h.FieldsByKey(k); f.Next(); {
 			v, _ := f.Text()
 			for _, a := range addrs(v) {
+				if k == "Delivered-To" || k == "X-Original-To" {
+					if !slices.Contains(m.Delivered, a) {
+						m.Delivered = append(m.Delivered, a)
+					}
+				}
 				if !seen[a] {
 					seen[a] = true
 					m.To = append(m.To, a)
@@ -60,8 +67,12 @@ func Parse(raw []byte) (Message, error) {
 
 	plain, htmlBody := collect(ent)
 	text, hrefs := plain, []string(nil)
-	if text == "" && htmlBody != "" {
-		text, hrefs = htmlToText(htmlBody)
+	if htmlBody != "" {
+		htmlText, htmlHrefs := htmlToText(htmlBody)
+		hrefs = htmlHrefs
+		if text == "" {
+			text = htmlText
+		}
 	}
 	m.Links = links(hrefs, text)
 	m.Text = truncate(strings.TrimSpace(text), MaxText)
@@ -129,43 +140,84 @@ func htmlToText(src string) (string, []string) {
 	skip := 0
 	z := html.NewTokenizer(strings.NewReader(src))
 	for {
-		switch z.Next() {
+		tt := z.Next()
+		switch tt {
 		case html.ErrorToken:
 			return collapse(sb.String()), hrefs
 		case html.TextToken:
 			if skip == 0 {
 				sb.Write(z.Text())
 			}
-		case html.StartTagToken, html.SelfClosingTagToken:
+		case html.StartTagToken, html.SelfClosingTagToken, html.EndTagToken:
 			name, hasAttr := z.TagName()
 			n := string(name)
-			if tt := z.Token().Type; n == "script" || n == "style" {
-				if tt == html.StartTagToken {
+			if n == "script" || n == "style" {
+				switch tt {
+				case html.StartTagToken:
 					skip++
+				case html.EndTagToken:
+					skip = max(skip-1, 0)
 				}
 				continue
 			}
 			if blockTags[n] {
 				sb.WriteByte('\n')
 			}
-			for hasAttr && n == "a" {
+			for hasAttr && n == "a" && tt != html.EndTagToken {
 				var k, v []byte
 				k, v, hasAttr = z.TagAttr()
 				if string(k) == "href" {
 					hrefs = append(hrefs, string(v))
 				}
 			}
-		case html.EndTagToken:
-			name, _ := z.TagName()
-			n := string(name)
-			if (n == "script" || n == "style") && skip > 0 {
-				skip--
-			}
-			if blockTags[n] {
-				sb.WriteByte('\n')
+		}
+	}
+}
+
+func domainOf(addr string) string {
+	_, d, _ := strings.Cut(addr, "@")
+	return d
+}
+
+var commentRe = regexp.MustCompile(`\([^)]*\)`)
+
+// authenticated reports whether an Authentication-Results header (the topmost one, added by the
+// receiving provider) shows dmarc=pass, or dkim=pass signed by the From domain or a parent of it.
+func authenticated(ar, fromDomain string) bool {
+	if ar == "" || fromDomain == "" {
+		return false
+	}
+	ar = commentRe.ReplaceAllString(strings.ToLower(ar), " ")
+	clauses := strings.Split(ar, ";")
+	for _, c := range clauses[1:] { // first clause is the authserv-id
+		fields := strings.Fields(c)
+		if len(fields) == 0 {
+			continue
+		}
+		method, result, ok := strings.Cut(fields[0], "=")
+		if !ok || result != "pass" {
+			continue
+		}
+		switch method {
+		case "dmarc":
+			return true
+		case "dkim":
+			for _, f := range fields[1:] {
+				k, v, _ := strings.Cut(f, "=")
+				if k != "header.d" && k != "header.i" {
+					continue
+				}
+				d := v
+				if strings.Contains(v, "@") {
+					d = domainOf(v)
+				}
+				if d != "" && (fromDomain == d || strings.HasSuffix(fromDomain, "."+d)) {
+					return true
+				}
 			}
 		}
 	}
+	return false
 }
 
 var blankRuns = regexp.MustCompile(`\n[ \t]*(\n[ \t]*)+`)

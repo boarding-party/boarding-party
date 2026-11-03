@@ -1,0 +1,6 @@
+From: a@smesolutions.uk, b@evil.test
+To: john@ex.test
+Subject: s
+Authentication-Results: mx.google.com; dmarc=pass header.from=smesolutions.uk
+
+hi
