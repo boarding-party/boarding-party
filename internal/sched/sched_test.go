@@ -1,13 +1,17 @@
 package sched
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
+	"os"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/boarding-party/boardingparty/internal/project"
 	"github.com/boarding-party/boardingparty/internal/runs"
@@ -577,5 +581,127 @@ func TestPokeRunsTick(t *testing.T) {
 			t.Fatal("queued item not started")
 		}
 		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func handoffWait() store.Wait {
+	return store.Wait{Kind: "handoff", Role: "clinician", Story: "approve", Deadline: now.Add(24 * time.Hour)}
+}
+
+func TestHandoffWaitStuckWhenTargetEnds(t *testing.T) {
+	for _, st := range []store.RunState{store.RunStuck, store.RunFailed} {
+		t.Run(string(st), func(t *testing.T) {
+			f := newFix(t, schedYAML)
+			f.waiting("p1", "Ada", "patient", "book", "j1", handoffWait())
+			f.tick()
+			if f.state("s1") != store.RunRunning {
+				t.Fatal("handoff not started")
+			}
+			f.tick() // running: the wait stays open
+			if w := f.wait("p1"); w.Status != store.WaitOpen {
+				t.Fatalf("closed while target runs: %+v", w)
+			}
+			f.clk.Add(time.Minute)
+			if ok, err := f.st.FinishRun("s1", st, "could not sign in\x1b[2J\nsecond line", f.clk.Now()); err != nil || !ok {
+				t.Fatal(ok, err)
+			}
+			f.tick()
+			want := `clinician could not finish "approve": could not sign in [2J`
+			if w := f.wait("p1"); w.Status != store.WaitStuck || w.Detail != want {
+				t.Fatalf("wait = %+v", w)
+			}
+			if f.state("p1") != store.RunStuck {
+				t.Fatal("waiting run not stuck")
+			}
+			if bugs, _ := f.st.Bugs("p1"); len(bugs) != 1 || bugs[0].Summary != want {
+				t.Fatalf("bugs = %+v", bugs)
+			}
+		})
+	}
+}
+
+func TestHandoffWaitStuckWhenQueuedRemoved(t *testing.T) {
+	f := newFix(t, schedYAML)
+	f.starter.SetErr(runs.ErrBusy)
+	f.waiting("p1", "Ada", "patient", "book", "j1", handoffWait())
+	f.tick()
+	q := f.queue()
+	if len(q) != 1 {
+		t.Fatalf("queue = %+v", q)
+	}
+	f.tick() // still queued: the wait stays open
+	if w := f.wait("p1"); w.Status != store.WaitOpen {
+		t.Fatalf("closed while target queued: %+v", w)
+	}
+	if err := f.st.DeleteQueued(q[0].ID); err != nil {
+		t.Fatal(err)
+	}
+	f.tick()
+	want := `the hand-off to clinician "approve" was removed before it ran`
+	if w := f.wait("p1"); w.Status != store.WaitStuck || w.Detail != want {
+		t.Fatalf("wait = %+v", w)
+	}
+}
+
+func TestHandoffWaitOpenUntilFollowed(t *testing.T) {
+	f := newFix(t, schedYAML)
+	f.waiting("p1", "Ada", "patient", "book", "j1", handoffWait())
+	// Before the fan-out has queued anything, the wait must not look dropped.
+	if err := f.s.resolveAll(f.clk.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if w := f.wait("p1"); w.Status != store.WaitOpen {
+		t.Fatalf("wait = %+v", w)
+	}
+}
+
+func TestHandoffWaitOpenWhileTargetWaits(t *testing.T) {
+	f := newFix(t, schedYAML)
+	f.waiting("p1", "Ada", "patient", "book", "j1", handoffWait())
+	f.tick()
+	if ok, err := f.st.FinishRunWaiting("s1", "waits for mail", f.clk.Now(),
+		store.Wait{Kind: "time", At: now.Add(time.Hour), Deadline: now.Add(time.Hour)}); err != nil || !ok {
+		t.Fatal(ok, err)
+	}
+	f.tick()
+	if w := f.wait("p1"); w.Status != store.WaitOpen {
+		t.Fatalf("wait = %+v", w)
+	}
+}
+
+func TestContextOutcomeCapped(t *testing.T) {
+	f := newFix(t, schedYAML)
+	f.starter.SetErr(runs.ErrBusy)
+	long := "a\x1b[2J\nb" + strings.Repeat("é", 3000)
+	f.done("p1", "Ada", "patient", "book", "j1", long)
+	f.tick()
+	q := f.queue()
+	if len(q) != 1 {
+		t.Fatalf("queue = %+v", q)
+	}
+	c := ctxOf(t, q[0])
+	for _, s := range []string{c.Previous, c.From.Summary} {
+		if n := utf8.RuneCountInString(s); n != MaxContextText {
+			t.Fatalf("len %d", n)
+		}
+		if strings.ContainsRune(s, '\x1b') || !strings.HasPrefix(s, "a [2J\nb") {
+			t.Fatalf("not cleaned: %q", s[:12])
+		}
+	}
+}
+
+func TestDrainLogsNoFence(t *testing.T) {
+	var buf bytes.Buffer
+	log.SetOutput(&buf)
+	t.Cleanup(func() { log.SetOutput(os.Stderr) })
+	f := newFix(t, schedYAML)
+	f.starter.SetErr(fmt.Errorf("%w: no NetworkPolicy", runs.ErrNoFence))
+	if err := f.st.Enqueue(store.Queued{ID: "q0", Persona: "Ada", Role: "patient", Story: "lone",
+		Journey: "j1", Via: "continue", Created: now}); err != nil {
+		t.Fatal(err)
+	}
+	f.tick()
+	if out := buf.String(); !strings.Contains(out, "Ada/lone") || !strings.Contains(out, "runs are not fenced") {
+		t.Fatalf("log = %q", out)
 	}
 }

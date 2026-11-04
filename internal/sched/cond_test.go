@@ -257,3 +257,65 @@ func TestMetEmailDetailBoundedSingleLine(t *testing.T) {
 		t.Error("invalid utf8")
 	}
 }
+
+func TestParseWaitEmailKeepsAfterID(t *testing.T) {
+	w, err := ParseWait(Until{Email: &EmailCond{Subject: "x", AfterID: "m7"}}, proj(t), run, now)
+	if err != nil || w.AfterID != "m7" {
+		t.Fatalf("%+v %v", w, err)
+	}
+}
+
+// Mail that lands between the agent's last messages_list and finish_run is
+// stored before the wait began; after_id still catches it.
+func TestMetEmailAfterID(t *testing.T) {
+	s := openStore(t)
+	began := now
+	uid := uint32(0)
+	add := func(id, subj string, stored time.Time) {
+		t.Helper()
+		uid++
+		if _, err := s.AddMessage(store.Message{ID: id, UID: uid, UIDValidity: 1, Persona: "pat",
+			From: "clinic@x.test", Subject: subj, Stored: stored, Received: stored, Mailbox: "m"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	add("seen", "Booking approved (old)", began.Add(-10*time.Minute))
+	add("late", "Booking approved", began.Add(-2*time.Minute)) // during wrap-up
+	w := store.Wait{RunID: "r1", Kind: "email", Subject: "approved", Began: began}
+	if _, ok, _ := Met(s, w, run, now); ok {
+		t.Fatal("without after_id, mail before the wait must not match")
+	}
+	w.AfterID = "seen"
+	a, ok, err := Met(s, w, run, now)
+	if err != nil || !ok || a.MessageID != "late" {
+		t.Fatalf("%+v %v %v", a, ok, err)
+	}
+	w.AfterID = "late"
+	if _, ok, _ := Met(s, w, run, now); ok {
+		t.Fatal("nothing after the newest seen message")
+	}
+	w.AfterID = "pruned" // gone from the store: fall back to mail after the wait began
+	add("new", "Booking approved again", began.Add(time.Minute))
+	if a, ok, _ := Met(s, w, run, now); !ok || a.MessageID != "new" {
+		t.Fatalf("fallback: %+v %v", a, ok)
+	}
+}
+
+func TestMetHandoffDetailPlain(t *testing.T) {
+	s := openStore(t)
+	if err := s.CreateRun(store.Run{ID: "d", Token: "td", Persona: "doc\x1b[31m", Role: "clinician", Story: "approve",
+		State: store.RunDone, Outcome: "ok\rfake\x1b[2J " + strings.Repeat("y", 300), Started: now, Finished: now.Add(time.Minute), Journey: "j1"}); err != nil {
+		t.Fatal(err)
+	}
+	w := store.Wait{RunID: "r1", Kind: "handoff", Role: "clinician", Story: "approve", Began: now}
+	a, ok, err := Met(s, w, run, now)
+	if err != nil || !ok {
+		t.Fatal(ok, err)
+	}
+	if strings.ContainsFunc(a.Detail, func(r rune) bool { return r < 0x20 || r == 0x7f }) {
+		t.Fatalf("control character in %q", a.Detail)
+	}
+	if n := utf8.RuneCountInString(a.Detail); n > 200+len(`doc [31m finished "approve": `) {
+		t.Fatalf("detail too long: %d", n)
+	}
+}

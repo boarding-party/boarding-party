@@ -25,7 +25,7 @@ func TestFinishRunWaitingOnlyActive(t *testing.T) {
 	s := open(t)
 	waitRun(t, s, "r1", RunRunning)
 	fin := time.Unix(100, 5).UTC()
-	w := Wait{Kind: "email", From: "a@b.c", Subject: "Hi", Deadline: fin.Add(time.Hour)}
+	w := Wait{Kind: "email", From: "a@b.c", Subject: "Hi", AfterID: "m9", Deadline: fin.Add(time.Hour)}
 	ok, err := s.FinishRunWaiting("r1", "waiting for mail", fin, w)
 	if err != nil || !ok {
 		t.Fatalf("ok=%v err=%v", ok, err)
@@ -38,7 +38,7 @@ func TestFinishRunWaitingOnlyActive(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Status != WaitOpen || !got.Began.Equal(fin) || got.RunID != "r1" || got.From != "a@b.c" || !got.Deadline.Equal(w.Deadline) {
+	if got.Status != WaitOpen || !got.Began.Equal(fin) || got.RunID != "r1" || got.From != "a@b.c" || got.AfterID != "m9" || !got.Deadline.Equal(w.Deadline) {
 		t.Fatalf("wait %+v", got)
 	}
 	ok, err = s.FinishRunWaiting("r1", "again", fin, w)

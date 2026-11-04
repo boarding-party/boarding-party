@@ -249,7 +249,7 @@ func newServer(svc *runs.Service, st *store.Store, directorURL, token string, ma
 		})
 
 	mcp.AddTool(s, &mcp.Tool{Name: "finish_run",
-		Description: "Finish your run. outcome is done, stuck, failed or waiting. For waiting, set until to exactly one of email {from, subject}, handoff {role, story} or time {at or after}, plus an optional timeout. Call this last."},
+		Description: "Finish your run. outcome is done, stuck, failed or waiting. For waiting, set until to exactly one of email {from, subject, after_id: the id of the newest message you already saw}, handoff {role, story} or time {at or after}, plus an optional timeout. Call this last."},
 		func(ctx context.Context, _ *mcp.CallToolRequest, in finishArgs) (*mcp.CallToolResult, any, error) {
 			r, bad, err := active()
 			if bad != nil || err != nil {
@@ -300,6 +300,15 @@ func finishWaiting(ctx context.Context, svc *runs.Service, st *store.Store, mail
 		}
 		if !personaHasEmail(p, r) {
 			return toolErr("this persona has no email address, so it can't wait for email")
+		}
+		if id := in.Until.Email.AfterID; id != "" {
+			m, err := st.Message(id)
+			if errors.Is(err, store.ErrNotFound) || (err == nil && (m.Persona != r.Persona || m.Filtered != "")) {
+				return toolErr(errNoMessage)
+			}
+			if err != nil {
+				return nil, nil, err
+			}
 		}
 	}
 	w, err := sched.ParseWait(*in.Until, p, r, time.Now().UTC())

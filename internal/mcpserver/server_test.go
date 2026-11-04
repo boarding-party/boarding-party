@@ -596,6 +596,37 @@ func TestFinishWaitingEmail(t *testing.T) {
 	}
 }
 
+func TestFinishWaitingEmailAfterID(t *testing.T) {
+	mail := fakeMail{Service: &inbox.Service{}, state: "ok"}
+	for _, tc := range []struct{ name, id, wants string }{
+		{"unknown", "nope", errNoMessage},
+		{"other persona", "theirs", errNoMessage},
+		{"filtered", "spam", errNoMessage},
+		{"own", "mine", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			st, srv, run := setupWait(t, mail, "ann@example.test")
+			addMsg(t, st, "mine", "ann", "")
+			addMsg(t, st, "theirs", "bob", "")
+			addMsg(t, st, "spam", "ann", "sender-not-allowed")
+			out, isErr := call(t, connect(t, srv, run.Token), "finish_run", map[string]any{"outcome": "waiting", "summary": "s",
+				"until": map[string]any{"email": map[string]any{"subject": "Reset", "after_id": tc.id}}})
+			if tc.wants != "" {
+				if !isErr || !strings.Contains(out, tc.wants) {
+					t.Fatalf("%v %q", isErr, out)
+				}
+				return
+			}
+			if isErr {
+				t.Fatalf("%q", out)
+			}
+			if w, err := st.WaitFor(run.ID); err != nil || w.AfterID != "mine" {
+				t.Fatalf("%+v %v", w, err)
+			}
+		})
+	}
+}
+
 func TestFinishWaitingValidation(t *testing.T) {
 	ok := fakeMail{Service: &inbox.Service{}, state: "ok"}
 	email := map[string]any{"email": map[string]any{"subject": "x"}}

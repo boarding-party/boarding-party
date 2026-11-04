@@ -8,8 +8,10 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/boarding-party/boardingparty/internal/project"
 	"github.com/boarding-party/boardingparty/internal/runs"
@@ -21,6 +23,8 @@ const (
 	// stories that hand off to each other cannot loop forever.
 	MaxChainRuns = 10
 	DefaultEvery = 30 * time.Second
+	// MaxContextText caps outcome text copied into a chained run's context.
+	MaxContextText = 1000
 )
 
 var chainFull = fmt.Sprintf("the chain reached %d runs", MaxChainRuns)
@@ -160,8 +164,9 @@ func (s *Scheduler) handoffs(p project.Project, r store.Run, targets []project.H
 	if err != nil {
 		return nil, "", err
 	}
-	ctxJSON, err := json.Marshal(store.RunContext{Kind: "handoff", PreviousRun: r.ID, Previous: r.Outcome,
-		From: &store.ContextFrom{Persona: r.Persona, Role: r.Role, Story: r.Story, Summary: r.Outcome}})
+	outcome := clip(r.Outcome, MaxContextText)
+	ctxJSON, err := json.Marshal(store.RunContext{Kind: "handoff", PreviousRun: r.ID, Previous: outcome,
+		From: &store.ContextFrom{Persona: r.Persona, Role: r.Role, Story: r.Story, Summary: outcome}})
 	if err != nil {
 		return nil, "", err
 	}
@@ -235,22 +240,33 @@ func (s *Scheduler) stuck(r store.Run, detail string, now time.Time) store.Resol
 			Note: r.Outcome, Created: now}}
 }
 
-// resolveAll ends every open wait whose condition happened or whose deadline passed.
+// resolveAll ends every open wait whose condition happened, can no longer
+// happen, or whose deadline passed.
 func (s *Scheduler) resolveAll(now time.Time) error {
 	ws, err := s.Store.OpenWaits()
+	if err != nil || len(ws) == 0 {
+		return err
+	}
+	un, err := s.Store.Unfollowed()
 	if err != nil {
 		return err
 	}
+	unfollowed := map[string]bool{}
+	for _, r := range un {
+		unfollowed[r.ID] = true
+	}
 	var errs []error
 	for _, w := range ws {
-		if err := s.resolve(w, now); err != nil {
+		if err := s.resolve(w, !unfollowed[w.RunID], now); err != nil {
 			errs = append(errs, fmt.Errorf("wait of run %s: %w", w.RunID, err))
 		}
 	}
 	return errors.Join(errs...)
 }
 
-func (s *Scheduler) resolve(w store.Wait, now time.Time) error {
+// resolve ends one open wait. followed says the run's hand-offs were queued,
+// so a handoff wait can tell a dropped hand-off from one not made yet.
+func (s *Scheduler) resolve(w store.Wait, followed bool, now time.Time) error {
 	r, err := s.Store.RunByID(w.RunID)
 	if err != nil {
 		return err
@@ -260,6 +276,16 @@ func (s *Scheduler) resolve(w store.Wait, now time.Time) error {
 		return err
 	}
 	if !met {
+		if w.Kind == "handoff" && followed {
+			why, err := s.handoffLost(w, r)
+			if err != nil {
+				return err
+			}
+			if why != "" {
+				_, err := s.Store.ResolveWait(r.ID, s.stuck(r, why, now))
+				return err
+			}
+		}
 		if now.Before(w.Deadline) {
 			return nil
 		}
@@ -275,7 +301,7 @@ func (s *Scheduler) resolve(w store.Wait, now time.Time) error {
 		return err
 	}
 	ctxJSON, err := json.Marshal(store.RunContext{Kind: "continue", WaitedFor: Describe(w), Arrived: a.Detail,
-		MessageID: a.MessageID, PreviousRun: r.ID, Previous: r.Outcome})
+		MessageID: a.MessageID, PreviousRun: r.ID, Previous: clip(r.Outcome, MaxContextText)})
 	if err != nil {
 		return err
 	}
@@ -283,6 +309,62 @@ func (s *Scheduler) resolve(w store.Wait, now time.Time) error {
 		Follows: r.ID, Via: "continue", Context: ctxJSON, Reason: "Continues after " + a.Detail, Created: now}
 	_, err = s.Store.ResolveWait(r.ID, store.Resolution{Status: store.WaitMet, Detail: a.Detail, Ended: now, Next: &next})
 	return err
+}
+
+// handoffLost returns why a handoff wait can no longer be met, or "" while it
+// still can: the hand-off is queued, its run is active or waiting, or nothing
+// decisive has happened yet.
+func (s *Scheduler) handoffLost(w store.Wait, r store.Run) (string, error) {
+	rs, qs, err := s.chain(r.Journey)
+	if err != nil {
+		return "", err
+	}
+	for _, q := range qs {
+		if q.Role == w.Role && q.Story == w.Story {
+			return "", nil
+		}
+	}
+	var last *store.Run
+	earlier := false
+	for i, x := range rs {
+		if x.Role != w.Role || x.Story != w.Story || x.ID == r.ID {
+			continue
+		}
+		if !x.State.Final() || x.State == store.RunWaiting {
+			return "", nil
+		}
+		if x.Started.Before(w.Began) {
+			earlier = true
+			continue
+		}
+		if last == nil || !x.Started.Before(last.Started) {
+			last = &rs[i]
+		}
+	}
+	switch {
+	case last != nil && (last.State == store.RunStuck || last.State == store.RunFailed):
+		return fmt.Sprintf("%s could not finish %q: %s", w.Role, w.Story, plain(firstLine(last.Outcome, 200), 200)), nil
+	case last != nil:
+		return "", nil // done; Met decides
+	case earlier:
+		return fmt.Sprintf("%s already did %q earlier in this chain, and a story is handed off only once per chain", w.Role, w.Story), nil
+	}
+	return fmt.Sprintf("the hand-off to %s %q was removed before it ran", w.Role, w.Story), nil
+}
+
+// clip makes outcome text fit a run context: control characters other than
+// newline and tab become spaces and it is cut to max runes.
+func clip(s string, max int) string {
+	s = strings.Map(func(r rune) rune {
+		if r != '\n' && r != '\t' && unicode.IsControl(r) {
+			return ' '
+		}
+		return r
+	}, s)
+	if r := []rune(s); len(r) > max {
+		s = string(r[:max])
+	}
+	return s
 }
 
 // drain starts the oldest queued run that can start, at most one per tick.
@@ -296,7 +378,10 @@ func (s *Scheduler) drain(ctx context.Context) error {
 		switch {
 		case err == nil:
 			return nil
-		case errors.Is(err, runs.ErrBusy), errors.Is(err, runs.ErrNoFence):
+		case errors.Is(err, runs.ErrBusy):
+			return nil // the item stays for a later tick
+		case errors.Is(err, runs.ErrNoFence):
+			log.Printf("scheduler: queued %s/%s cannot start yet: %v", q.Persona, q.Story, err)
 			return nil // the item stays for a later tick
 		case errors.Is(err, runs.ErrInvalid):
 			if derr := s.Store.DeleteQueued(q.ID); derr != nil && !errors.Is(derr, store.ErrNotFound) {

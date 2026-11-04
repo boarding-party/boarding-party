@@ -30,6 +30,7 @@ type Until struct {
 type EmailCond struct {
 	From    string `json:"from,omitempty" jsonschema:"part of the sender address, case-insensitive"`
 	Subject string `json:"subject,omitempty" jsonschema:"part of the subject, case-insensitive"`
+	AfterID string `json:"after_id,omitempty" jsonschema:"the id of the newest message you already saw in messages_list; any later message counts, even one that arrives while you wrap up"`
 }
 
 type HandoffCond struct {
@@ -65,7 +66,7 @@ func ParseWait(u Until, p project.Project, r store.Run, now time.Time) (store.Wa
 		if u.Email.From == "" && u.Email.Subject == "" {
 			return w, errors.New("email needs from or subject")
 		}
-		w.Kind, w.From, w.Subject = "email", u.Email.From, u.Email.Subject
+		w.Kind, w.From, w.Subject, w.AfterID = "email", u.Email.From, u.Email.Subject, u.Email.AfterID
 	case u.Handoff != nil:
 		h := u.Handoff
 		st, _ := p.FindStory(r.Role, r.Story)
@@ -160,7 +161,18 @@ func Met(st *store.Store, w store.Wait, r store.Run, now time.Time) (Arrival, bo
 			return Arrival{Detail: "time reached"}, true, nil
 		}
 	case "email":
-		msgs, err := st.Messages(store.MessageQuery{Persona: r.Persona, Since: w.Began, Limit: 200})
+		q := store.MessageQuery{Persona: r.Persona, Since: w.Began, Limit: 200}
+		if w.AfterID != "" {
+			// Mail after the newest one the agent saw counts, even if it came
+			// in during wrap-up, before the wait began. If that message was
+			// pruned, fall back to mail since the wait began.
+			if _, err := st.Message(w.AfterID); err == nil {
+				q.Since, q.AfterID = time.Time{}, w.AfterID
+			} else if !errors.Is(err, store.ErrNotFound) {
+				return Arrival{}, false, err
+			}
+		}
+		msgs, err := st.Messages(q)
 		if err != nil {
 			return Arrival{}, false, err
 		}
@@ -178,7 +190,7 @@ func Met(st *store.Store, w store.Wait, r store.Run, now time.Time) (Arrival, bo
 		}
 		for _, x := range runs {
 			if x.Role == w.Role && x.Story == w.Story && x.State == store.RunDone && x.Finished.After(w.Began) {
-				return Arrival{Detail: fmt.Sprintf("%s finished %q: %s", x.Persona, x.Story, firstLine(x.Outcome, 200))}, true, nil
+				return Arrival{Detail: fmt.Sprintf("%s finished %q: %s", plain(x.Persona, 200), x.Story, plain(firstLine(x.Outcome, 200), 200))}, true, nil
 			}
 		}
 	}

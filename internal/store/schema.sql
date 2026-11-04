@@ -81,6 +81,7 @@ CREATE TABLE IF NOT EXISTS waits (
   deadline INTEGER NOT NULL DEFAULT 0,
   status   TEXT NOT NULL,
   detail   TEXT NOT NULL DEFAULT '',
-  ended    INTEGER NOT NULL DEFAULT 0
+  ended    INTEGER NOT NULL DEFAULT 0,
+  after_id TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS waits_status ON waits(status);

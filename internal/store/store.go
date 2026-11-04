@@ -145,8 +145,10 @@ func messagesLacksMailbox(db *sql.DB) (bool, error) {
 	return n > 0 && !has, rows.Err()
 }
 
+type addedColumn struct{ name, ddl string }
+
 // runsAddedColumns are the runs columns added after the first release.
-var runsAddedColumns = []struct{ name, ddl string }{
+var runsAddedColumns = []addedColumn{
 	{"journey", "journey TEXT NOT NULL DEFAULT ''"},
 	{"follows", "follows TEXT NOT NULL DEFAULT ''"},
 	{"via", "via TEXT NOT NULL DEFAULT ''"},
@@ -154,9 +156,14 @@ var runsAddedColumns = []struct{ name, ddl string }{
 	{"followed", "followed INTEGER NOT NULL DEFAULT 0"},
 }
 
-// addColumns adds any missing runs columns to a database made by an older
-// version. Runs that already exist become their own journey and count as
-// followed, so the scheduler does not act on history.
+// waitsAddedColumns are the waits columns added after the table first shipped.
+var waitsAddedColumns = []addedColumn{
+	{"after_id", "after_id TEXT NOT NULL DEFAULT ''"},
+}
+
+// addColumns adds any missing runs and waits columns to a database made by an
+// older version. Runs that already exist become their own journey and count
+// as followed, so the scheduler does not act on history.
 func addColumns(db *sql.DB) (added bool, err error) {
 	// One transaction: a crash between the ALTERs and the backfill must not
 	// leave old runs unfollowed. SQLite DDL is transactional.
@@ -165,45 +172,61 @@ func addColumns(db *sql.DB) (added bool, err error) {
 		return false, err
 	}
 	defer tx.Rollback()
-	rows, err := tx.Query(`SELECT name FROM pragma_table_info('runs')`)
+	addedRuns, err := addMissing(tx, "runs", runsAddedColumns)
 	if err != nil {
 		return false, err
+	}
+	if addedRuns["followed"] {
+		if _, err := tx.Exec(`UPDATE runs SET followed = 1, journey = CASE journey WHEN '' THEN id ELSE journey END`); err != nil {
+			return false, err
+		}
+	}
+	addedWaits, err := addMissing(tx, "waits", waitsAddedColumns)
+	if err != nil {
+		return false, err
+	}
+	// Created here, not in schema.sql: on an old database the column exists only now.
+	if _, err := tx.Exec(`CREATE INDEX IF NOT EXISTS runs_journey ON runs(journey)`); err != nil {
+		return false, err
+	}
+	return len(addedRuns)+len(addedWaits) > 0, tx.Commit()
+}
+
+// addMissing adds the columns table lacks and returns the names it added. A
+// table that does not exist is left alone.
+func addMissing(tx *sql.Tx, table string, cols []addedColumn) (map[string]bool, error) {
+	rows, err := tx.Query(`SELECT name FROM pragma_table_info(?)`, table)
+	if err != nil {
+		return nil, err
 	}
 	have := map[string]bool{}
 	for rows.Next() {
 		var name string
 		if err := rows.Scan(&name); err != nil {
 			rows.Close()
-			return false, err
+			return nil, err
 		}
 		have[name] = true
 	}
 	if err := rows.Err(); err != nil {
 		rows.Close()
-		return false, err
+		return nil, err
 	}
 	rows.Close()
-	addedFollowed := false
-	for _, c := range runsAddedColumns {
+	added := map[string]bool{}
+	if len(have) == 0 {
+		return added, nil
+	}
+	for _, c := range cols {
 		if have[c.name] {
 			continue
 		}
-		if _, err := tx.Exec(`ALTER TABLE runs ADD COLUMN ` + c.ddl); err != nil {
-			return false, err
+		if _, err := tx.Exec(`ALTER TABLE ` + table + ` ADD COLUMN ` + c.ddl); err != nil {
+			return nil, err
 		}
-		added = true
-		addedFollowed = addedFollowed || c.name == "followed"
+		added[c.name] = true
 	}
-	if addedFollowed {
-		if _, err := tx.Exec(`UPDATE runs SET followed = 1, journey = CASE journey WHEN '' THEN id ELSE journey END`); err != nil {
-			return false, err
-		}
-	}
-	// Created here, not in schema.sql: on an old database the column exists only now.
-	if _, err := tx.Exec(`CREATE INDEX IF NOT EXISTS runs_journey ON runs(journey)`); err != nil {
-		return false, err
-	}
-	return added, tx.Commit()
+	return added, nil
 }
 
 func (s *Store) Close() error { return s.db.Close() }

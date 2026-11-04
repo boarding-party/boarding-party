@@ -202,3 +202,29 @@ INSERT INTO runs VALUES('old','t','done')`); err != nil {
 		t.Fatalf("second: %v %v", added, err)
 	}
 }
+
+func TestAddColumnsAddsWaitsAfterID(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "bp.db")
+	db, err := sql.Open("sqlite", "file:"+path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A waits table from before after_id, with one open wait.
+	if _, err := db.Exec(`CREATE TABLE waits (run_id TEXT PRIMARY KEY, kind TEXT NOT NULL DEFAULT '', sender TEXT NOT NULL DEFAULT '',
+  subject TEXT NOT NULL DEFAULT '', role TEXT NOT NULL DEFAULT '', story TEXT NOT NULL DEFAULT '', at INTEGER NOT NULL DEFAULT 0,
+  began INTEGER NOT NULL DEFAULT 0, deadline INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL, detail TEXT NOT NULL DEFAULT '',
+  ended INTEGER NOT NULL DEFAULT 0);
+INSERT INTO waits(run_id, kind, subject, status) VALUES('w1','email','Hi','open')`); err != nil {
+		t.Fatal(err)
+	}
+	db.Close()
+	s, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	w, err := s.WaitFor("w1")
+	if err != nil || w.Subject != "Hi" || w.AfterID != "" || w.Status != WaitOpen {
+		t.Fatalf("%+v %v", w, err)
+	}
+}
