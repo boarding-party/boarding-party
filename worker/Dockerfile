@@ -13,6 +13,16 @@ RUN apt-get update \
 # Global install; browsers come from the base image (PLAYWRIGHT_BROWSERS_PATH=/ms-playwright).
 RUN npm i -g @playwright/mcp@${PLAYWRIGHT_MCP_VERSION} && npm cache clean --force
 
+# Personas type like people: patch Playwright MCP so text goes in key by key
+# at a human pace (see humanise.mjs). Fails the build if the patch misses.
+COPY humanise.mjs /tmp/humanise.mjs
+RUN node /tmp/humanise.mjs "$(find "$(npm root -g)/@playwright/mcp" -path '*/playwright-core/lib/coreBundle.js' | head -1)" \
+    && rm /tmp/humanise.mjs
+
+# Claude Code's telemetry, error reports and update checks are not part of the
+# test: without this they show up as blocked hosts on every run.
+ENV CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
+
 # @playwright/mcp always tracks a Playwright alpha (1.65.0-alpha), which expects a
 # newer Chromium revision (1252) than the base image ships (1248, Playwright 1.64.1).
 # Fetch the revision it wants into the same browsers dir; --only-shell style trimming
