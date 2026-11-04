@@ -171,9 +171,18 @@ func TestExtraHosts(t *testing.T) {
 	if p.ExtraHosts[0] != "fonts.gstatic.com" {
 		t.Fatalf("extra host not normalised: %q", p.ExtraHosts[0])
 	}
-	for _, h := range []string{"com", ".com", "co.uk", "*", "fonts.gstatic.com\nevil.com", "a b.com", "https://x.com", "localhost"} {
+	for _, h := range []string{"com", ".com", "co.uk", "*", "fonts.gstatic.com\nevil.com", "a b.com", "https://x.com", "localhost",
+		"10.0.0.1", "169.254.169.254", "metadata.google.internal", "bp-director.boardingparty.svc", "kubernetes.default.svc.cluster.local", "printer.local", "10.1", "0x7f.1"} {
 		if _, err := LoadJSON([]byte(`{"name":"p","sites":["https://x.test"],"extraHosts":["` + h + `"]}`)); err == nil {
 			t.Errorf("extra host %q accepted", h)
+		}
+	}
+}
+
+func TestSitesMustBePublic(t *testing.T) {
+	for _, site := range []string{"https://10.0.0.5/", "https://[::1]/", "https://metadata.google.internal/", "https://app.svc/", "https://staging/"} {
+		if _, err := LoadJSON([]byte(`{"name":"p","sites":["` + site + `"]}`)); err == nil {
+			t.Errorf("site %q accepted", site)
 		}
 	}
 }

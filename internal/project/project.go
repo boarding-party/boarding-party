@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/mail"
 	"net/url"
 	"regexp"
@@ -178,14 +179,17 @@ func (p Project) validate() error {
 		if err != nil || u.Scheme != "https" || u.Host == "" {
 			return fmt.Errorf("site %q must be an https:// URL", s)
 		}
+		if why := publicHostProblem(strings.ToLower(u.Hostname())); why != "" {
+			return fmt.Errorf("site %q %s", s, why)
+		}
 	}
 	for i, h := range p.ExtraHosts {
 		h = strings.ToLower(strings.TrimSpace(h))
-		if len(validation.IsDNS1123Subdomain(h)) > 0 || !strings.Contains(h, ".") {
+		if len(validation.IsDNS1123Subdomain(h)) > 0 {
 			return fmt.Errorf("extra host %q must be a host name such as fonts.gstatic.com", p.ExtraHosts[i])
 		}
-		if suffix, _ := publicsuffix.PublicSuffix(h); suffix == h {
-			return fmt.Errorf("extra host %q is a whole domain ending; name the host, such as fonts.gstatic.com", p.ExtraHosts[i])
+		if why := publicHostProblem(h); why != "" {
+			return fmt.Errorf("extra host %q %s", p.ExtraHosts[i], why)
 		}
 		p.ExtraHosts[i] = h
 	}
@@ -259,4 +263,49 @@ func (p Project) Hosts() []string {
 	}
 	slices.Sort(hosts)
 	return slices.Compact(hosts)
+}
+
+// internalSuffixes are name endings that resolve inside a cluster, a cloud
+// project or a local network, never to a public staging site.
+var internalSuffixes = []string{".internal", ".local", ".localhost", ".localdomain", ".svc", ".cluster.local", ".home.arpa", ".arpa"}
+
+// publicHostProblem says why a lower-case host can't go on the egress
+// allow-list, or "" when it can. The proxy matches host names as written, so
+// an IP address or an internal name there would open the cluster's own
+// network (or the cloud metadata server) to the agents.
+func publicHostProblem(h string) string {
+	h = strings.TrimSuffix(h, ".")
+	if net.ParseIP(strings.Trim(h, "[]")) != nil || allDigitsLastLabel(h) {
+		return "is an IP address; use the site's host name"
+	}
+	if !strings.Contains(h, ".") {
+		return "must be a full host name such as fonts.gstatic.com"
+	}
+	for _, sfx := range internalSuffixes {
+		if strings.HasSuffix(h, sfx) || h == sfx[1:] {
+			return "is an internal name; runs may reach only public hosts"
+		}
+	}
+	if suffix, _ := publicsuffix.PublicSuffix(h); suffix == h {
+		return "is a whole domain ending; name the host, such as fonts.gstatic.com"
+	}
+	return ""
+}
+
+// allDigitsLastLabel catches IPv4 forms net.ParseIP rejects (such as
+// "10.1" or "0x7f.1"): no public top-level domain is numeric or hex.
+func allDigitsLastLabel(h string) bool {
+	last := h[strings.LastIndexByte(h, '.')+1:]
+	if last == "" {
+		return false
+	}
+	if strings.HasPrefix(last, "0x") {
+		return true
+	}
+	for _, c := range last {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
 }

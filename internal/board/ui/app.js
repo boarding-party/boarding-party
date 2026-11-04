@@ -726,10 +726,19 @@ function BlockedHosts({ hosts }) {
       <ul class="files blocked">${shown.map((h) => html`
         <li key=${h}><code>${h}</code>
           ${allowed.has(h) ? html`<span class="small muted">Allowed</span>`
+            : !allowable(h) ? html`<span class="small muted" title="IP addresses and internal names can't go on the allow-list">Not allowed</span>`
             : html`<button class="btn" type="button" disabled=${busy !== ''} onClick=${() => allow(h)}>${busy === h ? 'Allowing…' : 'Allow'}</button>`}</li>`)}</ul>
       ${hosts.length > shown.length ? html`<p class="small muted">${hosts.length - shown.length} more not shown.</p>` : null}
       ${err ? html`<div class="note bad">Could not allow the host: ${err}</div>` : null}
     </div>`;
+}
+
+// allowable mirrors the director's check (project.publicHostProblem) so the
+// card never offers Allow for an IP address or an internal name.
+const INTERNAL = /(^|\.)(internal|local|localhost|localdomain|svc|cluster\.local|arpa)$/;
+function allowable(host) {
+  if (!host.includes('.') || host.includes(':') || /(^|\.)(\d+|0x[0-9a-f]*)$/.test(host)) return false;
+  return !INTERNAL.test(host);
 }
 
 function hostOf(site) {
