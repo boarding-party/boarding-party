@@ -20,8 +20,9 @@ one run at a time and answers 409 while another run is active.
    must be a `.svc` name: tiny's egress proxy only bypasses `.svc` and
    `.cluster.local` hosts.
 
-   Chromium's use of the egress proxy must be checked. If pages fail to load,
-   add `--proxy-server=http://tiny-egress:3128` to the `pw` server args.
+   With the proxy on, `bp-browser` passes tiny's `HTTPS_PROXY` and `NO_PROXY`
+   to Playwright as `--proxy-server` and `--proxy-bypass`, so page loads go
+   through the fence and refused hosts show on the run page.
 
 2. Open the board:
 

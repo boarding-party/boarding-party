@@ -44,6 +44,16 @@ if [ -n "$files" ]; then
   rm -f /workspace/files/.*.part 2>/dev/null
 fi
 
+# tiny's egress proxy, when on, arrives as HTTPS_PROXY/NO_PROXY. Hand it to
+# Chromium explicitly rather than rely on Chromium reading the environment,
+# so every page request goes through the fence and its refusals are logged.
+proxy="${HTTPS_PROXY:-$https_proxy}"
+if [ -n "$proxy" ]; then
+  set -- "$@" "--proxy-server=$proxy"
+  bypass="${NO_PROXY:-$no_proxy}"
+  [ -n "$bypass" ] && set -- "$@" "--proxy-bypass=$bypass"
+fi
+
 name=""
 case "$device" in
   "") ;;
