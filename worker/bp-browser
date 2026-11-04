@@ -3,6 +3,7 @@
 # Nothing may be written to stdout here; it belongs to the MCP protocol.
 live=""
 files=""
+usage=""
 device=""
 n=$#
 while [ "$n" -gt 0 ]; do
@@ -10,6 +11,7 @@ while [ "$n" -gt 0 ]; do
   case "$a" in
     --live-url=*) live="${a#--live-url=}" ;;
     --files-url=*) files="${a#--files-url=}" ;;
+    --usage-url=*) usage="${a#--usage-url=}" ;;
     --bp-device=*) device="${a#--bp-device=}" ;;
     *) set -- "$@" "$a" ;;
   esac
@@ -21,6 +23,16 @@ if [ -n "$live" ]; then
   if [ -z "$pid" ] || ! kill -0 "$pid" 2>/dev/null; then
     node /opt/bp/bp-screen.mjs "--live-url=$live" >>/tmp/bp-screen.log 2>&1 &
     echo $! >/tmp/bp-screen.pid
+  fi
+fi
+
+# Token usage goes to the director while the run lasts; one reporter per pod.
+if [ -n "$usage" ]; then
+  pid=""
+  [ -f /tmp/bp-usage.pid ] && pid=$(cat /tmp/bp-usage.pid 2>/dev/null)
+  if [ -z "$pid" ] || ! kill -0 "$pid" 2>/dev/null; then
+    node /opt/bp/bp-usage.mjs "--usage-url=$usage" >>/tmp/bp-usage.log 2>&1 &
+    echo $! >/tmp/bp-usage.pid
   fi
 fi
 

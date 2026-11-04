@@ -85,12 +85,13 @@ func admin(svc *runs.Service, maxBytes int64, token string, hub *live.Hub, mail 
 	return s, guardAdmin(token, mux)
 }
 
-// Worker is the surface reachable by worker pods: artifact upload and health only.
+// Worker is the surface reachable by worker pods: artifact, frame and usage upload, test files and health.
 func Worker(svc *runs.Service, maxBytes int64, hub *live.Hub) http.Handler {
 	s := newServer(svc, maxBytes, hub)
 	mux := http.NewServeMux()
 	mux.HandleFunc("PUT /artifacts/{token}/{name}", s.putArtifact)
 	mux.HandleFunc("PUT /live/{token}", s.putLive)
+	mux.HandleFunc("PUT /usage/{token}", s.putUsage)
 	mux.HandleFunc("GET /files/{token}/{$}", s.workerFiles)
 	mux.HandleFunc("GET /files/{token}/{name}", s.workerFile)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
@@ -274,6 +275,11 @@ func (s *server) getRun(w http.ResponseWriter, r *http.Request) {
 		out["blocked"] = blocked
 	}
 	cancel()
+	if u, err := s.svc.Usage(run.ID); err != nil {
+		log.Printf("api: run %s usage: %v", run.ID, err)
+	} else if u != nil {
+		out["usage"] = u
+	}
 	if stage, reason, isLive := s.progress(r.Context(), run); stage != "" || isLive {
 		if stage != "" {
 			out["stage"] = stage
@@ -367,6 +373,22 @@ func (s *server) putArtifact(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusCreated)
+}
+
+// putUsage takes a worker's running token total for its run.
+func (s *server) putUsage(w http.ResponseWriter, r *http.Request) {
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096))
+	dec.DisallowUnknownFields()
+	var u runs.Usage
+	if err := dec.Decode(&u); err != nil {
+		http.Error(w, "bad usage", http.StatusBadRequest)
+		return
+	}
+	if err := s.svc.SaveUsage(r.PathValue("token"), u, time.Now()); err != nil {
+		fail(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // putLive takes the newest screen frame from a worker.

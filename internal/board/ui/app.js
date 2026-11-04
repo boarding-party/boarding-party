@@ -615,8 +615,8 @@ function RunPage({ id, onChange }) {
       ${err ? html`<div class="note bad">Could not load the run: ${err}</div>` : html`<p class="muted">Loading run…</p>`}</section>`;
   }
 
-  const { run, bugs = [], artifacts = [] } = data;
-  const files = artifacts.filter((n) => n !== BLOCKED_NAME);
+  const { run, bugs = [], artifacts = [], usage } = data;
+  const files = artifacts.filter((n) => n !== BLOCKED_NAME && n !== USAGE_NAME);
   const webm = artifacts.find((n) => n.toLowerCase().endsWith('.webm'));
   const started = parseTime(run.started), finished = parseTime(run.finished);
   const took = started ? fmtDuration((finished || new Date()) - started) : '';
@@ -665,6 +665,7 @@ function RunPage({ id, onChange }) {
               <dt>Started</dt><dd>${fmtFull(run.started) || '—'}</dd>
               <dt>Finished</dt><dd>${fmtFull(run.finished) || '—'}</dd>
               ${took ? html`<dt>Duration</dt><dd>${took}</dd>` : null}
+              ${usage ? html`<dt>Tokens</dt><dd>${fmtUsage(usage)}</dd>` : null}
               ${run.session ? html`<dt>Session</dt><dd><code>${run.session}</code></dd>` : null}
             </dl>
           </div>
@@ -678,6 +679,26 @@ function RunPage({ id, onChange }) {
         </div>
       </div>
     </section>`;
+}
+
+// USAGE_NAME is the run's token count (runs.UsageName); the run page shows it
+// in Details, not as a file.
+const USAGE_NAME = 'usage.json';
+
+// fmtUsage says how many tokens the agent read and wrote. Every turn re-reads
+// the conversation so far, so most of what it reads comes from the cache,
+// which costs a tenth of fresh input.
+function fmtUsage(u) {
+  const read = (u.input || 0) + (u.cacheRead || 0) + (u.cacheWrite || 0);
+  const cached = read ? Math.round(((u.cacheRead || 0) / read) * 100) : 0;
+  const turns = u.turns === 1 ? '1 turn' : `${u.turns || 0} turns`;
+  return `${fmtCount(read)} read (${cached}% from cache), ${fmtCount(u.output || 0)} written, ${turns}`;
+}
+
+function fmtCount(n) {
+  if (n >= 1e6) return `${(n / 1e6).toFixed(n >= 1e7 ? 0 : 1)}M`;
+  if (n >= 1e3) return `${(n / 1e3).toFixed(n >= 1e4 ? 0 : 1)}k`;
+  return String(n);
 }
 
 // BLOCKED_NAME is the director's saved list of refused hosts (runs.BlockedName);
