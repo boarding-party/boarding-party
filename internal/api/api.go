@@ -226,6 +226,7 @@ func (s *server) listRuns(w http.ResponseWriter, r *http.Request) {
 		Stage       string `json:"stage,omitempty"`
 		StageReason string `json:"stageReason,omitempty"`
 		Live        bool   `json:"live,omitempty"`
+		Blocked     int    `json:"blocked,omitempty"` // hosts the egress fence refused
 	}
 	out := make([]item, len(rs))
 	// One deadline for every lookup: a slow cluster costs the list at most
@@ -235,6 +236,9 @@ func (s *server) listRuns(w http.ResponseWriter, r *http.Request) {
 	for i, x := range rs {
 		out[i] = item{Run: redact(x)}
 		out[i].Stage, out[i].StageReason, out[i].Live = s.progress(ctx, x)
+		if hosts, err := s.svc.Blocked(ctx, x); err == nil {
+			out[i].Blocked = len(hosts)
+		}
 	}
 	writeJSON(w, http.StatusOK, out)
 }

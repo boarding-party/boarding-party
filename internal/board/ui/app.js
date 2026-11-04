@@ -402,7 +402,7 @@ function RunsTable({ runs }) {
               <td><a href=${runHref(r.id)} onClick=${(e) => e.stopPropagation()}>${r.persona}</a>
                 ${r.role ? html`<div class="small muted">${r.role}</div>` : null}</td>
               <td>${r.story}${ACTIVE.has(r.state) ? html` <a class="small" href=${runHref(r.id)} onClick=${(e) => e.stopPropagation()}>Watch</a>` : null}</td>
-              <td><${StateTag} state=${r.state} /></td>
+              <td><${StateTag} state=${r.state} />${r.blocked ? html` <span class="tag wait" title="The network fence refused hosts the site tried to load. Open the run to allow them.">${r.blocked} blocked</span>` : null}</td>
               <td class="when" title=${fmtFull(r.started)}>${fmtWhen(r.started)}</td>
               <td class="outcome" title=${firstLine(r.outcome)}>${firstLine(r.outcome) || html`<span class="muted">${ACTIVE.has(r.state) ? 'In progress' : '—'}</span>`}</td>
             </tr>`)}
