@@ -19,7 +19,7 @@ var schema string
 
 var ErrNotFound = errors.New("not found")
 
-type RunState string // "pending","running","done","stuck","failed"
+type RunState string // "pending","running","done","stuck","failed","waiting"
 
 const (
 	RunPending RunState = "pending"
@@ -27,7 +27,18 @@ const (
 	RunDone    RunState = "done"
 	RunStuck   RunState = "stuck"
 	RunFailed  RunState = "failed"
+	RunWaiting RunState = "waiting"
 )
+
+// Final reports whether the run has stopped for good (a waiting run has
+// stopped too; a later run continues it).
+func (s RunState) Final() bool {
+	switch s {
+	case RunDone, RunStuck, RunFailed, RunWaiting:
+		return true
+	}
+	return false
+}
 
 type Run struct {
 	ID       string    `json:"id"`
@@ -40,6 +51,29 @@ type Run struct {
 	Session  string    `json:"session"` // tiny Session name
 	Started  time.Time `json:"started"`
 	Finished time.Time `json:"finished"`
+
+	Journey string          `json:"journey"`
+	Follows string          `json:"follows,omitempty"` // run that caused this one
+	Via     string          `json:"via,omitempty"`     // "" new, "continue", "handoff"
+	Context json.RawMessage `json:"context,omitempty"`
+}
+
+// RunContext is what a chained run is told about the run before it.
+type RunContext struct {
+	Kind        string       `json:"kind"` // "continue" | "handoff"
+	WaitedFor   string       `json:"waitedFor,omitempty"`
+	Arrived     string       `json:"arrived,omitempty"`
+	MessageID   string       `json:"messageId,omitempty"`
+	PreviousRun string       `json:"previousRun"`
+	Previous    string       `json:"previous"` // that run's outcome summary
+	From        *ContextFrom `json:"from,omitempty"`
+}
+
+type ContextFrom struct {
+	Persona string `json:"persona"`
+	Role    string `json:"role"`
+	Story   string `json:"story"`
+	Summary string `json:"summary"`
 }
 
 type Bug struct {
@@ -79,6 +113,10 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("apply schema: %w", err)
 	}
+	if _, err := addColumns(db); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("migrate runs: %w", err)
+	}
 	if legacy {
 		if _, err := db.Exec(`INSERT INTO messages(` + msgCols + `, mailbox) SELECT ` + msgCols + `, '' FROM messages_old; DROP TABLE messages_old`); err != nil {
 			db.Close()
@@ -105,6 +143,60 @@ func messagesLacksMailbox(db *sql.DB) (bool, error) {
 		has = has || name == "mailbox"
 	}
 	return n > 0 && !has, rows.Err()
+}
+
+// runsAddedColumns are the runs columns added after the first release.
+var runsAddedColumns = []struct{ name, ddl string }{
+	{"journey", "journey TEXT NOT NULL DEFAULT ''"},
+	{"follows", "follows TEXT NOT NULL DEFAULT ''"},
+	{"via", "via TEXT NOT NULL DEFAULT ''"},
+	{"context", "context TEXT NOT NULL DEFAULT ''"},
+	{"followed", "followed INTEGER NOT NULL DEFAULT 0"},
+}
+
+// addColumns adds any missing runs columns to a database made by an older
+// version. Runs that already exist become their own journey and count as
+// followed, so the scheduler does not act on history.
+func addColumns(db *sql.DB) (added bool, err error) {
+	rows, err := db.Query(`SELECT name FROM pragma_table_info('runs')`)
+	if err != nil {
+		return false, err
+	}
+	have := map[string]bool{}
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			rows.Close()
+			return false, err
+		}
+		have[name] = true
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return false, err
+	}
+	rows.Close()
+	addedFollowed := false
+	for _, c := range runsAddedColumns {
+		if have[c.name] {
+			continue
+		}
+		if _, err := db.Exec(`ALTER TABLE runs ADD COLUMN ` + c.ddl); err != nil {
+			return added, err
+		}
+		added = true
+		addedFollowed = addedFollowed || c.name == "followed"
+	}
+	if addedFollowed {
+		if _, err := db.Exec(`UPDATE runs SET followed = 1, journey = CASE journey WHEN '' THEN id ELSE journey END`); err != nil {
+			return added, err
+		}
+	}
+	// Created here, not in schema.sql: on an old database the column exists only now.
+	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS runs_journey ON runs(journey)`); err != nil {
+		return added, err
+	}
+	return added, nil
 }
 
 func (s *Store) Close() error { return s.db.Close() }
@@ -166,24 +258,51 @@ func fromTS(n int64) time.Time {
 	return time.Unix(0, n).UTC()
 }
 
-const runCols = `id, token, persona, role, story, state, outcome, session, started, finished`
+const runCols = `id, token, persona, role, story, state, outcome, session, started, finished, journey, follows, via, context`
 
 func scanRun(sc interface{ Scan(...any) error }) (Run, error) {
 	var r Run
 	var st string
 	var started, finished int64
-	if err := sc.Scan(&r.ID, &r.Token, &r.Persona, &r.Role, &r.Story, &st, &r.Outcome, &r.Session, &started, &finished); err != nil {
+	var ctx string
+	if err := sc.Scan(&r.ID, &r.Token, &r.Persona, &r.Role, &r.Story, &st, &r.Outcome, &r.Session, &started, &finished,
+		&r.Journey, &r.Follows, &r.Via, &ctx); err != nil {
 		return Run{}, err
+	}
+	if ctx != "" {
+		r.Context = json.RawMessage(ctx)
 	}
 	r.State = RunState(st)
 	r.Started, r.Finished = fromTS(started), fromTS(finished)
 	return r, nil
 }
 
-func (s *Store) CreateRun(r Run) error {
-	_, err := s.db.Exec(`INSERT INTO runs(`+runCols+`) VALUES(?,?,?,?,?,?,?,?,?,?)`,
-		r.ID, r.Token, r.Persona, r.Role, r.Story, string(r.State), r.Outcome, r.Session, ts(r.Started), ts(r.Finished))
-	return err
+func (s *Store) CreateRun(r Run) error { return s.CreateRunFrom(r, "") }
+
+// CreateRunFrom creates the run and, when queueID is set, consumes that queue
+// row in the same transaction. It returns ErrNotFound (creating nothing) if
+// the row was already gone.
+func (s *Store) CreateRunFrom(r Run, queueID string) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if queueID != "" {
+		res, err := tx.Exec(`DELETE FROM queue WHERE id = ?`, queueID)
+		if err != nil {
+			return err
+		}
+		if n, _ := res.RowsAffected(); n == 0 {
+			return ErrNotFound
+		}
+	}
+	if _, err := tx.Exec(`INSERT INTO runs(`+runCols+`) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		r.ID, r.Token, r.Persona, r.Role, r.Story, string(r.State), r.Outcome, r.Session, ts(r.Started), ts(r.Finished),
+		r.Journey, r.Follows, r.Via, string(r.Context)); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (s *Store) RunByToken(token string) (Run, error) {
@@ -262,6 +381,17 @@ func (s *Store) Runs(limit int) ([]Run, error) {
 // ActiveRuns returns runs that are pending or running.
 func (s *Store) ActiveRuns() ([]Run, error) {
 	return s.queryRuns(`SELECT ` + runCols + ` FROM runs WHERE state IN ('pending','running') ORDER BY started`)
+}
+
+// RunsInJourney returns every run of a journey, oldest first.
+func (s *Store) RunsInJourney(journey string) ([]Run, error) {
+	return s.queryRuns(`SELECT `+runCols+` FROM runs WHERE journey = ? ORDER BY started, rowid`, journey)
+}
+
+// Unfollowed returns done or waiting runs the scheduler has not yet acted on,
+// oldest finished first.
+func (s *Store) Unfollowed() ([]Run, error) {
+	return s.queryRuns(`SELECT ` + runCols + ` FROM runs WHERE state IN ('done','waiting') AND followed = 0 ORDER BY finished, rowid`)
 }
 
 func (s *Store) AddBug(b Bug) error {

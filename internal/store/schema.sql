@@ -16,7 +16,12 @@ CREATE TABLE IF NOT EXISTS runs (
   outcome  TEXT NOT NULL DEFAULT '',
   session  TEXT NOT NULL DEFAULT '',
   started  INTEGER NOT NULL DEFAULT 0,
-  finished INTEGER NOT NULL DEFAULT 0
+  finished INTEGER NOT NULL DEFAULT 0,
+  journey  TEXT NOT NULL DEFAULT '',
+  follows  TEXT NOT NULL DEFAULT '',
+  via      TEXT NOT NULL DEFAULT '',
+  context  TEXT NOT NULL DEFAULT '',
+  followed INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS runs_started ON runs(started);
 CREATE TABLE IF NOT EXISTS bugs (
@@ -51,4 +56,16 @@ CREATE TABLE IF NOT EXISTS mail_cursor (
   id       INTEGER PRIMARY KEY CHECK (id = 1),
   validity INTEGER NOT NULL,
   last     INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS queue (
+  id      TEXT PRIMARY KEY,
+  persona TEXT NOT NULL DEFAULT '',
+  role    TEXT NOT NULL DEFAULT '',
+  story   TEXT NOT NULL DEFAULT '',
+  journey TEXT NOT NULL DEFAULT '',
+  follows TEXT NOT NULL DEFAULT '',
+  via     TEXT NOT NULL DEFAULT '',
+  context TEXT NOT NULL DEFAULT '',
+  reason  TEXT NOT NULL DEFAULT '',
+  created INTEGER NOT NULL DEFAULT 0
 );
