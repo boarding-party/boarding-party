@@ -21,6 +21,7 @@ import (
 	"github.com/boarding-party/boardingparty/internal/live"
 	"github.com/boarding-party/boardingparty/internal/project"
 	"github.com/boarding-party/boardingparty/internal/runs"
+	"github.com/boarding-party/boardingparty/internal/sched"
 	"github.com/boarding-party/boardingparty/internal/store"
 )
 
@@ -917,5 +918,115 @@ func TestAdminFilesTooLargeWithoutContentLength(t *testing.T) {
 	}
 	if l, _ := fs.List(); len(l) != 0 {
 		t.Fatalf("stored %+v", l)
+	}
+}
+
+func mkRun(t *testing.T, svc *runs.Service, id, journey, follows, via string, at time.Time) {
+	t.Helper()
+	err := svc.Store.CreateRun(store.Run{ID: id, Token: "tok-" + id, Persona: "ann", Role: "buyer", Story: "s-" + id,
+		State: store.RunDone, Started: at, Journey: journey, Follows: follows, Via: via})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRunsListShowsWait(t *testing.T) {
+	srv, _, svc := setupBoth(t, 1024)
+	t0 := time.Now().UTC().Add(-time.Hour)
+	mkRun(t, svc, "r1", "r1", "", "", t0)
+	mkRun(t, svc, "r2", "r2", "", "", t0.Add(time.Minute))
+	w := store.Wait{Kind: "email", From: "shop@x.test", Subject: "Receipt", Deadline: t0.Add(8 * time.Hour)}
+	if err := svc.Store.CreateRun(store.Run{ID: "r3", Token: "tok-r3", Persona: "ann", Role: "buyer", Story: "s3", State: store.RunRunning, Started: t0.Add(2 * time.Minute), Journey: "r3"}); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := svc.Store.FinishRunWaiting("r3", "waiting", t0.Add(3*time.Minute), w); err != nil || !ok {
+		t.Fatalf("%v %v", ok, err)
+	}
+	resp := do(t, "GET", srv.URL+"/api/runs", "")
+	body, _ := io.ReadAll(resp.Body)
+	if strings.Contains(string(body), "tok-") || strings.Contains(string(body), `"token":"t`) {
+		t.Fatalf("token leaked: %s", body)
+	}
+	var list []map[string]any
+	if err := json.Unmarshal(body, &list); err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]map[string]any{}
+	for _, x := range list {
+		got[x["id"].(string)] = x
+	}
+	if _, ok := got["r1"]["wait"]; ok {
+		t.Error("r1 should have no wait")
+	}
+	wm, ok := got["r3"]["wait"].(map[string]any)
+	if !ok {
+		t.Fatalf("r3 wait missing: %s", body)
+	}
+	stored, _ := svc.Store.WaitFor("r3")
+	if wm["waitingFor"] != sched.Describe(stored) || wm["kind"] != "email" {
+		t.Errorf("wait: %v", wm)
+	}
+}
+
+func TestRunDetailChain(t *testing.T) {
+	srv, _, svc := setupBoth(t, 1024)
+	t0 := time.Now().UTC().Add(-time.Hour)
+	mkRun(t, svc, "a", "a", "", "", t0)
+	mkRun(t, svc, "b", "a", "a", "handoff", t0.Add(time.Minute))
+	mkRun(t, svc, "lone", "lone", "", "", t0.Add(2*time.Minute))
+	if err := svc.Store.Enqueue(store.Queued{ID: "q1", Persona: "bob", Role: "ops", Story: "next", Journey: "a", Follows: "b", Via: "handoff", Reason: "Handed off", Created: t0}); err != nil {
+		t.Fatal(err)
+	}
+	var d struct {
+		Chain []map[string]any `json:"chain"`
+		Queue []map[string]any `json:"queued"`
+	}
+	resp := do(t, "GET", srv.URL+"/api/runs/b", "")
+	body, _ := io.ReadAll(resp.Body)
+	if strings.Contains(string(body), "tok-") {
+		t.Fatalf("token leaked: %s", body)
+	}
+	if err := json.Unmarshal(body, &d); err != nil {
+		t.Fatal(err)
+	}
+	if len(d.Chain) != 2 || d.Chain[0]["id"] != "a" || d.Chain[1]["id"] != "b" || d.Chain[1]["follows"] != "a" || d.Chain[1]["via"] != "handoff" {
+		t.Fatalf("chain: %v", d.Chain)
+	}
+	if len(d.Queue) != 1 || d.Queue[0]["id"] != "q1" {
+		t.Fatalf("queued: %v", d.Queue)
+	}
+	resp = do(t, "GET", srv.URL+"/api/runs/lone", "")
+	var m map[string]any
+	json.NewDecoder(resp.Body).Decode(&m)
+	if _, ok := m["chain"]; ok {
+		t.Error("lone run has chain")
+	}
+	if _, ok := m["queued"]; ok {
+		t.Error("lone run has queued")
+	}
+}
+
+func TestQueueListAndDelete(t *testing.T) {
+	srv, _, svc := setupBoth(t, 1024)
+	resp := do(t, "GET", srv.URL+"/api/queue", "")
+	if b, _ := io.ReadAll(resp.Body); strings.TrimSpace(string(b)) != "[]" {
+		t.Fatalf("empty: %q", b)
+	}
+	t0 := time.Now().UTC()
+	for i, id := range []string{"q1", "q2"} {
+		if err := svc.Store.Enqueue(store.Queued{ID: id, Persona: "bob", Role: "ops", Story: "s", Journey: "j", Follows: "r", Via: "handoff", Reason: "why", Created: t0.Add(time.Duration(i) * time.Second)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var list []map[string]any
+	json.NewDecoder(do(t, "GET", srv.URL+"/api/queue", "").Body).Decode(&list)
+	if len(list) != 2 || list[0]["id"] != "q1" || list[1]["id"] != "q2" || list[0]["reason"] != "why" || list[0]["follows"] != "r" {
+		t.Fatalf("list: %v", list)
+	}
+	if r := do(t, "DELETE", srv.URL+"/api/queue/q1", ""); r.StatusCode != 204 {
+		t.Fatalf("delete: %d", r.StatusCode)
+	}
+	if r := do(t, "DELETE", srv.URL+"/api/queue/q1", ""); r.StatusCode != 404 {
+		t.Fatalf("again: %d", r.StatusCode)
 	}
 }

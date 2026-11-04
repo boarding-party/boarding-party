@@ -20,6 +20,7 @@ import (
 	"github.com/boarding-party/boardingparty/internal/live"
 	"github.com/boarding-party/boardingparty/internal/project"
 	"github.com/boarding-party/boardingparty/internal/runs"
+	"github.com/boarding-party/boardingparty/internal/sched"
 	"github.com/boarding-party/boardingparty/internal/store"
 )
 
@@ -74,6 +75,8 @@ func admin(svc *runs.Service, maxBytes int64, token string, hub *live.Hub, mail 
 	mux.HandleFunc("GET /api/runs/{id}/artifacts/{name}", s.getArtifact)
 	mux.HandleFunc("GET /api/runs/{id}/live", s.streamLive)
 	mux.HandleFunc("GET /api/runs/{id}/live.jpg", s.liveStill)
+	mux.HandleFunc("GET /api/queue", s.listQueue)
+	mux.HandleFunc("DELETE /api/queue/{id}", s.deleteQueued)
 	mux.HandleFunc("GET /api/files", s.listFiles)
 	mux.HandleFunc("PUT /api/files/{name}", s.putFile)
 	mux.HandleFunc("DELETE /api/files/{name}", s.deleteFile)
@@ -226,18 +229,31 @@ func (s *server) listRuns(w http.ResponseWriter, r *http.Request) {
 	}
 	type item struct {
 		store.Run
-		Stage       string `json:"stage,omitempty"`
-		StageReason string `json:"stageReason,omitempty"`
-		Live        bool   `json:"live,omitempty"`
-		Blocked     int    `json:"blocked,omitempty"` // hosts the egress fence refused
+		Stage       string    `json:"stage,omitempty"`
+		StageReason string    `json:"stageReason,omitempty"`
+		Live        bool      `json:"live,omitempty"`
+		Blocked     int       `json:"blocked,omitempty"` // hosts the egress fence refused
+		Wait        *waitView `json:"wait,omitempty"`
 	}
 	out := make([]item, len(rs))
+	ids := make([]string, len(rs))
+	for i, x := range rs {
+		ids[i] = x.ID
+	}
+	waits, err := s.svc.Store.WaitsFor(ids)
+	if err != nil {
+		fail(w, err)
+		return
+	}
 	// One deadline for every lookup: a slow cluster costs the list at most
 	// listStageBudget, and runs after it expires just omit their stage.
 	ctx, cancel := context.WithTimeout(r.Context(), listStageBudget)
 	defer cancel()
 	for i, x := range rs {
 		out[i] = item{Run: redact(x)}
+		if wt, ok := waits[x.ID]; ok {
+			out[i].Wait = newWaitView(wt)
+		}
 		out[i].Stage, out[i].StageReason, out[i].Live = s.progress(ctx, x)
 		if hosts, err := s.svc.Blocked(ctx, x); err == nil {
 			out[i].Blocked = len(hosts)
@@ -293,7 +309,98 @@ func (s *server) getRun(w http.ResponseWriter, r *http.Request) {
 			out["live"] = true
 		}
 	}
+	if wt, err := s.svc.Store.WaitFor(id); err == nil {
+		out["wait"] = newWaitView(wt)
+	} else if !errors.Is(err, store.ErrNotFound) {
+		fail(w, err)
+		return
+	}
+	if run.Journey != "" {
+		chain, err := s.svc.Store.RunsInJourney(run.Journey)
+		if err != nil {
+			fail(w, err)
+			return
+		}
+		if len(chain) > 1 {
+			links := make([]chainLink, len(chain))
+			for i, c := range chain {
+				links[i] = chainLink{ID: c.ID, Persona: c.Persona, Role: c.Role, Story: c.Story, State: c.State, Started: c.Started, Follows: c.Follows, Via: c.Via}
+			}
+			out["chain"] = links
+		}
+		queue, err := s.svc.Store.Queue()
+		if err != nil {
+			fail(w, err)
+			return
+		}
+		var mine []queueView
+		for _, q := range queue {
+			if q.Journey == run.Journey {
+				mine = append(mine, newQueueView(q))
+			}
+		}
+		if len(mine) > 0 {
+			out["queued"] = mine
+		}
+	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// waitView is a wait with its plain-words description.
+type waitView struct {
+	store.Wait
+	WaitingFor string `json:"waitingFor"`
+}
+
+func newWaitView(w store.Wait) *waitView { return &waitView{Wait: w, WaitingFor: sched.Describe(w)} }
+
+// chainLink is one run of a journey.
+type chainLink struct {
+	ID      string         `json:"id"`
+	Persona string         `json:"persona"`
+	Role    string         `json:"role"`
+	Story   string         `json:"story"`
+	State   store.RunState `json:"state"`
+	Started time.Time      `json:"started"`
+	Follows string         `json:"follows,omitempty"`
+	Via     string         `json:"via,omitempty"`
+}
+
+// queueView is a queued run as the board shows it.
+type queueView struct {
+	ID      string    `json:"id"`
+	Persona string    `json:"persona"`
+	Role    string    `json:"role"`
+	Story   string    `json:"story"`
+	Follows string    `json:"follows"`
+	Via     string    `json:"via"`
+	Reason  string    `json:"reason"`
+	Created time.Time `json:"created"`
+}
+
+func newQueueView(q store.Queued) queueView {
+	return queueView{ID: q.ID, Persona: q.Persona, Role: q.Role, Story: q.Story, Follows: q.Follows, Via: q.Via, Reason: q.Reason, Created: q.Created}
+}
+
+func (s *server) listQueue(w http.ResponseWriter, _ *http.Request) {
+	q, err := s.svc.Store.Queue()
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	out := make([]queueView, len(q))
+	for i, x := range q {
+		out[i] = newQueueView(x)
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *server) deleteQueued(w http.ResponseWriter, r *http.Request) {
+	if err := s.svc.Store.DeleteQueued(r.PathValue("id")); err != nil {
+		fail(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // stageTimeout bounds the pod lookup so a slow cluster cannot stall the API.
