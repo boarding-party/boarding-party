@@ -10,6 +10,7 @@ import (
 	"crypto/rand"
 	_ "embed"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"image"
@@ -287,6 +288,10 @@ func start(ctx context.Context, dir string, projectYAML []byte, duration time.Du
 		st.Close()
 		return nil, err
 	}
+	if err := seedChain(st, p, time.Now().UTC()); err != nil {
+		st.Close()
+		return nil, fmt.Errorf("seed runs: %w", err)
+	}
 	hub := live.NewHub()
 	mail := &inbox.Service{
 		Store:   st,
@@ -327,6 +332,67 @@ func start(ctx context.Context, dir string, projectYAML []byte, duration time.Du
 	}()
 	go svc.Watch(ctx, time.Second, 10*time.Minute)
 	return &Director{Base: "http://" + ln.Addr().String(), Token: token, srv: srv, st: st, dir: dir}, nil
+}
+
+// seedChain stores finished runs so the board has a chain, a waiting run and
+// a queued run to show, using the first role's first persona and story: a
+// done run, a run that continued it, a run waiting for an email and a run
+// queued after it. The dev director has no scheduler, so they stay put.
+func seedChain(st *store.Store, p project.Project, now time.Time) error {
+	if len(p.Roles) == 0 || len(p.Roles[0].Personas) == 0 || len(p.Roles[0].Stories) == 0 {
+		return nil
+	}
+	role := p.Roles[0]
+	persona, story := role.Personas[0].Name, role.Stories[0].Name
+	var err error
+	id := func() string {
+		b := make([]byte, 16)
+		if _, e := rand.Read(b); e != nil && err == nil {
+			err = e
+		}
+		return hex.EncodeToString(b)
+	}
+	run := func(state store.RunState, outcome string, started, finished time.Time) store.Run {
+		r := store.Run{ID: id(), Token: id() + id(), Persona: persona, Role: role.Name, Story: story,
+			State: state, Outcome: outcome, Started: started, Finished: finished}
+		r.Journey = r.ID
+		return r
+	}
+
+	first := run(store.RunDone, "Added three todos and left before finishing the list (sample run).",
+		now.Add(-3*time.Hour), now.Add(-3*time.Hour+4*time.Minute))
+	next := run(store.RunDone, "Came back, completed one todo and checked the counter (sample run).",
+		now.Add(-2*time.Hour), now.Add(-2*time.Hour+3*time.Minute))
+	next.Journey, next.Follows, next.Via = first.Journey, first.ID, "continue"
+	ctxJSON, e := json.Marshal(store.RunContext{Kind: "continue", PreviousRun: first.ID, Previous: first.Outcome})
+	if e != nil {
+		return e
+	}
+	next.Context = ctxJSON
+	waiting := run(store.RunRunning, "", now.Add(-40*time.Minute), time.Time{})
+	if err != nil {
+		return err
+	}
+	for _, r := range []store.Run{first, next, waiting} {
+		if err := st.CreateRun(r); err != nil {
+			return err
+		}
+	}
+	ok, e := st.FinishRunWaiting(waiting.ID, "Booked a slot and is waiting for the confirmation email (sample run).",
+		now.Add(-30*time.Minute), store.Wait{Kind: "email", Subject: "Booking confirmed", Deadline: now.Add(24 * time.Hour)})
+	if e != nil {
+		return e
+	}
+	if !ok {
+		return fmt.Errorf("sample waiting run %s was not active", waiting.ID)
+	}
+	q := store.Queued{ID: id(), Persona: persona, Role: role.Name, Story: story, Journey: waiting.Journey,
+		Follows: waiting.ID, Via: "handoff", Reason: fmt.Sprintf("Handed off by %s (%s)", persona, story),
+		Created: now.Add(-30 * time.Minute)}
+	if err != nil {
+		return err
+	}
+	return st.Enqueue(q)
 }
 
 // memSecrets keeps the mailbox login in memory for the dev director.

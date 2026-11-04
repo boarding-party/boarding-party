@@ -128,3 +128,65 @@ func TestRunStoresFakeMail(t *testing.T) {
 		t.Fatalf("mailbox: %d %s", resp.StatusCode, b)
 	}
 }
+
+func TestDevDirectorSeedsChain(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	d, err := Start(ctx, sample(t), time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+
+	_, b := do(t, d, "GET", "/api/runs", "", d.Token, "")
+	var list []struct {
+		store.Run
+		Wait *struct {
+			WaitingFor string `json:"waitingFor"`
+		} `json:"wait"`
+	}
+	if err := json.Unmarshal(b, &list); err != nil {
+		t.Fatalf("runs: %v: %s", err, b)
+	}
+	var waiting []string
+	continued := ""
+	for _, r := range list {
+		if r.State == store.RunWaiting {
+			if r.Wait == nil || !strings.Contains(r.Wait.WaitingFor, "Booking confirmed") {
+				t.Fatalf("waiting run %s wait = %+v", r.ID, r.Wait)
+			}
+			waiting = append(waiting, r.ID)
+		}
+		if r.Via == "continue" {
+			continued = r.ID
+		}
+	}
+	if len(waiting) != 1 {
+		t.Fatalf("waiting runs = %v, want one (%s)", waiting, b)
+	}
+
+	_, b = do(t, d, "GET", "/api/queue", "", d.Token, "")
+	var queue []struct {
+		Follows string `json:"follows"`
+		Reason  string `json:"reason"`
+	}
+	if err := json.Unmarshal(b, &queue); err != nil || len(queue) != 1 {
+		t.Fatalf("queue = %s (%v), want one item", b, err)
+	}
+	if queue[0].Follows != waiting[0] || queue[0].Reason != "Handed off by Ada (todos)" {
+		t.Fatalf("queued = %+v", queue[0])
+	}
+
+	if continued == "" {
+		t.Fatal("no continued run")
+	}
+	_, b = do(t, d, "GET", "/api/runs/"+continued, "", d.Token, "")
+	var detail struct {
+		Chain []struct {
+			ID string `json:"id"`
+		} `json:"chain"`
+	}
+	if err := json.Unmarshal(b, &detail); err != nil || len(detail.Chain) != 2 {
+		t.Fatalf("continued run detail chain = %s (%v), want two", b, err)
+	}
+}

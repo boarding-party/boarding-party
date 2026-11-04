@@ -16,13 +16,16 @@ const nid = () => `r${++seq}`;
 
 const row = (v = '') => ({ id: nid(), v });
 const newPersona = () => ({ id: nid(), name: '', profile: {}, traits: [], identity: [] });
-const newStory = () => ({ id: nid(), name: '', goal: '', model: '' });
+const newStory = () => ({ id: nid(), name: '', goal: '', model: '', handoffs: [] });
 const newRole = () => ({ id: nid(), name: '', description: '', canWatchRecordings: false, personas: [newPersona()], stories: [newStory()] });
 
+// A story's handoffs are kept as the draft ids of the stories they point
+// at, so renaming a role or story carries through and removing one drops
+// the reference; toJSON turns them back into names.
 function fromProject(p) {
   p = p || {};
   const sites = (p.sites || []).map(row);
-  return {
+  const d = {
     name: p.name || '',
     sites: sites.length ? sites : [row()],
     extraHosts: (p.extraHosts || []).map(row),
@@ -44,9 +47,22 @@ function fromProject(p) {
         traits: [...(pe.traits || [])],
         identity: Object.entries(pe.identity || {}).map(([k, v]) => ({ id: nid(), k, v: String(v) })),
       })),
-      stories: (r.stories || []).map((s) => ({ id: nid(), name: s.name || '', goal: s.goal || '', model: s.model || '' })),
+      stories: (r.stories || []).map((s) => ({ id: nid(), name: s.name || '', goal: s.goal || '', model: s.model || '', handoffs: s.handoffs || [] })),
     })),
   };
+  const ids = new Map();
+  for (const r of d.roles) for (const s of r.stories) ids.set(JSON.stringify([r.name, s.name]), s.id);
+  for (const r of d.roles) {
+    for (const s of r.stories) s.handoffs = s.handoffs.map((h) => ids.get(JSON.stringify([h.role, h.story]))).filter(Boolean);
+  }
+  return d;
+}
+
+// storyTargets maps each story's draft id to its role and story names.
+function storyTargets(roles) {
+  const m = new Map();
+  for (const r of roles) for (const s of r.stories) m.set(s.id, { role: r.name.trim(), story: s.name.trim() });
+  return m;
 }
 
 const personaHasContent = (p) => !!(p.name.trim() || p.traits.length || Object.values(p.profile).some(Boolean) || p.identity.some((x) => x.k.trim() || x.v.trim()));
@@ -69,6 +85,8 @@ function identityWarnings(rows) {
 const vals = (rows) => rows.map((x) => x.v.trim()).filter(Boolean);
 
 function toJSON(d) {
+  const targets = storyTargets(d.roles);
+  const handoffs = (s) => s.handoffs.map((id) => targets.get(id)).filter((t) => t && t.role && t.story);
   return {
     name: d.name.trim(),
     sites: vals(d.sites),
@@ -87,7 +105,10 @@ function toJSON(d) {
         traits: pe.traits,
         identity: Object.fromEntries(pe.identity.filter((x) => x.k.trim()).map((x) => [x.k.trim(), x.v])),
       })),
-      stories: r.stories.map((s) => ({ name: s.name.trim(), goal: s.goal.trim(), ...(s.model ? { model: s.model } : {}) })),
+      stories: r.stories.map((s) => {
+        const h = handoffs(s);
+        return { name: s.name.trim(), goal: s.goal.trim(), ...(s.model ? { model: s.model } : {}), ...(h.length ? { handoffs: h } : {}) };
+      }),
     })),
   };
 }
@@ -263,7 +284,7 @@ export function ProjectPage({ section = 'general', roleN = '', onSaved, onDirty 
   } else if (section === 'roles' && roleN) {
     body = role
       ? html`<p class="crumb"><a href="#/project/roles">Roles</a></p>
-        <${RoleCard} key=${role.id} role=${role} n=${roleIndex + 1} profileFields=${profileFields}
+        <${RoleCard} key=${role.id} role=${role} n=${roleIndex + 1} profileFields=${profileFields} roles=${draft.roles}
           onChange=${(fn) => edit((d) => fn(d.roles[roleIndex]))} onRemove=${() => removeRole(role)} />`
       : html`<div class="empty"><b>No such role</b>It may have been removed. <a href="#/project/roles">See all roles</a>.</div>`;
   } else if (section === 'roles') {
@@ -379,8 +400,12 @@ function ListField({ label, hint, rows, placeholder, addLabel, warn, onChange })
     </div>`;
 }
 
-function RoleCard({ role, n, profileFields, onChange, onRemove }) {
+function RoleCard({ role, n, profileFields, roles, onChange, onRemove }) {
   const id = `role-${role.id}`;
+  // Stories of every other role, by name, that this role's stories can hand off to.
+  const targets = roles.filter((r) => r.id !== role.id).flatMap((r) => r.stories
+    .filter((s) => s.name.trim())
+    .map((s) => ({ id: s.id, label: `${r.name.trim() || 'Unnamed role'} · ${s.name.trim()}` })));
   return html`
     <div class="card role">
       <div class="row between nowrap">
@@ -419,7 +444,7 @@ function RoleCard({ role, n, profileFields, onChange, onRemove }) {
           <h3>Stories</h3>
           <p class="hint">Goals, not steps. Any persona in this role can play any story; the agent finds the way.</p>
           ${role.stories.length ? null : html`<p class="small muted">No stories. Runs need at least one.</p>`}
-          ${role.stories.map((s, i) => html`<${StoryRow} key=${s.id} story=${s}
+          ${role.stories.map((s, i) => html`<${StoryRow} key=${s.id} story=${s} targets=${targets}
               onChange=${(fn) => onChange((r) => fn(r.stories[i]))}
               onRemove=${async () => {
                 if (storyHasContent(s) && !(await confirmDialog(`Remove the story ${s.name.trim() ? `"${s.name.trim()}"` : 'without a name'}?`, { confirm: 'Remove story', danger: true }))) return;
@@ -495,7 +520,7 @@ function PersonaRow({ persona, fields, onChange, onRemove }) {
     </div>`;
 }
 
-function StoryRow({ story, onChange, onRemove }) {
+function StoryRow({ story, targets, onChange, onRemove }) {
   return html`
     <div class="sub">
       <div class="row nowrap">
@@ -509,7 +534,29 @@ function StoryRow({ story, onChange, onRemove }) {
       <label class="field">Model
         <${ModelSelect} value=${story.model} empty="Project's model" onChange=${(v) => onChange((s) => { s.model = v; })} />
       </label>
+      <${HandsOffTo} story=${story} targets=${targets} onChange=${onChange} />
     </div>`;
+}
+
+// HandsOffTo picks the other roles' stories this story starts when it ends.
+function HandsOffTo({ story, targets, onChange }) {
+  const toggle = (tid, on) => onChange((s) => {
+    s.handoffs = s.handoffs.filter((x) => x !== tid);
+    if (on) s.handoffs.push(tid);
+  });
+  return html`
+    <fieldset class="handoffs">
+      <legend>Hands off to</legend>
+      ${targets.length
+        ? html`<div class="picks">${targets.map((t) => html`
+            <label class="check" key=${t.id}>
+              <input type="checkbox" checked=${story.handoffs.includes(t.id)}
+                onChange=${(e) => toggle(t.id, e.currentTarget.checked)} />
+              <span>${t.label}</span>
+            </label>`)}</div>`
+        : html`<p class="small muted">No other role has a story yet.</p>`}
+      <span class="hint">When this story ends, or waits for one of these, the director starts it for the first persona of that role.</span>
+    </fieldset>`;
 }
 
 // MODELS are the models offered in the editor, cheapest first. A model the

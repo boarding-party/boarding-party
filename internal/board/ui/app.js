@@ -9,7 +9,7 @@ import { html, api, directorDown, confirmDialog, DialogHost } from './lib.js';
 import { ProjectPage } from './project.js';
 
 const ACTIVE = new Set(['pending', 'running']);
-const STATE_TAG = new Map([['pending', 'idle'], ['running', 'run'], ['done', 'ok'], ['stuck', 'wait'], ['failed', 'bad']]);
+const STATE_TAG = new Map([['pending', 'idle'], ['running', 'run'], ['done', 'ok'], ['stuck', 'wait'], ['failed', 'bad'], ['waiting', 'hold'], ['continued', 'idle']]);
 const RETRY_MS = [5000, 10000, 30000]; // back-off after consecutive errors
 const MAX_FINISHED_FAILURES = 5;
 const RECONNECT_MS = 14 * 60 * 1000; // under the director's 15-minute stream cap
@@ -162,6 +162,7 @@ function App() {
   const [projectErr, setProjectErr] = useState('');
   const [runs, setRuns] = useState(null);
   const [runsErr, setRunsErr] = useState('');
+  const [queue, setQueue] = useState([]);
   const [director, setDirector] = useState('unknown'); // unknown | ok | down
 
   const loadProject = useCallback(async () => {
@@ -174,9 +175,19 @@ function App() {
     }
   }, []);
 
+  // The queue rides along with the runs; if it can't be read, the last
+  // known queue stays and the runs still show.
+  const loadQueue = useCallback(async () => {
+    try {
+      const q = (await api('/api/queue')) || [];
+      setQueue(q);
+      return q;
+    } catch (_) { return null; }
+  }, []);
+
   const loadRuns = useCallback(async () => {
     try {
-      const rs = (await api('/api/runs')) || [];
+      const [rs] = await Promise.all([api('/api/runs').then((x) => x || []), loadQueue()]);
       setRuns(rs);
       setRunsErr('');
       setDirector('ok');
@@ -186,13 +197,16 @@ function App() {
       setDirector(directorDown(e) ? 'down' : 'ok');
       return null;
     }
-  }, []);
+  }, [loadQueue]);
 
+  // Poll quickly while a run is active or one is up next: the director starts
+  // queued runs on its own.
+  const queued = queue.length > 0;
   usePoll(async (stale) => {
     const rs = await loadRuns();
     if (stale()) return null;
-    return rs && rs.some((r) => ACTIVE.has(r.state)) ? ACTIVE_POLL_MS : IDLE_POLL_MS;
-  }, [loadRuns]);
+    return rs && (rs.some((r) => ACTIVE.has(r.state)) || queued) ? ACTIVE_POLL_MS : IDLE_POLL_MS;
+  }, [loadRuns, queued]);
 
   useEffect(() => { loadProject(); }, [loadProject, route.page]);
 
@@ -207,7 +221,7 @@ function App() {
           : route.page === 'project' ? html`<${ProjectPage} section=${route.section} roleN=${route.roleN} onSaved=${loadProject} onDirty=${onDirty} />`
           : route.page === 'inbox' ? html`<${InboxPage} project=${project} />`
           : html`<${RunsPage} project=${project} projectErr=${projectErr} runs=${runs} runsErr=${runsErr}
-                    active=${active} onStarted=${loadRuns} />`}
+                    queue=${queue} active=${active} onStarted=${loadRuns} />`}
       </main>
       <${DialogHost} />
     </div>`;
@@ -252,7 +266,7 @@ function RunStrip({ director, active }) {
 
 // ---- runs page ----------------------------------------------------------
 
-function RunsPage({ project, projectErr, runs, runsErr, active, onStarted }) {
+function RunsPage({ project, projectErr, runs, runsErr, queue, active, onStarted }) {
   return html`
     <section class="page">
       <h1>Runs</h1>
@@ -266,6 +280,7 @@ function RunsPage({ project, projectErr, runs, runsErr, active, onStarted }) {
         ${runsErr ? html`<div class="note bad">Could not load runs: ${runsErr}</div>` : null}
         ${runs && runs.length === 0 && project !== null
           ? html`<div class="empty"><b>No runs yet.</b>Start one above.</div>` : null}
+        ${queue.length ? html`<${UpNext} queue=${queue} onChange=${onStarted} />` : null}
         ${runs && runs.length > 0 ? html`<${RunsTable} runs=${runs} />` : null}
       </div>
     </section>`;
@@ -342,8 +357,43 @@ function StartRun({ project, active, onStarted }) {
     </form>`;
 }
 
-function StateTag({ state }) {
-  return html`<span class=${'tag ' + (STATE_TAG.get(state) || 'idle')}>${state || 'unknown'}</span>`;
+// shownState is what the board calls a run's state: a waiting run whose wait
+// was met has been continued by a later run.
+const shownState = (state, wait) => (state === 'waiting' && wait && wait.status === 'met' ? 'continued' : state);
+
+function StateTag({ state, wait }) {
+  const s = shownState(state, wait);
+  return html`<span class=${'tag ' + (STATE_TAG.get(s) || 'idle')}>${s || 'unknown'}</span>`;
+}
+
+// UpNext lists the runs the director will start next, oldest first.
+function UpNext({ queue, onChange }) {
+  const [busy, setBusy] = useState('');
+  const [err, setErr] = useState('');
+  const remove = async (q) => {
+    if (!(await confirmDialog('Remove this run from the queue?', { confirm: 'Remove', danger: true }))) return;
+    setBusy(q.id); setErr('');
+    try {
+      await api(`/api/queue/${encodeURIComponent(q.id)}`, { method: 'DELETE' });
+    } catch (e) {
+      if (e.status !== 404) setErr(e.message); // already started or gone: nothing to say
+    } finally {
+      setBusy('');
+      onChange();
+    }
+  };
+  return html`
+    <div class="card upnext">
+      <h2>Up next</h2>
+      <ul>${queue.map((q) => html`
+        <li key=${q.id}>
+          <span class="what"><b>${q.persona}</b> · ${q.story}</span>
+          <span class="why muted">${q.follows ? html`<a href=${runHref(q.follows)}>${q.reason}</a>` : q.reason}${' · '}<span title=${fmtFull(q.created)}>queued ${fmtWhen(q.created)}</span></span>
+          <button class="btn icon" type="button" disabled=${busy !== ''} title="Remove from the queue"
+            aria-label=${`Remove ${q.persona} · ${q.story} from the queue`} onClick=${() => remove(q)}>×</button>
+        </li>`)}</ul>
+      ${err ? html`<div class="note bad" role="alert">Could not remove the run: ${err}</div>` : null}
+    </div>`;
 }
 
 const STAGE_SHORT = { 'waiting-for-node': 'Starting machine', 'starting': 'Starting run', 'running': 'Getting ready', 'failing': 'Failing to start' };
@@ -405,7 +455,9 @@ function RunsTable({ runs }) {
               <td><a href=${runHref(r.id)} onClick=${(e) => e.stopPropagation()}>${r.persona}</a>
                 ${r.role ? html`<div class="small muted">${r.role}</div>` : null}</td>
               <td>${r.story}${ACTIVE.has(r.state) ? html` <a class="small" href=${runHref(r.id)} onClick=${(e) => e.stopPropagation()}>Watch</a>` : null}</td>
-              <td><${StateTag} state=${r.state} />${r.blocked ? html` <span class="tag wait" title="The network fence refused hosts the site tried to load. Open the run to allow them.">${r.blocked} blocked</span>` : null}</td>
+              <td><${StateTag} state=${r.state} wait=${r.wait} />${r.blocked ? html` <span class="tag wait" title="The network fence refused hosts the site tried to load. Open the run to allow them.">${r.blocked} blocked</span>` : null}
+                ${r.state === 'waiting' && r.wait && r.wait.status === 'open'
+                  ? html`<div class="waitline small muted">Waiting for ${r.wait.waitingFor} · gives up ${fmtWhen(r.wait.deadline)}</div>` : null}</td>
               <td class="when" title=${fmtFull(r.started)}>${fmtWhen(r.started)}</td>
               <td class="outcome" title=${firstLine(r.outcome)}>${firstLine(r.outcome) || html`<span class="muted">${ACTIVE.has(r.state) ? 'In progress' : '—'}</span>`}</td>
             </tr>`)}
@@ -597,7 +649,9 @@ function RunPage({ id, onChange }) {
       if (prev && prev !== st) onChange();
       if (ACTIVE.has(st)) return ACTIVE_POLL_MS;
       // Just finished: look once more for files uploaded at the end.
-      return ACTIVE.has(prev) ? ACTIVE_POLL_MS : null;
+      if (ACTIVE.has(prev)) return ACTIVE_POLL_MS;
+      // A waiting run, or one with runs queued after it, can still change.
+      return (d.wait && d.wait.status === 'open') || d.queued ? IDLE_POLL_MS : null;
     } catch (e) {
       if (stale()) return null;
       if (e.status === 404) { setMissing(true); return null; }
@@ -618,7 +672,14 @@ function RunPage({ id, onChange }) {
       ${err ? html`<div class="note bad">Could not load the run: ${err}</div>` : html`<p class="muted">Loading run…</p>`}</section>`;
   }
 
-  const { run, bugs = [], artifacts = [], usage } = data;
+  const { run, bugs = [], artifacts = [], usage, wait, chain, queued } = data;
+  const links = chain || [run];
+  const byID = new Map(links.map((c) => [c.id, c]));
+  const runLink = (rid) => {
+    const c = byID.get(rid);
+    return html`<a href=${runHref(rid)}>${c ? `${c.persona} · ${c.story}` : rid}</a>`;
+  };
+  const continuedBy = links.filter((c) => c.follows === run.id);
   const files = artifacts.filter((n) => n !== BLOCKED_NAME && n !== USAGE_NAME);
   const webm = artifacts.find((n) => n.toLowerCase().endsWith('.webm'));
   const started = parseTime(run.started), finished = parseTime(run.finished);
@@ -635,7 +696,7 @@ function RunPage({ id, onChange }) {
   return html`
     <section class="page">
       <p class="crumb"><a href="#/runs">Runs</a> / ${run.id}</p>
-      <h1>${run.persona} · ${run.story} <${StateTag} state=${run.state} /></h1>
+      <h1>${run.persona} · ${run.story} <${StateTag} state=${run.state} wait=${wait} /></h1>
       <p class="lede">${run.role ? `${run.role}. ` : ''}Started ${fmtFull(run.started)}${finished ? `, took ${took}` : took ? `, ${took} so far` : ''}.</p>
       ${err ? html`<div class="note bad banner">Lost contact with the director: ${err}. ${gaveUp ? 'Reload the page to try again.' : 'Retrying.'}</div>` : null}
       <div class="grid g-side">
@@ -657,6 +718,7 @@ function RunPage({ id, onChange }) {
             ${run.outcome ? html`<p class="outcome-text">${run.outcome}</p>`
               : html`<p class="muted small" style="margin:0">${ACTIVE.has(run.state) ? 'Still running.' : 'No outcome recorded.'}</p>`}
           </div>
+          ${chain || queued ? html`<${Chain} links=${links} current=${run.id} queued=${queued || []} />` : null}
           ${data.blocked && data.blocked.length ? html`<${BlockedHosts} hosts=${data.blocked} />` : null}
           <div class="card">
             <h2>Details</h2>
@@ -664,7 +726,11 @@ function RunPage({ id, onChange }) {
               <dt>Persona</dt><dd>${run.persona}</dd>
               ${run.role ? html`<dt>Role</dt><dd>${run.role}</dd>` : null}
               <dt>Story</dt><dd>${run.story}</dd>
-              <dt>State</dt><dd><${StateTag} state=${run.state} /></dd>
+              <dt>State</dt><dd><${StateTag} state=${run.state} wait=${wait} /></dd>
+              ${wait ? html`<dt>Waiting for</dt><dd>${waitText(wait)}</dd>` : null}
+              ${run.follows && run.via === 'continue' ? html`<dt>Continues</dt><dd>${runLink(run.follows)}</dd>` : null}
+              ${run.follows && run.via === 'handoff' ? html`<dt>Handed off by</dt><dd>${runLink(run.follows)}</dd>` : null}
+              ${continuedBy.length ? html`<dt>Continued by</dt><dd>${continuedBy.map((c, i) => html`${i ? ', ' : ''}${runLink(c.id)}`)}</dd>` : null}
               <dt>Started</dt><dd>${fmtFull(run.started) || '—'}</dd>
               <dt>Finished</dt><dd>${fmtFull(run.finished) || '—'}</dd>
               ${took ? html`<dt>Duration</dt><dd>${took}</dd>` : null}
@@ -683,6 +749,35 @@ function RunPage({ id, onChange }) {
         </div>
       </div>
     </section>`;
+}
+
+// waitText says what a run waited for and how that ended.
+function waitText(w) {
+  if (w.status === 'open') return `${w.waitingFor}, until ${fmtFull(w.deadline)}`;
+  if (w.status === 'met') return `${w.waitingFor}. Arrived: ${w.detail || 'yes'}`;
+  return `${w.waitingFor}. Gave up: ${w.detail || 'it did not happen in time'}`;
+}
+
+// Chain lists the runs that followed one another, oldest first, and the
+// runs queued to come after them. A waiting run that a later run continued
+// shows as continued.
+function Chain({ links, current, queued }) {
+  const continued = new Set(links.filter((c) => c.via === 'continue' && c.follows).map((c) => c.follows));
+  return html`
+    <div class="card">
+      <h2>Chain</h2>
+      <ol class="chain">
+        ${links.map((c) => html`
+          <li key=${c.id} class=${c.id === current ? 'here' : ''}>
+            ${c.id === current
+              ? html`<b aria-current="page">${c.persona} · ${c.story}</b>`
+              : html`<a href=${runHref(c.id)}>${c.persona} · ${c.story}</a>`}
+            <${StateTag} state=${c.state} wait=${continued.has(c.id) ? { status: 'met' } : null} /></li>`)}
+        ${queued.map((q) => html`
+          <li key=${q.id} class="next"><span>${q.persona} · ${q.story}</span>
+            <span class="tag idle">Up next</span></li>`)}
+      </ol>
+    </div>`;
 }
 
 // USAGE_NAME is the run's token count (runs.UsageName); the run page shows it
