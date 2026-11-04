@@ -281,6 +281,9 @@ func publicHostProblem(h string) string {
 	if !strings.Contains(h, ".") {
 		return "must be a full host name such as fonts.gstatic.com"
 	}
+	if embedsIP(h) {
+		return "points at an IP address through a wildcard DNS name; use the site's host name"
+	}
 	for _, sfx := range internalSuffixes {
 		if strings.HasSuffix(h, sfx) || h == sfx[1:] {
 			return "is an internal name; runs may reach only public hosts"
@@ -290,6 +293,25 @@ func publicHostProblem(h string) string {
 		return "is a whole domain ending; name the host, such as fonts.gstatic.com"
 	}
 	return ""
+}
+
+// wildcardDNS are services whose names resolve to whatever address the name
+// spells, such as 10.0.0.1.nip.io.
+var wildcardDNS = []string{"nip.io", "sslip.io", "xip.io", "traefik.me", "localtest.me", "lvh.me", "local.gd", "vcap.me", "lacolhost.com"}
+
+// ipInName matches an IPv4 address written with dots or dashes inside a name.
+var ipInName = regexp.MustCompile(`(^|[.-])\d{1,3}[.-]\d{1,3}[.-]\d{1,3}[.-]\d{1,3}([.-]|$)`)
+
+// embedsIP reports names that carry their own address: wildcard DNS services
+// and names spelling an IPv4 address. It can't catch every name an attacker
+// points at a private address; tiny's proxy is the place for that.
+func embedsIP(h string) bool {
+	for _, d := range wildcardDNS {
+		if h == d || strings.HasSuffix(h, "."+d) {
+			return true
+		}
+	}
+	return ipInName.MatchString(h)
 }
 
 // allDigitsLastLabel catches IPv4 forms net.ParseIP rejects (such as

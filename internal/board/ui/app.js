@@ -738,6 +738,8 @@ function BlockedHosts({ hosts }) {
 const INTERNAL = /(^|\.)(internal|local|localhost|localdomain|svc|cluster\.local|arpa)$/;
 function allowable(host) {
   if (!host.includes('.') || host.includes(':') || /(^|\.)(\d+|0x[0-9a-f]*)$/.test(host)) return false;
+  if (/(^|[.-])\d{1,3}[.-]\d{1,3}[.-]\d{1,3}[.-]\d{1,3}([.-]|$)/.test(host)) return false;
+  if (/(^|\.)(nip\.io|sslip\.io|xip\.io|traefik\.me|localtest\.me|lvh\.me|local\.gd|vcap\.me|lacolhost\.com)$/.test(host)) return false;
   return !INTERNAL.test(host);
 }
 

@@ -172,7 +172,8 @@ func TestExtraHosts(t *testing.T) {
 		t.Fatalf("extra host not normalised: %q", p.ExtraHosts[0])
 	}
 	for _, h := range []string{"com", ".com", "co.uk", "*", "fonts.gstatic.com\nevil.com", "a b.com", "https://x.com", "localhost",
-		"10.0.0.1", "169.254.169.254", "metadata.google.internal", "bp-director.boardingparty.svc", "kubernetes.default.svc.cluster.local", "printer.local", "10.1", "0x7f.1"} {
+		"10.0.0.1", "169.254.169.254", "metadata.google.internal", "bp-director.boardingparty.svc", "kubernetes.default.svc.cluster.local", "printer.local", "10.1", "0x7f.1",
+		"169.254.169.254.nip.io", "10-0-0-1.sslip.io", "app.lvh.me", "x.10.0.0.1.example.com"} {
 		if _, err := LoadJSON([]byte(`{"name":"p","sites":["https://x.test"],"extraHosts":["` + h + `"]}`)); err == nil {
 			t.Errorf("extra host %q accepted", h)
 		}
