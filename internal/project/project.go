@@ -142,6 +142,14 @@ type Story struct {
 	// Model runs this story on a different model than the project's, such
 	// as a cheap one for a routine story. Empty uses the project's.
 	Model string `json:"model,omitempty"`
+	// Handoffs name the stories that follow this one, each in another role.
+	Handoffs []Handoff `json:"handoffs,omitempty"`
+}
+
+// Handoff points at a story of another role that this story passes work to.
+type Handoff struct {
+	Role  string `json:"role"`
+	Story string `json:"story"`
 }
 
 // modelID is the shape of a Claude model id, such as claude-haiku-5-5.
@@ -257,22 +265,67 @@ func (p Project) validate() error {
 			}
 		}
 	}
+	// Handoffs need every role, so they are checked after the role loop.
+	for _, r := range p.Roles {
+		for _, st := range r.Stories {
+			if err := p.checkHandoffs(r.Name, st); err != nil {
+				return fmt.Errorf("role %q: story %q: %w", r.Name, st.Name, err)
+			}
+		}
+	}
 	return nil
+}
+
+func (p Project) checkHandoffs(role string, st Story) error {
+	seen := map[Handoff]bool{}
+	for _, h := range st.Handoffs {
+		if h.Role == "" || h.Story == "" {
+			return fmt.Errorf("handoff needs a role and a story")
+		}
+		target, ok := p.Role(h.Role)
+		if !ok {
+			return fmt.Errorf("hands off to unknown role %q", h.Role)
+		}
+		if h.Role == role {
+			return fmt.Errorf("hands off to its own role")
+		}
+		if _, ok := p.FindStory(h.Role, h.Story); !ok {
+			return fmt.Errorf("hands off to unknown story %q of role %q", h.Story, target.Name)
+		}
+		if seen[h] {
+			return fmt.Errorf("hands off to %s/%s twice", h.Role, h.Story)
+		}
+		seen[h] = true
+	}
+	return nil
+}
+
+// Role returns the role with the given name.
+func (p Project) Role(name string) (Role, bool) {
+	for _, r := range p.Roles {
+		if r.Name == name {
+			return r, true
+		}
+	}
+	return Role{}, false
+}
+
+// FindStory returns the named story of the named role.
+func (p Project) FindStory(role, story string) (Story, bool) {
+	if r, ok := p.Role(role); ok {
+		for _, st := range r.Stories {
+			if st.Name == story {
+				return st, true
+			}
+		}
+	}
+	return Story{}, false
 }
 
 // StoryModel returns the model the story asks for, or "" for the project's.
 func (p Project) StoryModel(role, story string) string {
-	for _, r := range p.Roles {
-		if r.Name != role {
-			continue
-		}
-		for _, st := range r.Stories {
-			if st.Name == story {
-				return st.Model
-			}
-		}
-	}
-	return ""
+	st, _ := p.FindStory(role, story)
+	return st.Model
 }
 
 // Hosts returns the hosts runs may reach: each site's host and the extra

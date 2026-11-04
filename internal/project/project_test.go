@@ -1,7 +1,9 @@
 package project
 
 import (
+	"encoding/json"
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -207,5 +209,94 @@ func TestStoryModel(t *testing.T) {
 		if _, err := LoadJSON(doc(bad)); err == nil {
 			t.Errorf("story model %q accepted", bad)
 		}
+	}
+}
+
+const handoffYAML = `name: p
+sites: ["https://x.test"]
+roles:
+  - name: patient
+    stories:
+      - name: book
+        goal: book a slot
+        handoffs: [{role: clinician, story: approve}]
+  - name: clinician
+    stories:
+      - {name: approve, goal: approve it}
+`
+
+func TestHandoffsLoad(t *testing.T) {
+	p, err := Load([]byte(handoffYAML))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []Handoff{{"clinician", "approve"}}
+	if got := p.Roles[0].Stories[0].Handoffs; !reflect.DeepEqual(got, want) {
+		t.Fatalf("handoffs = %v, want %v", got, want)
+	}
+	b, err := json.Marshal(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	q, err := LoadJSON(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(p, q) {
+		t.Fatalf("round trip differs:\n%v\n%v", p, q)
+	}
+}
+
+func TestHandoffsValidate(t *testing.T) {
+	mk := func(h string) string {
+		return `name: p
+sites: ["https://x.test"]
+roles:
+  - name: patient
+    stories:
+      - {name: book, goal: g, handoffs: ` + h + `}
+  - name: clinician
+    stories:
+      - {name: approve, goal: g}
+`
+	}
+	tests := []struct{ name, handoffs, want string }{
+		{"unknown role", `[{role: nurse, story: x}]`, `hands off to unknown role "nurse"`},
+		{"unknown story", `[{role: clinician, story: triage}]`, `hands off to unknown story "triage" of role "clinician"`},
+		{"same role", `[{role: patient, story: book}]`, `hands off to its own role`},
+		{"duplicate", `[{role: clinician, story: approve}, {role: clinician, story: approve}]`, `hands off to clinician/approve twice`},
+		{"empty role", `[{story: approve}]`, `handoff needs a role and a story`},
+		{"empty story", `[{role: clinician}]`, `handoff needs a role and a story`},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := Load([]byte(mk(tc.handoffs)))
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("err = %v, want containing %q", err, tc.want)
+			}
+		})
+	}
+}
+
+func TestFindStory(t *testing.T) {
+	p, err := Load([]byte(handoffYAML))
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, ok := p.FindStory("clinician", "approve")
+	if !ok || st.Goal != "approve it" {
+		t.Fatalf("got %v %v", st, ok)
+	}
+	if _, ok := p.FindStory("clinician", "book"); ok {
+		t.Fatal("found missing story")
+	}
+	if _, ok := p.FindStory("nobody", "book"); ok {
+		t.Fatal("found missing role")
+	}
+	if r, ok := p.Role("patient"); !ok || r.Name != "patient" {
+		t.Fatalf("Role: %v %v", r, ok)
+	}
+	if _, ok := p.Role("nobody"); ok {
+		t.Fatal("found missing role")
 	}
 }
