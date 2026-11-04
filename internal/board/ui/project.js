@@ -16,7 +16,7 @@ const nid = () => `r${++seq}`;
 
 const row = (v = '') => ({ id: nid(), v });
 const newPersona = () => ({ id: nid(), name: '', profile: {}, traits: [], identity: [] });
-const newStory = () => ({ id: nid(), name: '', goal: '' });
+const newStory = () => ({ id: nid(), name: '', goal: '', model: '' });
 const newRole = () => ({ id: nid(), name: '', description: '', canWatchRecordings: false, personas: [newPersona()], stories: [newStory()] });
 
 function fromProject(p) {
@@ -44,7 +44,7 @@ function fromProject(p) {
         traits: [...(pe.traits || [])],
         identity: Object.entries(pe.identity || {}).map(([k, v]) => ({ id: nid(), k, v: String(v) })),
       })),
-      stories: (r.stories || []).map((s) => ({ id: nid(), name: s.name || '', goal: s.goal || '' })),
+      stories: (r.stories || []).map((s) => ({ id: nid(), name: s.name || '', goal: s.goal || '', model: s.model || '' })),
     })),
   };
 }
@@ -87,7 +87,7 @@ function toJSON(d) {
         traits: pe.traits,
         identity: Object.fromEntries(pe.identity.filter((x) => x.k.trim()).map((x) => [x.k.trim(), x.v])),
       })),
-      stories: r.stories.map((s) => ({ name: s.name.trim(), goal: s.goal.trim() })),
+      stories: r.stories.map((s) => ({ name: s.name.trim(), goal: s.goal.trim(), ...(s.model ? { model: s.model } : {}) })),
     })),
   };
 }
@@ -292,9 +292,9 @@ export function ProjectPage({ section = 'general', roleN = '', onSaved, onDirty 
           </div>
           <div class="field">
             <label for="pj-model">Model</label>
-            <input id="pj-model" value=${draft.model} placeholder="Default"
-              onInput=${(e) => { const v = e.currentTarget.value; edit((d) => { d.model = v; }); }} />
-            <span class="hint">Leave empty to use the default model.</span>
+            <${ModelSelect} id="pj-model" value=${draft.model} empty="Claude Code's default"
+              onChange=${(v) => edit((d) => { d.model = v; })} />
+            <span class="hint">The model runs use unless a story picks its own.</span>
           </div>
           <div class="field">
             <label for="pj-pool">Node pool</label>
@@ -506,7 +506,27 @@ function StoryRow({ story, onChange, onRemove }) {
       </div>
       <textarea rows="3" value=${story.goal} placeholder="In their words: I need to bill a client £450 + VAT and download the invoice as a PDF." aria-label="Goal"
         onInput=${(e) => { const v = e.currentTarget.value; onChange((s) => { s.goal = v; }); }}></textarea>
+      <label class="field">Model
+        <${ModelSelect} value=${story.model} empty="Project's model" onChange=${(v) => onChange((s) => { s.model = v; })} />
+      </label>
     </div>`;
+}
+
+// MODELS are the models offered in the editor, cheapest first. A model the
+// project already names but this list lacks stays selectable.
+const MODELS = [
+  { value: 'claude-haiku-5-5', label: 'Haiku 5.5, cheapest' },
+  { value: 'claude-sonnet-5-5', label: 'Sonnet 5.5' },
+  { value: 'claude-opus-5-5', label: 'Opus 5.5, most thorough' },
+];
+
+function ModelSelect({ id, value, empty, onChange }) {
+  const known = !value || MODELS.some((m) => m.value === value);
+  return html`<select id=${id} value=${value || ''} onChange=${(e) => onChange(e.currentTarget.value)}>
+      <option value="" selected=${!value}>${empty}</option>
+      ${MODELS.map((m) => html`<option key=${m.value} value=${m.value} selected=${value === m.value}>${m.label}</option>`)}
+      ${known ? null : html`<option value=${value} selected>${value}</option>`}
+    </select>`;
 }
 
 // Tags edits a list of short strings: Enter or comma adds, Backspace on an

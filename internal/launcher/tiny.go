@@ -82,6 +82,9 @@ func (t *Tiny) Start(ctx context.Context, r store.Run, p project.Project) (strin
 	if p.Model != "" {
 		model = p.Model
 	}
+	if m := p.StoryModel(r.Role, r.Story); m != "" {
+		model = m
+	}
 	name := sessionName(r.ID)
 	res := p.RunResources() // always set: a run pod is never unbounded
 	s := &agentsv1.Session{

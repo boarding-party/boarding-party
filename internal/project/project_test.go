@@ -188,3 +188,24 @@ func TestSitesMustBePublic(t *testing.T) {
 		}
 	}
 }
+
+func TestStoryModel(t *testing.T) {
+	doc := func(model string) []byte {
+		return []byte(`{"name":"p","sites":["https://x.test"],"roles":[{"name":"customer","personas":[{"name":"ann"}],"stories":[{"name":"pay","goal":"g","model":"` + model + `"},{"name":"browse","goal":"g"}]}]}`)
+	}
+	p, err := LoadJSON(doc("claude-haiku-5-5"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m := p.StoryModel("customer", "pay"); m != "claude-haiku-5-5" {
+		t.Errorf("pay model = %q", m)
+	}
+	if m := p.StoryModel("customer", "browse"); m != "" {
+		t.Errorf("browse model = %q, want the project's", m)
+	}
+	for _, bad := range []string{"Claude Haiku", "haiku 5", "-x"} {
+		if _, err := LoadJSON(doc(bad)); err == nil {
+			t.Errorf("story model %q accepted", bad)
+		}
+	}
+}

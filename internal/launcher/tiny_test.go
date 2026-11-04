@@ -252,6 +252,21 @@ func TestProjectModelOverridesDefault(t *testing.T) {
 	}
 }
 
+func TestStoryModelOverridesProject(t *testing.T) {
+	p := project.Project{Model: "claude-sonnet-5-5", Roles: []project.Role{{Name: "customer",
+		Stories: []project.Story{{Name: "first-invoice", Goal: "g", Model: "claude-haiku-5-5"}, {Name: "refund", Goal: "g"}}}}}
+	tn := newTiny()
+	for story, want := range map[string]string{"first-invoice": "claude-haiku-5-5", "refund": "claude-sonnet-5-5"} {
+		name, err := tn.Start(context.Background(), store.Run{ID: "ffff" + story[:4], Token: "t", Role: "customer", Story: story}, p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if m := getSession(t, tn, name).Spec.Model; m != want {
+			t.Errorf("story %s: model = %v, want %s", story, m, want)
+		}
+	}
+}
+
 func TestSessionsListsLabelledSessionsOnly(t *testing.T) {
 	tn := newTiny()
 	n1, _ := tn.Start(context.Background(), store.Run{ID: "dddddddd11", Token: "t"}, project.Project{})

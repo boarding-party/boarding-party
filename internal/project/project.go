@@ -139,7 +139,13 @@ type Persona struct {
 type Story struct {
 	Name string `json:"name"`
 	Goal string `json:"goal"`
+	// Model runs this story on a different model than the project's, such
+	// as a cheap one for a routine story. Empty uses the project's.
+	Model string `json:"model,omitempty"`
 }
+
+// modelID is the shape of a Claude model id, such as claude-haiku-5-5.
+var modelID = regexp.MustCompile(`^[a-z0-9][a-z0-9.@_-]{0,99}$`)
 
 // Load parses and validates a project from YAML.
 func Load(b []byte) (Project, error) {
@@ -246,9 +252,27 @@ func (p Project) validate() error {
 			if st.Goal == "" {
 				return fmt.Errorf("role %q: story %q needs a goal", r.Name, st.Name)
 			}
+			if st.Model != "" && !modelID.MatchString(st.Model) {
+				return fmt.Errorf("role %q: story %q: %q is not a model id, such as claude-haiku-5-5", r.Name, st.Name, st.Model)
+			}
 		}
 	}
 	return nil
+}
+
+// StoryModel returns the model the story asks for, or "" for the project's.
+func (p Project) StoryModel(role, story string) string {
+	for _, r := range p.Roles {
+		if r.Name != role {
+			continue
+		}
+		for _, st := range r.Stories {
+			if st.Name == story {
+				return st.Model
+			}
+		}
+	}
+	return ""
 }
 
 // Hosts returns the hosts runs may reach: each site's host and the extra
