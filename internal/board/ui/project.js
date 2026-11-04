@@ -267,7 +267,7 @@ export function ProjectPage({ onSaved, onDirty }) {
           <${ListField} label="Sites" hint="Staging URLs the cast may open, starting with https://. Never point it at production."
             rows=${draft.sites} placeholder="https://staging.example.com" addLabel="Add site" warn=${siteWarning}
             onChange=${(fn) => edit((d) => fn(d.sites))} />
-          <${ListField} label="Extra hosts" hint="Other hosts the site loads from, such as a CDN or a sign-in provider."
+          <${ListField} label="Extra hosts" hint="Other hosts the site loads from or links to, such as fonts, a CDN, a sign-in or payment provider. Runs can reach only these and the sites."
             rows=${draft.extraHosts} placeholder="cdn.example.com" addLabel="Add host"
             onChange=${(fn) => edit((d) => fn(d.extraHosts))} />
         </div>

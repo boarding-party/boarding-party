@@ -162,3 +162,18 @@ func TestInboxAuthServID(t *testing.T) {
 		}
 	}
 }
+
+func TestExtraHosts(t *testing.T) {
+	p, err := LoadJSON([]byte(`{"name":"p","sites":["https://x.test"],"extraHosts":[" Fonts.GStatic.com "]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.ExtraHosts[0] != "fonts.gstatic.com" {
+		t.Fatalf("extra host not normalised: %q", p.ExtraHosts[0])
+	}
+	for _, h := range []string{"com", ".com", "co.uk", "*", "fonts.gstatic.com\nevil.com", "a b.com", "https://x.com", "localhost"} {
+		if _, err := LoadJSON([]byte(`{"name":"p","sites":["https://x.test"],"extraHosts":["` + h + `"]}`)); err == nil {
+			t.Errorf("extra host %q accepted", h)
+		}
+	}
+}

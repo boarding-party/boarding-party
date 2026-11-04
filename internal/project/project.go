@@ -8,8 +8,10 @@ import (
 	"net/mail"
 	"net/url"
 	"regexp"
+	"slices"
 	"strings"
 
+	"golang.org/x/net/publicsuffix"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/util/validation"
 
@@ -177,6 +179,16 @@ func (p Project) validate() error {
 			return fmt.Errorf("site %q must be an https:// URL", s)
 		}
 	}
+	for i, h := range p.ExtraHosts {
+		h = strings.ToLower(strings.TrimSpace(h))
+		if len(validation.IsDNS1123Subdomain(h)) > 0 || !strings.Contains(h, ".") {
+			return fmt.Errorf("extra host %q must be a host name such as fonts.gstatic.com", p.ExtraHosts[i])
+		}
+		if suffix, _ := publicsuffix.PublicSuffix(h); suffix == h {
+			return fmt.Errorf("extra host %q is a whole domain ending; name the host, such as fonts.gstatic.com", p.ExtraHosts[i])
+		}
+		p.ExtraHosts[i] = h
+	}
 	if r := p.Resources; r != nil {
 		if r.CPU != "" {
 			if err := checkQuantity("cpu", r.CPU, minCPU, maxCPU); err != nil {
@@ -229,4 +241,22 @@ func (p Project) validate() error {
 		}
 	}
 	return nil
+}
+
+// Hosts returns the hosts runs may reach: each site's host and the extra
+// hosts, lower-case, sorted and without duplicates.
+func (p Project) Hosts() []string {
+	var hosts []string
+	for _, s := range p.Sites {
+		if u, err := url.Parse(s); err == nil && u.Hostname() != "" {
+			hosts = append(hosts, strings.ToLower(u.Hostname()))
+		}
+	}
+	for _, h := range p.ExtraHosts {
+		if h = strings.ToLower(strings.TrimSpace(h)); h != "" {
+			hosts = append(hosts, h)
+		}
+	}
+	slices.Sort(hosts)
+	return slices.Compact(hosts)
 }

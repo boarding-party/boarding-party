@@ -109,6 +109,9 @@ func fail(w http.ResponseWriter, err error) {
 		http.Error(w, "not found", http.StatusNotFound)
 	case errors.Is(err, runs.ErrBusy):
 		http.Error(w, runs.ErrBusy.Error(), http.StatusConflict)
+	case errors.Is(err, runs.ErrAllowList):
+		log.Printf("api: %v", err)
+		http.Error(w, err.Error(), http.StatusBadGateway)
 	case errors.Is(err, runs.ErrNoFence):
 		http.Error(w, err.Error(), http.StatusPreconditionFailed)
 	case errors.Is(err, artifacts.ErrBadName):
@@ -136,7 +139,7 @@ func (s *server) putProject(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	if err := s.svc.Store.PutProject(p); err != nil {
+	if err := s.svc.SaveProject(r.Context(), p); err != nil {
 		fail(w, err)
 		return
 	}
@@ -158,7 +161,7 @@ func (s *server) putProjectJSON(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	if err := s.svc.Store.PutProject(p); err != nil {
+	if err := s.svc.SaveProject(r.Context(), p); err != nil {
 		fail(w, err)
 		return
 	}
@@ -260,6 +263,13 @@ func (s *server) getRun(w http.ResponseWriter, r *http.Request) {
 		names = []string{}
 	}
 	out := map[string]any{"run": redact(run), "bugs": bugs, "artifacts": names}
+	bctx, cancel := context.WithTimeout(r.Context(), stageTimeout)
+	if blocked, err := s.svc.Blocked(bctx, run); err != nil {
+		log.Printf("api: run %s blocked hosts: %v", run.ID, err)
+	} else if len(blocked) > 0 {
+		out["blocked"] = blocked
+	}
+	cancel()
 	if stage, reason, isLive := s.progress(r.Context(), run); stage != "" || isLive {
 		if stage != "" {
 			out["stage"] = stage

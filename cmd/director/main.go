@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/kubernetes"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -28,6 +29,7 @@ import (
 
 	"github.com/boarding-party/boardingparty/internal/api"
 	"github.com/boarding-party/boardingparty/internal/artifacts"
+	"github.com/boarding-party/boardingparty/internal/egress"
 	"github.com/boarding-party/boardingparty/internal/files"
 	"github.com/boarding-party/boardingparty/internal/inbox"
 	"github.com/boarding-party/boardingparty/internal/launcher"
@@ -198,8 +200,13 @@ func run() error {
 		Artifacts: artifacts.NewFS(filepath.Join(cfg.Data, "artifacts"), cfg.MaxArtifactBytes),
 		Files:     files.New(filepath.Join(cfg.Data, "files")),
 		Launcher:  tl,
-		Fence:     tl.CheckFence,
 	}
+	kube, err := kubernetes.NewForConfig(restCfg)
+	if err != nil {
+		return fmt.Errorf("kubernetes clientset: %w", err)
+	}
+	fence := &egress.Fence{Client: kc, Pods: kube.CoreV1(), Namespace: cfg.Namespace}
+	svc.Fence, svc.Egress = fence.Check, fence
 	if cfg.NoEgressFence {
 		log.Print("warning: --no-egress-fence: runs start without the egress fence, agents can reach any host")
 		svc.Fence = nil
@@ -207,6 +214,12 @@ func run() error {
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, os.Interrupt)
 	defer stop()
+
+	if p, err := st.Project(); err == nil {
+		if err := svc.SyncHosts(ctx, p); err != nil {
+			log.Printf("warning: %v", err)
+		}
+	}
 
 	hub := live.NewHub()
 	svc.LastFrame = hub.Latest

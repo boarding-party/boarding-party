@@ -52,6 +52,7 @@ func (s *Service) Reconcile(ctx context.Context, now time.Time, timeout time.Dur
 		}
 		if won {
 			s.keepLastFrame(r.ID)
+			s.keepBlocked(ctx, r, now)
 			session := r.Session
 			if session == "" {
 				session = s.Launcher.SessionName(r.ID) // may be an orphan from a crashed Start

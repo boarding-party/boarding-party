@@ -6,8 +6,10 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"sync"
 	"time"
 
@@ -74,6 +76,78 @@ type Launcher interface {
 	Stage(ctx context.Context, session string) (stage, reason string, err error)
 }
 
+// Egress is the fence's allow-list and refusal log (see package egress).
+type Egress interface {
+	Sync(ctx context.Context, hosts []string) error
+	Denied(ctx context.Context, since, until time.Time) ([]string, error)
+}
+
+// BlockedName is the artifact listing the hosts a finished run was refused.
+const BlockedName = "blocked-hosts.json"
+
+// ErrAllowList means the project was saved but the fence's allow-list was not updated.
+var ErrAllowList = errors.New("project saved, but the egress allow-list was not updated")
+
+// SaveProject stores p and puts its hosts on the egress allow-list.
+func (s *Service) SaveProject(ctx context.Context, p project.Project) error {
+	if err := s.Store.PutProject(p); err != nil {
+		return err
+	}
+	return s.SyncHosts(ctx, p)
+}
+
+// SyncHosts puts p's hosts on the egress allow-list.
+func (s *Service) SyncHosts(ctx context.Context, p project.Project) error {
+	if s.Egress == nil {
+		return nil
+	}
+	if err := s.Egress.Sync(ctx, p.Hosts()); err != nil {
+		return fmt.Errorf("%w: %v", ErrAllowList, err)
+	}
+	return nil
+}
+
+// Blocked returns the hosts the fence refused during r: saved with a finished
+// run, read from the proxy while it runs.
+func (s *Service) Blocked(ctx context.Context, r store.Run) ([]string, error) {
+	if !r.Finished.IsZero() {
+		if s.Artifacts == nil {
+			return nil, nil
+		}
+		rc, err := s.Artifacts.Open(r.ID, BlockedName)
+		if errors.Is(err, artifacts.ErrNotFound) {
+			return nil, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+		defer rc.Close()
+		var hosts []string
+		err = json.NewDecoder(io.LimitReader(rc, 1<<20)).Decode(&hosts)
+		return hosts, err
+	}
+	if s.Egress == nil {
+		return nil, nil
+	}
+	return s.Egress.Denied(ctx, r.Started, time.Time{})
+}
+
+// keepBlocked saves the hosts the fence refused during the run. Best effort,
+// like the last frame: a run whose refusals can't be read has no list.
+func (s *Service) keepBlocked(ctx context.Context, r store.Run, finished time.Time) {
+	if s.Egress == nil || s.Artifacts == nil {
+		return
+	}
+	hosts, err := s.Egress.Denied(ctx, r.Started, finished)
+	if err != nil || len(hosts) == 0 {
+		return
+	}
+	b, err := json.Marshal(hosts)
+	if err == nil {
+		_, _ = s.Artifacts.Put(r.ID, BlockedName, bytes.NewReader(b))
+	}
+}
+
 type Service struct {
 	Store     *store.Store
 	Artifacts artifacts.Store
@@ -85,6 +159,9 @@ type Service struct {
 	// Fence, when set, must return nil before a run starts: it checks that
 	// agents can reach only the hosts someone allowed.
 	Fence func(ctx context.Context) error
+	// Egress, when set, keeps the project's hosts on the fence's allow-list
+	// and says which hosts the fence refused during a run.
+	Egress Egress
 
 	startMu sync.Mutex // makes the one-active-run check and CreateRun atomic
 }
@@ -214,7 +291,8 @@ func (s *Service) Finish(ctx context.Context, token string, state store.RunState
 	if err != nil {
 		return err
 	}
-	won, err := s.Store.FinishRun(r.ID, state, outcome, time.Now().UTC())
+	finished := time.Now().UTC()
+	won, err := s.Store.FinishRun(r.ID, state, outcome, finished)
 	if err != nil {
 		return err
 	}
@@ -222,6 +300,7 @@ func (s *Service) Finish(ctx context.Context, token string, state store.RunState
 		return ErrNotActive
 	}
 	s.keepLastFrame(r.ID)
+	s.keepBlocked(ctx, r, finished)
 	if r.Session == "" {
 		return nil
 	}

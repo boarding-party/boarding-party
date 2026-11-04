@@ -616,6 +616,7 @@ function RunPage({ id, onChange }) {
   }
 
   const { run, bugs = [], artifacts = [] } = data;
+  const files = artifacts.filter((n) => n !== BLOCKED_NAME);
   const webm = artifacts.find((n) => n.toLowerCase().endsWith('.webm'));
   const started = parseTime(run.started), finished = parseTime(run.finished);
   const took = started ? fmtDuration((finished || new Date()) - started) : '';
@@ -653,6 +654,7 @@ function RunPage({ id, onChange }) {
             ${run.outcome ? html`<p class="outcome-text">${run.outcome}</p>`
               : html`<p class="muted small" style="margin:0">${ACTIVE.has(run.state) ? 'Still running.' : 'No outcome recorded.'}</p>`}
           </div>
+          ${data.blocked && data.blocked.length ? html`<${BlockedHosts} hosts=${data.blocked} />` : null}
           <div class="card">
             <h2>Details</h2>
             <dl class="facts">
@@ -668,7 +670,7 @@ function RunPage({ id, onChange }) {
           </div>
           <div class="card">
             <h2>Files</h2>
-            ${artifacts.length ? html`<ul class="files">${artifacts.map((n) => html`
+            ${files.length ? html`<ul class="files">${files.map((n) => html`
               <li key=${n}><a href=${artifactURL(run.id, n)} download=${n}>${n}</a>
                 ${n === 'trace.zip' ? html`<span class="hint">Open it with <code>npx playwright show-trace trace.zip</code></span>` : null}</li>`)}</ul>`
               : html`<p class="muted small" style="margin:0">No files yet.</p>`}
@@ -676,6 +678,62 @@ function RunPage({ id, onChange }) {
         </div>
       </div>
     </section>`;
+}
+
+// BLOCKED_NAME is the director's saved list of refused hosts (runs.BlockedName);
+// the run page shows it as its own card, not as a file.
+const BLOCKED_NAME = 'blocked-hosts.json';
+const MAX_BLOCKED = 50;
+
+// BlockedHosts lists the hosts the network fence refused during the run. A
+// page that loads fonts, scripts or payments from such a host looks broken
+// to the persona. Allow adds the host to the project's extra hosts, which
+// the director copies to the fence's allow-list.
+function BlockedHosts({ hosts }) {
+  const [allowed, setAllowed] = useState(() => new Set());
+  const [busy, setBusy] = useState('');
+  const [err, setErr] = useState('');
+  useEffect(() => {
+    let live = true;
+    api('/api/project').then((p) => {
+      if (live) setAllowed(new Set([...(p.extraHosts || []), ...(p.sites || []).map(hostOf)].map((h) => h.toLowerCase())));
+    }).catch(() => {});
+    return () => { live = false; };
+  }, []);
+
+  const allow = async (host) => {
+    setBusy(host); setErr('');
+    try {
+      const p = await api('/api/project');
+      const extra = p.extraHosts || [];
+      if (!extra.map((h) => h.toLowerCase()).includes(host)) {
+        await api('/api/project', { method: 'PUT', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...p, extraHosts: [...extra, host] }) });
+      }
+      setAllowed((a) => new Set(a).add(host));
+    } catch (e) {
+      setErr(e.message);
+    } finally {
+      setBusy('');
+    }
+  };
+
+  const shown = hosts.slice(0, MAX_BLOCKED);
+  return html`
+    <div class="card">
+      <h2>Blocked hosts</h2>
+      <p class="small muted" style="margin-top:0">The network fence stopped the browser reaching these hosts, so parts of the site may not have loaded. Allow the ones the site needs, such as fonts, scripts or payments. The next run can reach them.</p>
+      <ul class="files blocked">${shown.map((h) => html`
+        <li key=${h}><code>${h}</code>
+          ${allowed.has(h) ? html`<span class="small muted">Allowed</span>`
+            : html`<button class="btn" type="button" disabled=${busy !== ''} onClick=${() => allow(h)}>${busy === h ? 'Allowing…' : 'Allow'}</button>`}</li>`)}</ul>
+      ${hosts.length > shown.length ? html`<p class="small muted">${hosts.length - shown.length} more not shown.</p>` : null}
+      ${err ? html`<div class="note bad">Could not allow the host: ${err}</div>` : null}
+    </div>`;
+}
+
+function hostOf(site) {
+  try { return new URL(site).hostname; } catch (_) { return ''; }
 }
 
 const SEVERITY_TAG = new Map([['high', 'bad'], ['critical', 'bad'], ['medium', 'wait'], ['low', 'idle']]);

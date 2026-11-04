@@ -311,15 +311,8 @@ func jsonText(v any) (*mcp.CallToolResult, any, error) {
 // allowedHosts is the exact (lower-case) host set links may point at.
 func allowedHosts(p project.Project) map[string]bool {
 	hosts := map[string]bool{}
-	for _, s := range p.Sites {
-		if u, err := url.Parse(s); err == nil && u.Hostname() != "" {
-			hosts[strings.ToLower(u.Hostname())] = true
-		}
-	}
-	for _, h := range p.ExtraHosts {
-		if h = strings.ToLower(strings.TrimSpace(h)); h != "" {
-			hosts[h] = true
-		}
+	for _, h := range p.Hosts() {
+		hosts[h] = true
 	}
 	return hosts
 }

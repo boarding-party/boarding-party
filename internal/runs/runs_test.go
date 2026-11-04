@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -355,5 +356,59 @@ func TestFinishWithoutFrameSavesNothing(t *testing.T) {
 	}
 	if names, _ := svc.Artifacts.List(r.ID); len(names) != 0 {
 		t.Fatalf("artifacts: %v", names)
+	}
+}
+
+type fakeEgress struct {
+	synced  []string
+	syncErr error
+	denied  []string
+}
+
+func (f *fakeEgress) Sync(_ context.Context, hosts []string) error {
+	f.synced = hosts
+	return f.syncErr
+}
+
+func (f *fakeEgress) Denied(context.Context, time.Time, time.Time) ([]string, error) {
+	return f.denied, nil
+}
+
+func TestSaveProjectSyncsHosts(t *testing.T) {
+	svc, _ := newSvc(t)
+	eg := &fakeEgress{}
+	svc.Egress = eg
+	p := project.Project{Name: "p", Sites: []string{"https://Staging.Example.com/app"}, ExtraHosts: []string{"fonts.gstatic.com"}}
+	if err := svc.SaveProject(context.Background(), p); err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"fonts.gstatic.com", "staging.example.com"}; !reflect.DeepEqual(eg.synced, want) {
+		t.Fatalf("synced %v, want %v", eg.synced, want)
+	}
+	eg.syncErr = errors.New("forbidden")
+	if err := svc.SaveProject(context.Background(), p); !errors.Is(err, ErrAllowList) {
+		t.Fatalf("SaveProject = %v, want ErrAllowList", err)
+	}
+	if got, err := svc.Store.Project(); err != nil || got.Sites[0] != p.Sites[0] {
+		t.Fatalf("project not saved before the sync failed: %+v %v", got, err)
+	}
+}
+
+func TestBlockedLiveThenSaved(t *testing.T) {
+	svc, _ := newSvc(t)
+	svc.Egress = &fakeEgress{denied: []string{"fonts.gstatic.com"}}
+	ctx := context.Background()
+	r, _ := svc.Start(ctx, "ann", "checkout")
+	if got, _ := svc.Blocked(ctx, r); !reflect.DeepEqual(got, []string{"fonts.gstatic.com"}) {
+		t.Fatalf("live blocked = %v", got)
+	}
+	if err := svc.Finish(ctx, r.Token, store.RunDone, "ok"); err != nil {
+		t.Fatal(err)
+	}
+	// After the run, the saved list answers even once the proxy forgets.
+	svc.Egress = &fakeEgress{}
+	done, _ := svc.Store.RunByID(r.ID)
+	if got, err := svc.Blocked(ctx, done); err != nil || !reflect.DeepEqual(got, []string{"fonts.gstatic.com"}) {
+		t.Fatalf("saved blocked = %v, %v", got, err)
 	}
 }

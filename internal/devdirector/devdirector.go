@@ -22,6 +22,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -304,6 +305,7 @@ func start(ctx context.Context, dir string, projectYAML []byte, duration time.Du
 		Files:     files.New(filepath.Join(dir, "files")),
 		Launcher:  l,
 		LastFrame: hub.Latest,
+		Egress:    &devEgress{},
 	}
 	l.Svc = svc
 	b := make([]byte, 32)
@@ -328,6 +330,31 @@ func start(ctx context.Context, dir string, projectYAML []byte, duration time.Du
 }
 
 // memSecrets keeps the mailbox login in memory for the dev director.
+// devEgress fakes the network fence: every run is refused one font host the
+// project hasn't allowed, so the board's blocked-hosts card has something to show.
+type devEgress struct {
+	mu      sync.Mutex
+	allowed []string
+}
+
+func (e *devEgress) Sync(_ context.Context, hosts []string) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.allowed = hosts
+	return nil
+}
+
+func (e *devEgress) Denied(context.Context, time.Time, time.Time) ([]string, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if slices.Contains(e.allowed, devBlockedHost) {
+		return nil, nil
+	}
+	return []string{devBlockedHost}, nil
+}
+
+const devBlockedHost = "fonts.gstatic.com"
+
 type memSecrets struct {
 	mu  sync.Mutex
 	c   inbox.Config

@@ -1,4 +1,4 @@
-package launcher
+package egress
 
 import (
 	"context"
@@ -8,12 +8,17 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
-func fenceTiny(objs ...client.Object) *Tiny {
-	return &Tiny{Client: fake.NewClientBuilder().WithScheme(testScheme()).WithObjects(objs...).Build(), Namespace: "bp"}
+func newFence(objs ...client.Object) *Fence {
+	sc := runtime.NewScheme()
+	if err := corev1.AddToScheme(sc); err != nil {
+		panic(err)
+	}
+	return &Fence{Client: fake.NewClientBuilder().WithScheme(sc).WithObjects(objs...).Build(), Namespace: "bp"}
 }
 
 func cm(name string, data map[string]string) *corev1.ConfigMap {
@@ -35,15 +40,15 @@ func TestCheckFence(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			err := fenceTiny(c.objs...).CheckFence(context.Background())
+			err := newFence(c.objs...).Check(context.Background())
 			if c.want == "" {
 				if err != nil {
-					t.Fatalf("CheckFence = %v, want nil", err)
+					t.Fatalf("Check = %v, want nil", err)
 				}
 				return
 			}
 			if err == nil || !strings.Contains(err.Error(), c.want) {
-				t.Fatalf("CheckFence = %v, want error containing %q", err, c.want)
+				t.Fatalf("Check = %v, want error containing %q", err, c.want)
 			}
 		})
 	}

@@ -1,4 +1,7 @@
-package launcher
+// Package egress talks to tiny's egress fence: the proxy that lets run pods
+// reach only allow-listed hosts. It checks the fence is in place, keeps the
+// project's hosts on the allow-list, and reads which hosts the proxy refused.
+package egress
 
 import (
 	"context"
@@ -8,6 +11,7 @@ import (
 	"golang.org/x/net/publicsuffix"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	corev1client "k8s.io/client-go/kubernetes/typed/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -17,12 +21,19 @@ const (
 	egressAllowKey = "hosts"
 )
 
-// CheckFence reports whether runs in the namespace are fenced: tiny's egress
+// Fence is tiny's egress proxy in one namespace.
+type Fence struct {
+	Client    client.Client
+	Pods      corev1client.PodsGetter // reads the proxy's logs; nil: Denied reports nothing
+	Namespace string
+}
+
+// Check reports whether runs in the namespace are fenced: tiny's egress
 // proxy is on and its allow-list admits no whole public suffix (".com",
 // ".co.uk"), which would let agents reach any site under it.
-func (t *Tiny) CheckFence(ctx context.Context) error {
+func (f *Fence) Check(ctx context.Context) error {
 	cm := &corev1.ConfigMap{}
-	err := t.Client.Get(ctx, client.ObjectKey{Namespace: t.Namespace, Name: tinySettings}, cm)
+	err := f.Client.Get(ctx, client.ObjectKey{Namespace: f.Namespace, Name: tinySettings}, cm)
 	if err != nil && !apierrors.IsNotFound(err) {
 		return fmt.Errorf("read configmap %s: %w", tinySettings, err)
 	}
@@ -30,7 +41,7 @@ func (t *Tiny) CheckFence(ctx context.Context) error {
 		return fmt.Errorf("tiny's egress proxy is off, so agents could reach any host (set egressProxy: \"true\" in configmap %s)", tinySettings)
 	}
 	al := &corev1.ConfigMap{}
-	if err := t.Client.Get(ctx, client.ObjectKey{Namespace: t.Namespace, Name: egressAllowCM}, al); err != nil {
+	if err := f.Client.Get(ctx, client.ObjectKey{Namespace: f.Namespace, Name: egressAllowCM}, al); err != nil {
 		return fmt.Errorf("can't read allow-list %s: %w", egressAllowCM, err)
 	}
 	if bad := wideEntries(al.Data[egressAllowKey]); len(bad) > 0 {

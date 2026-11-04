@@ -103,6 +103,12 @@ talked into doing the wrong thing.
   staging hosts and the model API you list. If you point a project at
   production, the pages won't load unless you also allow production hosts.
   Don't.
+- You don't edit the allow-list by hand for your project. Each time the
+  project is saved, the director writes the hosts of its sites and extra
+  hosts into a block of its own in `tiny-egress-allow`, and leaves the other
+  lines alone. When the fence refuses a host during a run (a font, script or
+  payment host the site loads), the run page lists it under "Blocked hosts"
+  with an Allow button that adds it to the extra hosts.
 - The director won't start a run unless that fence is in place: tiny's egress
   proxy must be on, and its allow-list can't contain a whole public suffix
   such as `.com`. You can pass `--no-egress-fence` to the director to skip

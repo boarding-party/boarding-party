@@ -70,10 +70,19 @@ rules:
   - apiGroups: [""]
     resources: ["secrets"]
     verbs: ["create"]
+  # The project's hosts are kept on tiny's egress allow-list.
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    resourceNames: ["tiny-egress-allow"]
+    verbs: ["update"]
   # The one-run gate also waits for run pods to be gone.
   - apiGroups: [""]
     resources: ["pods"]
     verbs: ["list"]
+  # The egress proxy's log says which hosts a run was refused.
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
