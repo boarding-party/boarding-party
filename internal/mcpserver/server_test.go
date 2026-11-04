@@ -560,3 +560,140 @@ func TestLinkAllowedRejectsOpaqueAndHostless(t *testing.T) {
 		t.Error("real link not allowed")
 	}
 }
+
+// setupWait is setup with a clinician role, so stories can hand off, and a mailbox.
+func setupWait(t *testing.T, mail mailbox, email string) (*store.Store, *httptest.Server, store.Run) {
+	t.Helper()
+	svc, st, _, run := setup(t)
+	p := project.Project{Name: "p", Sites: []string{"https://x.test"}, Roles: []project.Role{
+		{Name: "buyer",
+			Personas: []project.Persona{{Name: "ann", Identity: map[string]string{"email": email}}},
+			Stories: []project.Story{{Name: "checkout", Goal: "buy a thing",
+				Handoffs: []project.Handoff{{Role: "clinician", Story: "approve"}}}}},
+		{Name: "clinician",
+			Personas: []project.Persona{{Name: "dr", Identity: map[string]string{"email": "dr@example.test"}}},
+			Stories:  []project.Story{{Name: "approve", Goal: "approve the order"}}},
+	}}
+	if err := st.PutProject(p); err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(handler(svc, st, director, mail))
+	t.Cleanup(srv.Close)
+	return st, srv, run
+}
+
+func TestFinishWaitingEmail(t *testing.T) {
+	st, srv, run := setupWait(t, fakeMail{Service: &inbox.Service{}, state: "ok"}, "ann@example.test")
+	out, isErr := call(t, connect(t, srv, run.Token), "finish_run", map[string]any{"outcome": "waiting", "summary": "s",
+		"until": map[string]any{"email": map[string]any{"subject": "Reset"}}})
+	if isErr || !strings.HasPrefix(out, "waiting for an email") {
+		t.Fatalf("%v %q", isErr, out)
+	}
+	r, _ := st.RunByID(run.ID)
+	w, err := st.WaitFor(run.ID)
+	if err != nil || r.State != store.RunWaiting || w.Kind != "email" {
+		t.Errorf("state %q wait %+v %v", r.State, w, err)
+	}
+}
+
+func TestFinishWaitingValidation(t *testing.T) {
+	ok := fakeMail{Service: &inbox.Service{}, state: "ok"}
+	email := map[string]any{"email": map[string]any{"subject": "x"}}
+	for _, tc := range []struct {
+		name  string
+		mail  mailbox
+		addr  string
+		args  map[string]any
+		wants string
+	}{
+		{"no until", ok, "a@b.test", map[string]any{"outcome": "waiting", "summary": "s"}, "outcome waiting needs until: exactly one of email, handoff or time"},
+		{"until on done", ok, "a@b.test", map[string]any{"outcome": "done", "summary": "s", "until": email}, "until applies only to outcome waiting"},
+		{"no mailbox", nil, "a@b.test", map[string]any{"outcome": "waiting", "summary": "s", "until": email}, errNoMailbox},
+		{"no email", ok, "", map[string]any{"outcome": "waiting", "summary": "s", "until": email}, "this persona has no email address, so it can't wait for email"},
+		{"undeclared handoff", ok, "a@b.test", map[string]any{"outcome": "waiting", "summary": "s",
+			"until": map[string]any{"handoff": map[string]any{"role": "buyer", "story": "checkout"}}}, "does not hand off to"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			st, srv, run := setupWait(t, tc.mail, tc.addr)
+			out, isErr := call(t, connect(t, srv, run.Token), "finish_run", tc.args)
+			if !isErr || !strings.Contains(out, tc.wants) {
+				t.Errorf("%v %q want %q", isErr, out, tc.wants)
+			}
+			r, _ := st.RunByID(run.ID)
+			if r.State != store.RunPending && r.State != store.RunRunning {
+				t.Errorf("run ended: %q", r.State)
+			}
+		})
+	}
+}
+
+func TestFinishWaitingHandoff(t *testing.T) {
+	st, srv, run := setupWait(t, nil, "")
+	out, isErr := call(t, connect(t, srv, run.Token), "finish_run", map[string]any{"outcome": "waiting", "summary": "s",
+		"until": map[string]any{"handoff": map[string]any{"role": "clinician", "story": "approve"}}})
+	if isErr || !strings.HasPrefix(out, "waiting for ") {
+		t.Fatalf("%v %q", isErr, out)
+	}
+	if w, err := st.WaitFor(run.ID); err != nil || w.Kind != "handoff" {
+		t.Errorf("%+v %v", w, err)
+	}
+}
+
+func TestFinishWaitingTime(t *testing.T) {
+	st, srv, run := setupWait(t, nil, "")
+	out, isErr := call(t, connect(t, srv, run.Token), "finish_run", map[string]any{"outcome": "waiting", "summary": "s",
+		"until": map[string]any{"time": map[string]any{"after": "30m"}}})
+	if isErr || !strings.HasPrefix(out, "waiting for ") {
+		t.Fatalf("%v %q", isErr, out)
+	}
+	if w, err := st.WaitFor(run.ID); err != nil || w.Kind != "time" {
+		t.Errorf("%+v %v", w, err)
+	}
+}
+
+func TestNextAssignmentContext(t *testing.T) {
+	st, srv, run := setupWait(t, nil, "")
+	read := func(r store.Run) struct {
+		Context json.RawMessage `json:"context"`
+		Story   struct {
+			Handoffs []struct{ Role, Story, Goal string } `json:"handoffs"`
+		} `json:"story"`
+	} {
+		out, isErr := call(t, connect(t, srv, r.Token), "next_assignment", nil)
+		if isErr {
+			t.Fatal(out)
+		}
+		var a struct {
+			Context json.RawMessage `json:"context"`
+			Story   struct {
+				Handoffs []struct{ Role, Story, Goal string } `json:"handoffs"`
+			} `json:"story"`
+		}
+		if err := json.Unmarshal([]byte(out), &a); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(out, `"context":`) {
+			t.Errorf("no context key: %s", out)
+		}
+		return a
+	}
+	fresh := read(run)
+	if string(fresh.Context) != "null" {
+		t.Errorf("fresh context %s", fresh.Context)
+	}
+	if len(fresh.Story.Handoffs) != 1 || fresh.Story.Handoffs[0].Role != "clinician" || fresh.Story.Handoffs[0].Story != "approve" || fresh.Story.Handoffs[0].Goal != "approve the order" {
+		t.Errorf("handoffs %+v", fresh.Story.Handoffs)
+	}
+	if _, err := st.FinishRun(run.ID, store.RunDone, "", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	cont := store.Run{ID: "cccccccc01", Token: "tok-ctx", Persona: "ann", Role: "buyer", Story: "checkout", State: store.RunRunning,
+		Started: time.Now(), Context: json.RawMessage(`{"kind":"continue"}`)}
+	if err := st.CreateRun(cont); err != nil {
+		t.Fatal(err)
+	}
+	var c struct{ Kind string }
+	if err := json.Unmarshal(read(cont).Context, &c); err != nil || c.Kind != "continue" {
+		t.Errorf("context %v %v", c, err)
+	}
+}

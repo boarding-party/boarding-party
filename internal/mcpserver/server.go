@@ -16,6 +16,7 @@ import (
 	"github.com/boarding-party/boardingparty/internal/inbox"
 	"github.com/boarding-party/boardingparty/internal/project"
 	"github.com/boarding-party/boardingparty/internal/runs"
+	"github.com/boarding-party/boardingparty/internal/sched"
 	"github.com/boarding-party/boardingparty/internal/store"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -79,9 +80,17 @@ type persona struct {
 	Guidance []string          `json:"guidance"`
 }
 
+type handoffInfo struct {
+	Role  string `json:"role"`
+	Story string `json:"story"`
+	Goal  string `json:"goal"`
+}
+
 type story struct {
 	Name string `json:"name"`
 	Goal string `json:"goal"`
+	// Handoffs are the stories this one may wait for in finish_run.
+	Handoffs []handoffInfo `json:"handoffs"`
 }
 
 type assignment struct {
@@ -94,6 +103,8 @@ type assignment struct {
 	Files []string `json:"files"`
 	// Inbox is true when the persona can receive email: a mailbox is configured and it has identity.email.
 	Inbox bool `json:"inbox"`
+	// Context says why this run exists: it continues an earlier run or picks up a hand-off. null for a fresh run.
+	Context json.RawMessage `json:"context"`
 }
 
 type saveArgs struct {
@@ -109,8 +120,9 @@ type bugArgs struct {
 }
 
 type finishArgs struct {
-	Outcome string `json:"outcome" jsonschema:"done, stuck or failed"`
-	Summary string `json:"summary" jsonschema:"what happened"`
+	Outcome string       `json:"outcome" jsonschema:"done, stuck, failed or waiting"`
+	Summary string       `json:"summary" jsonschema:"what happened"`
+	Until   *sched.Until `json:"until,omitempty" jsonschema:"what to wait for; required for outcome waiting and not allowed otherwise"`
 }
 
 func newServer(svc *runs.Service, st *store.Store, directorURL, token string, mail mailbox) *mcp.Server {
@@ -137,7 +149,7 @@ func newServer(svc *runs.Service, st *store.Store, directorURL, token string, ma
 			if err != nil {
 				return nil, nil, fmt.Errorf("load project: %w", err)
 			}
-			a := assignment{Sites: p.Sites, UploadURL: directorURL + "/artifacts/" + token + "/", Files: []string{}}
+			a := assignment{Sites: p.Sites, Context: json.RawMessage("null"), UploadURL: directorURL + "/artifacts/" + token + "/", Files: []string{}}
 			if svc.Files != nil {
 				fl, err := svc.Files.ForPersona(r.Persona)
 				if err != nil {
@@ -149,6 +161,10 @@ func newServer(svc *runs.Service, st *store.Store, directorURL, token string, ma
 			}
 			a.Persona.Name, a.Persona.Role = r.Persona, r.Role
 			a.Story.Name = r.Story
+			a.Story.Handoffs = []handoffInfo{}
+			if len(r.Context) > 0 {
+				a.Context = r.Context
+			}
 			for _, role := range p.Roles {
 				if role.Name != r.Role {
 					continue
@@ -162,6 +178,13 @@ func newServer(svc *runs.Service, st *store.Store, directorURL, token string, ma
 				for _, sy := range role.Stories {
 					if sy.Name == r.Story {
 						a.Story.Goal = sy.Goal
+						for _, h := range sy.Handoffs {
+							hi := handoffInfo{Role: h.Role, Story: h.Story}
+							if t, ok := p.FindStory(h.Role, h.Story); ok {
+								hi.Goal = t.Goal
+							}
+							a.Story.Handoffs = append(a.Story.Handoffs, hi)
+						}
 					}
 				}
 			}
@@ -226,10 +249,17 @@ func newServer(svc *runs.Service, st *store.Store, directorURL, token string, ma
 		})
 
 	mcp.AddTool(s, &mcp.Tool{Name: "finish_run",
-		Description: "Finish your run. outcome is done, stuck or failed. Call this last."},
+		Description: "Finish your run. outcome is done, stuck, failed or waiting. For waiting, set until to exactly one of email {from, subject}, handoff {role, story} or time {at or after}, plus an optional timeout. Call this last."},
 		func(ctx context.Context, _ *mcp.CallToolRequest, in finishArgs) (*mcp.CallToolResult, any, error) {
-			if _, bad, err := active(); bad != nil || err != nil {
+			r, bad, err := active()
+			if bad != nil || err != nil {
 				return bad, nil, err
+			}
+			if in.Outcome == "waiting" {
+				return finishWaiting(ctx, svc, st, mail, token, r, in)
+			}
+			if in.Until != nil {
+				return toolErr("until applies only to outcome waiting")
 			}
 			var state store.RunState
 			switch in.Outcome {
@@ -240,9 +270,9 @@ func newServer(svc *runs.Service, st *store.Store, directorURL, token string, ma
 			case "failed":
 				state = store.RunFailed
 			default:
-				return toolErr(fmt.Sprintf("outcome must be done, stuck or failed, got %q", in.Outcome))
+				return toolErr(fmt.Sprintf("outcome must be done, stuck, failed or waiting, got %q", in.Outcome))
 			}
-			err := svc.Finish(ctx, token, state, in.Summary)
+			err = svc.Finish(ctx, token, state, in.Summary)
 			if errors.Is(err, runs.ErrNotActive) {
 				return toolErr(errNotActive)
 			}
@@ -253,6 +283,51 @@ func newServer(svc *runs.Service, st *store.Store, directorURL, token string, ma
 		})
 	addMailTools(s, st, mail, active)
 	return s
+}
+
+// finishWaiting ends the run as waiting on in.Until after checking the wait can be met.
+func finishWaiting(ctx context.Context, svc *runs.Service, st *store.Store, mail mailbox, token string, r store.Run, in finishArgs) (*mcp.CallToolResult, any, error) {
+	if in.Until == nil {
+		return toolErr("outcome waiting needs until: exactly one of email, handoff or time")
+	}
+	p, err := st.Project()
+	if err != nil {
+		return nil, nil, fmt.Errorf("load project: %w", err)
+	}
+	if in.Until.Email != nil {
+		if msg := mailUnavailable(mail); msg != "" {
+			return toolErr(msg)
+		}
+		if !personaHasEmail(p, r) {
+			return toolErr("this persona has no email address, so it can't wait for email")
+		}
+	}
+	w, err := sched.ParseWait(*in.Until, p, r, time.Now().UTC())
+	if err != nil {
+		return toolErr(err.Error())
+	}
+	err = svc.FinishWaiting(ctx, token, w, in.Summary)
+	if errors.Is(err, runs.ErrNotActive) {
+		return toolErr(errNotActive)
+	}
+	if err != nil {
+		return nil, nil, err
+	}
+	return text("waiting for " + sched.Describe(w))
+}
+
+func personaHasEmail(p project.Project, r store.Run) bool {
+	for _, role := range p.Roles {
+		if role.Name != r.Role {
+			continue
+		}
+		for _, pe := range role.Personas {
+			if pe.Name == r.Persona {
+				return pe.Identity["email"] != ""
+			}
+		}
+	}
+	return false
 }
 
 const errNoMailbox = "no mailbox is set up for this project"
