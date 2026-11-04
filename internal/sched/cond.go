@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/boarding-party/boardingparty/internal/project"
 	"github.com/boarding-party/boardingparty/internal/store"
@@ -167,7 +168,7 @@ func Met(st *store.Store, w store.Wait, r store.Run, now time.Time) (Arrival, bo
 		for i := len(msgs) - 1; i >= 0; i-- { // newest first, so oldest match wins from the end
 			m := msgs[i]
 			if strings.Contains(strings.ToLower(m.From), from) && strings.Contains(strings.ToLower(m.Subject), subj) {
-				return Arrival{Detail: fmt.Sprintf("email %q from %s", m.Subject, m.From), MessageID: m.ID}, true, nil
+				return Arrival{Detail: fmt.Sprintf("email %q from %s", plain(m.Subject, 200), plain(m.From, 200)), MessageID: m.ID}, true, nil
 			}
 		}
 	case "handoff":
@@ -182,6 +183,21 @@ func Met(st *store.Store, w store.Wait, r store.Run, now time.Time) (Arrival, bo
 		}
 	}
 	return Arrival{}, false, nil
+}
+
+// plain makes outside text safe to show an agent: control characters (newlines
+// included) become spaces and it is cut to max runes.
+func plain(s string, max int) string {
+	s = strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return ' '
+		}
+		return r
+	}, s)
+	if r := []rune(s); len(r) > max {
+		s = string(r[:max])
+	}
+	return s
 }
 
 func firstLine(s string, max int) string {
