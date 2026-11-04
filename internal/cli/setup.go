@@ -179,7 +179,7 @@ func checkEgress(ctx context.Context, kube kubernetes.Interface, ns string, c *c
 		return
 	}
 	if err != nil || cm.Data["egressProxy"] != "true" {
-		c.warn("egress proxy is off: no hostname allow-list, agents can reach any HTTPS host")
+		c.warn("egress proxy is off: no hostname allow-list, so the director refuses to start runs (or run it with --no-egress-fence)")
 		return
 	}
 	al, err := kube.CoreV1().ConfigMaps(ns).Get(ctx, egressAllowCM, metav1.GetOptions{})

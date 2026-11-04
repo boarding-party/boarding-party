@@ -47,6 +47,10 @@ var ErrInvalid = errors.New("invalid run request")
 // because a session can read every other session's spec (and so its token).
 var ErrBusy = errors.New("another run is active; Plan 1 runs one at a time")
 
+// ErrNoFence means runs can't start because nothing limits which hosts an
+// agent can reach.
+var ErrNoFence = errors.New("runs are not fenced")
+
 // ErrBadState means Finish was given a state that is not final.
 var ErrBadState = errors.New("finish state must be done, stuck or failed")
 
@@ -78,6 +82,9 @@ type Service struct {
 	// LastFrame returns the run's newest live screen frame, or nil. When set,
 	// a finished run keeps it as the artifact LastFrameName.
 	LastFrame func(runID string) []byte
+	// Fence, when set, must return nil before a run starts: it checks that
+	// agents can reach only the hosts someone allowed.
+	Fence func(ctx context.Context) error
 
 	startMu sync.Mutex // makes the one-active-run check and CreateRun atomic
 }
@@ -107,6 +114,11 @@ func (s *Service) Start(ctx context.Context, persona, story string) (store.Run, 
 	token, err := randHex(32)
 	if err != nil {
 		return store.Run{}, err
+	}
+	if s.Fence != nil {
+		if err := s.Fence(ctx); err != nil {
+			return store.Run{}, fmt.Errorf("%w: %v", ErrNoFence, err)
+		}
 	}
 	r := store.Run{ID: id, Token: token, Persona: persona, Role: role, Story: st,
 		State: store.RunPending, Started: time.Now().UTC()}

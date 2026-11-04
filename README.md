@@ -103,6 +103,15 @@ talked into doing the wrong thing.
   staging hosts and the model API you list. If you point a project at
   production, the pages won't load unless you also allow production hosts.
   Don't.
+- The director won't start a run unless that fence is in place: tiny's egress
+  proxy must be on, and its allow-list can't contain a whole public suffix
+  such as `.com`. You can pass `--no-egress-fence` to the director to skip
+  the check, but then agents can reach any host.
+- Agents don't solve CAPTCHAs or get around bot checks. If one blocks a run,
+  the agent files a bug saying the staging site needs CAPTCHA test keys or a
+  bypass. reCAPTCHA, hCaptcha and Turnstile all publish test keys that
+  always pass; use them on staging.
+- Only test sites you own or have written permission to test.
 - Agents can't reach the admin API at all, because it isn't on any network
   they can see. Through the worker port they can only act on their own run.
 - Each run gets its own token, carried in the agent's MCP URL. It names one
@@ -190,6 +199,8 @@ room for a pool to scale up from zero.
   that pool, and nothing else lands on it. A pool with nodes of at least
   2 CPU and 8GB fits a run; it can scale to zero between runs, and spot
   nodes work if a lost run now and then is fine.
+- tiny's egress add-on (`egressProxy: "true"` in the `tiny-settings`
+  ConfigMap). The director refuses to start runs without it.
 - Kubernetes with a CNI that enforces NetworkPolicy. Without that, the
   allow-list is only advisory.
 - tiny v0.12.1 or later. Earlier versions lack `spec.mcpServers`,

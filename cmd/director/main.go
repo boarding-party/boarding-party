@@ -48,6 +48,7 @@ type config struct {
 	RunTimeout       time.Duration
 	MaxArtifactBytes int64
 	TinyImageTag     string
+	NoEgressFence    bool
 	AdminToken       string // from $BP_ADMIN_TOKEN, never a flag (flags show in ps)
 }
 
@@ -141,6 +142,7 @@ func run() error {
 	flag.StringVar(&cfg.WorkerAddr, "worker-addr", ":8080", "worker listen address")
 	flag.DurationVar(&cfg.RunTimeout, "run-timeout", runs.DefaultRunTimeout, "maximum run duration")
 	flag.Int64Var(&cfg.MaxArtifactBytes, "max-artifact-bytes", 500<<20, "maximum artifact size in bytes")
+	flag.BoolVar(&cfg.NoEgressFence, "no-egress-fence", false, "start runs even when tiny's egress proxy is off or its allow-list admits whole domains (agents can then reach any host)")
 	flag.StringVar(&cfg.TinyImageTag, "tiny-image-tag", "", "tiny agent/sidecar image tag, used only when build info has no tiny version (e.g. 0.11.0)")
 	flag.Parse()
 
@@ -196,6 +198,11 @@ func run() error {
 		Artifacts: artifacts.NewFS(filepath.Join(cfg.Data, "artifacts"), cfg.MaxArtifactBytes),
 		Files:     files.New(filepath.Join(cfg.Data, "files")),
 		Launcher:  tl,
+		Fence:     tl.CheckFence,
+	}
+	if cfg.NoEgressFence {
+		log.Print("warning: --no-egress-fence: runs start without the egress fence, agents can reach any host")
+		svc.Fence = nil
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, os.Interrupt)

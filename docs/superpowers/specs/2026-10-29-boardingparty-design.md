@@ -307,6 +307,41 @@ accounts. Email works for any site that can send to the project's real mailbox
 addresses; a role whose sign-up rejects those addresses uses pre-made
 accounts.
 
+### 5.3 Misuse
+boardingparty drives a real browser at real sites, so it can be pointed at
+sites the user doesn't own. The self-hosted release can't prevent that (it is
+open source; anyone can delete a check), so it makes misuse a deliberate act
+and a poor fit:
+- The egress fence is required. The director refuses to start a run unless
+  tiny's egress proxy is on and its allow-list admits no whole public suffix
+  (`.com`, `.co.uk`). `--no-egress-fence` turns the check off and logs a
+  warning.
+- Agents never solve or get around CAPTCHAs, bot checks or other
+  anti-automation blocks, and never hand them to a human to solve. Hitting one
+  is reported as a bug ("the staging site needs CAPTCHA test keys or a
+  bypass") and the run ends stuck. Staging sites use the providers' test keys
+  (reCAPTCHA, hCaptcha and Turnstile all publish keys that always pass).
+- Low concurrency and human-speed pacing are product limits (§5), not
+  defaults to tune away; load, scraping and mass sign-up tools exist
+  elsewhere.
+- Docs state the rule: test only sites you own or have written permission to
+  test.
+
+A hosted version (deferred, §2) carries the risk itself and enforces it:
+1. Domain ownership proof before any run: a DNS TXT record or a
+   `/.well-known/boardingparty.txt` token for every host in Sites and Extra
+   hosts, except a short list of known services (payment test modes, mail
+   providers). Re-checked daily; a lost proof stops runs.
+2. A per-tenant egress allow-list built only from verified hosts, enforced at
+   the proxy, so a crafted story can't reach anything else.
+3. Identifiable traffic: a `BoardingParty/<tenant>` User-Agent suffix and
+   published egress IP ranges, so site owners can recognise and block it.
+4. Per-tenant rate limits: runs per day, parallel personas, identities and
+   inboxes per project.
+5. A card on file and terms with an acceptable-use clause, an `abuse@`
+   contact, a per-tenant kill switch, and audit logs (who ran what against
+   which host, with recordings) kept for complaints.
+
 ## 6. Open questions and risks
 
 1. Resolved: worker ↔ director uses MCP through a new generic

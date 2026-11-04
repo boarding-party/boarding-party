@@ -81,7 +81,7 @@ func TestPreflight(t *testing.T) {
 		{"oauth only", crdWith(true), []runtime.Object{nsObj, saObj, secret(map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": apiKey}), proxyOn, allow}, false,
 			[]string{"! secret tiny-agent-env has only CLAUDE_CODE_OAUTH_TOKEN", "metered ANTHROPIC_API_KEY"}},
 		{"proxy off", crdWith(true), []runtime.Object{nsObj, saObj, secret(map[string]string{"ANTHROPIC_API_KEY": apiKey})}, false,
-			[]string{"! egress proxy is off", "any HTTPS host"}},
+			[]string{"! egress proxy is off", "refuses to start runs"}},
 		{"all good", crdWith(true), []runtime.Object{nsObj, saObj, secret(map[string]string{"ANTHROPIC_API_KEY": apiKey}), proxyOn, allow}, false,
 			[]string{"✓ CRD", "✓ namespace", "✓ service account", "✓ secret tiny-agent-env has ANTHROPIC_API_KEY",
 				"allowed hosts: api.anthropic.com, .github.com", "! network policies are only enforced if your CNI enforces them"}},

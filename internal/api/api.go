@@ -109,6 +109,8 @@ func fail(w http.ResponseWriter, err error) {
 		http.Error(w, "not found", http.StatusNotFound)
 	case errors.Is(err, runs.ErrBusy):
 		http.Error(w, runs.ErrBusy.Error(), http.StatusConflict)
+	case errors.Is(err, runs.ErrNoFence):
+		http.Error(w, err.Error(), http.StatusPreconditionFailed)
 	case errors.Is(err, artifacts.ErrBadName):
 		http.Error(w, "bad name", http.StatusBadRequest)
 	case errors.Is(err, artifacts.ErrTooLarge):

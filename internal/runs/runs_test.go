@@ -125,6 +125,21 @@ func TestStartCreatesRunningRun(t *testing.T) {
 	}
 }
 
+func TestStartRefusesWithoutFence(t *testing.T) {
+	svc, fl := newSvc(t)
+	svc.Fence = func(context.Context) error { return errors.New("proxy is off") }
+	_, err := svc.Start(context.Background(), "ann", "checkout")
+	if !errors.Is(err, ErrNoFence) || !strings.Contains(err.Error(), "proxy is off") {
+		t.Fatalf("Start = %v, want ErrNoFence with the reason", err)
+	}
+	if runs, _ := svc.Store.Runs(10); len(runs) != 0 {
+		t.Fatalf("unfenced start stored runs: %+v", runs)
+	}
+	if len(fl.started) != 0 {
+		t.Fatalf("unfenced start launched: %v", fl.started)
+	}
+}
+
 func TestStartLauncherErrorFailsRun(t *testing.T) {
 	svc, fl := newSvc(t)
 	fl.startErr = errors.New("boom")
