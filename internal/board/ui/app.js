@@ -91,7 +91,10 @@ function storiesFor(project, personaName) {
 
 function parseRoute(hash) {
   const parts = (hash || '').replace(/^#\/?/, '').split('/');
-  if (parts[0] === 'project') return { page: 'project' };
+  if (parts[0] === 'project') {
+    const section = ['general', 'sites', 'inbox', 'files', 'roles'].includes(parts[1]) ? parts[1] : 'general';
+    return { page: 'project', section, roleN: section === 'roles' && /^[1-9][0-9]*$/.test(parts[2] || '') ? parts[2] : '' };
+  }
   if (parts[0] === 'inbox') return { page: 'inbox' };
   if (parts[0] === 'runs' && parts[1]) {
     try { return { page: 'run', id: decodeURIComponent(parts[1]) }; } catch (_) { /* fall through */ }
@@ -201,7 +204,7 @@ function App() {
       <main>
         <${RunStrip} director=${director} active=${active} />
         ${route.page === 'run' ? html`<${RunPage} key=${route.id} id=${route.id} onChange=${loadRuns} />`
-          : route.page === 'project' ? html`<${ProjectPage} onSaved=${loadProject} onDirty=${onDirty} />`
+          : route.page === 'project' ? html`<${ProjectPage} section=${route.section} roleN=${route.roleN} onSaved=${loadProject} onDirty=${onDirty} />`
           : route.page === 'inbox' ? html`<${InboxPage} project=${project} />`
           : html`<${RunsPage} project=${project} projectErr=${projectErr} runs=${runs} runsErr=${runsErr}
                     active=${active} onStarted=${loadRuns} />`}
@@ -449,7 +452,7 @@ function InboxPage({ project }) {
   return html`
     <section class="page">
       <h1>Inbox</h1>
-      <p class="lede">Mail sent to the personas' addresses. The mailbox is set up on the <a href="#/project">Project</a> page.</p>
+      <p class="lede">Mail sent to the personas' addresses. The mailbox is set up on the <a href="#/project/inbox">Project</a> page.</p>
       <div class="stack">
         <div class="row inboxbar">
           <div class="field">
@@ -665,6 +668,7 @@ function RunPage({ id, onChange }) {
               <dt>Started</dt><dd>${fmtFull(run.started) || '—'}</dd>
               <dt>Finished</dt><dd>${fmtFull(run.finished) || '—'}</dd>
               ${took ? html`<dt>Duration</dt><dd>${took}</dd>` : null}
+              ${usage && usage.byModel ? html`<dt>Model</dt><dd>${fmtModels(usage.byModel)}</dd>` : null}
               ${usage ? html`<dt>Tokens</dt><dd>${fmtUsage(usage)}</dd>` : null}
               ${run.session ? html`<dt>Session</dt><dd><code>${run.session}</code></dd>` : null}
             </dl>
@@ -693,6 +697,14 @@ function fmtUsage(u) {
   const cached = read ? Math.round(((u.cacheRead || 0) / read) * 100) : 0;
   const turns = u.turns === 1 ? '1 turn' : `${u.turns || 0} turns`;
   return `${fmtCount(read)} read (${cached}% from cache), ${fmtCount(u.output || 0)} written, ${turns}`;
+}
+
+// fmtModels names the models that served the run, the busiest first; turn
+// counts appear only when there is more than one.
+function fmtModels(byModel) {
+  const rows = Object.entries(byModel).sort((a, b) => (b[1].turns || 0) - (a[1].turns || 0));
+  if (rows.length === 1) return rows[0][0];
+  return rows.map(([m, c]) => `${m} (${c.turns === 1 ? '1 turn' : `${c.turns || 0} turns`})`).join(', ');
 }
 
 function fmtCount(n) {

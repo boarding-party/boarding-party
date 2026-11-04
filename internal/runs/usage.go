@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"regexp"
 	"time"
 
 	"github.com/boarding-party/boardingparty/internal/artifacts"
@@ -23,12 +24,28 @@ const usageGrace = 2 * time.Minute
 // Claude Code's transcript. Each turn re-reads the whole conversation, so
 // Input+CacheRead+CacheWrite is every token the model read.
 type Usage struct {
+	Counts
+	// ByModel splits the counts by the model that served each turn: Claude
+	// Code may hand side work to a smaller model.
+	ByModel map[string]Counts `json:"byModel,omitempty"`
+}
+
+// Counts are token totals over some turns.
+type Counts struct {
 	Input      uint64 `json:"input"`
 	Output     uint64 `json:"output"`
 	CacheRead  uint64 `json:"cacheRead"`
 	CacheWrite uint64 `json:"cacheWrite"`
 	Turns      uint64 `json:"turns"`
 }
+
+// ErrBadUsage means a usage report names too many models or a malformed one.
+var ErrBadUsage = errors.New("bad usage report")
+
+// maxUsageModels bounds a report: a run uses one or two models.
+const maxUsageModels = 8
+
+var modelID = regexp.MustCompile(`^[a-z0-9][a-z0-9.@_-]{0,99}$`)
 
 // SaveUsage replaces the usage of the run holding token. The worker sends a
 // running total, so the newest report wins.
@@ -43,6 +60,14 @@ func (s *Service) SaveUsage(token string, u Usage, now time.Time) error {
 	if r.State != store.RunPending && r.State != store.RunRunning &&
 		(r.Finished.IsZero() || now.Sub(r.Finished) > usageGrace) {
 		return ErrNotActive
+	}
+	if len(u.ByModel) > maxUsageModels {
+		return ErrBadUsage
+	}
+	for m := range u.ByModel {
+		if !modelID.MatchString(m) {
+			return ErrBadUsage
+		}
 	}
 	b, err := json.Marshal(u)
 	if err != nil {

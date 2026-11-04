@@ -108,6 +108,8 @@ func fail(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, store.ErrNotFound), errors.Is(err, artifacts.ErrNotFound), errors.Is(err, runs.ErrNotActive):
 		http.Error(w, "not found", http.StatusNotFound)
+	case errors.Is(err, runs.ErrBadUsage):
+		http.Error(w, err.Error(), http.StatusBadRequest)
 	case errors.Is(err, runs.ErrBusy):
 		http.Error(w, runs.ErrBusy.Error(), http.StatusConflict)
 	case errors.Is(err, runs.ErrAllowList):

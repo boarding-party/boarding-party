@@ -10,7 +10,7 @@ func TestPutUsage(t *testing.T) {
 	run := startRun(t, srv, svc)
 
 	for body, want := range map[string]int{
-		`{"input":5,"output":6,"cacheRead":7,"cacheWrite":8,"turns":2}`: 204,
+		`{"input":5,"output":6,"cacheRead":7,"cacheWrite":8,"turns":2,"byModel":{"claude-sonnet-5-5":{"input":5,"turns":2}}}`: 204,
 		`{"input":-1}`: 400, // counts are never negative
 		`{"tokens":1}`: 400, // unknown fields are refused
 		`not json`:     400,

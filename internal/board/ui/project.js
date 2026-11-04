@@ -1,4 +1,5 @@
-// Project editor: sites, roles, personas, stories. Saves the whole project
+// Project editor: one draft shown as sections (general, sites and hosts,
+// inbox, test files, roles and a page per role). Saves the whole project
 // with PUT /api/project (JSON); "Import YAML" posts a pasted file as-is.
 //
 // Field names must match internal/project/project.go exactly: the director
@@ -114,7 +115,7 @@ function siteWarning(s) {
 
 // ---- page ---------------------------------------------------------------
 
-export function ProjectPage({ onSaved, onDirty }) {
+export function ProjectPage({ section = 'general', roleN = '', onSaved, onDirty }) {
   const [state, setState] = useState('loading'); // loading | ready | error
   const [loadErr, setLoadErr] = useState('');
   const [isNew, setIsNew] = useState(false);
@@ -225,72 +226,118 @@ export function ProjectPage({ onSaved, onDirty }) {
       <div style="margin-top:12px"><button class="btn" type="button" onClick=${() => { setState('loading'); load(); }}>Try again</button></div></section>`;
   }
 
+  const cur = toJSON(draft);
+  const base = baseline ? JSON.parse(baseline) : {};
+  const changed = (...keys) => keys.some((k) => JSON.stringify(cur[k]) !== JSON.stringify(base[k]));
+  const roleChanged = (i) => JSON.stringify(cur.roles[i]) !== JSON.stringify((base.roles || [])[i]);
+  const roleIndex = Number(roleN) - 1;
+  const role = section === 'roles' && roleN ? draft.roles[roleIndex] : null;
+
+  const addRole = () => {
+    const n = draft.roles.length + 1;
+    edit((d) => { d.roles.push(newRole()); });
+    location.hash = `#/project/roles/${n}`;
+  };
+  const removeRole = async (r) => {
+    const busy = r.name.trim() || r.description.trim() || r.personas.some(personaHasContent) || r.stories.some(storyHasContent);
+    if (busy && !(await confirmDialog(`Remove the role ${r.name.trim() ? `"${r.name.trim()}"` : 'without a name'} with its personas and stories?`, { confirm: 'Remove role', danger: true }))) return;
+    edit((d) => { d.roles.splice(d.roles.findIndex((x) => x.id === r.id), 1); });
+    location.hash = '#/project/roles';
+  };
+
+  let body;
+  if (section === 'sites') {
+    body = html`<div class="card">
+        <h2>Sites and hosts</h2>
+        <${ListField} label="Sites" hint="Staging URLs the cast may open, starting with https://. Never point it at production."
+          rows=${draft.sites} placeholder="https://staging.example.com" addLabel="Add site" warn=${siteWarning}
+          onChange=${(fn) => edit((d) => fn(d.sites))} />
+        <${ListField} label="Extra hosts" hint="Other hosts the site loads from or links to, such as fonts, a CDN, a sign-in or payment provider. Runs can reach only these and the sites. Hosts you allow from a run's blocked list land here; remove one to block it again."
+          rows=${draft.extraHosts} placeholder="cdn.example.com" addLabel="Add host"
+          onChange=${(fn) => edit((d) => fn(d.extraHosts))} />
+      </div>`;
+  } else if (section === 'inbox') {
+    body = html`<${InboxCard} allowFrom=${draft.allowFrom} authServId=${draft.authServId} onChange=${(fn) => edit((d) => fn(d))} />`;
+  } else if (section === 'files') {
+    body = html`<${FilesCard} personas=${savedPersonas(baseline)} />`;
+  } else if (section === 'roles' && roleN) {
+    body = role
+      ? html`<p class="crumb"><a href="#/project/roles">Roles</a></p>
+        <${RoleCard} key=${role.id} role=${role} n=${roleIndex + 1} profileFields=${profileFields}
+          onChange=${(fn) => edit((d) => fn(d.roles[roleIndex]))} onRemove=${() => removeRole(role)} />`
+      : html`<div class="empty"><b>No such role</b>It may have been removed. <a href="#/project/roles">See all roles</a>.</div>`;
+  } else if (section === 'roles') {
+    body = html`<div class="card">
+        <div class="row between"><h2>Roles</h2><button class="btn" type="button" onClick=${addRole}>Add role</button></div>
+        <p class="hint">A role is a kind of user, such as a customer or an admin. Each has personas who play it and stories they try to finish.</p>
+        ${draft.roles.length
+          ? html`<table class="roles">
+              <thead><tr><th>Role</th><th>Personas</th><th>Stories</th></tr></thead>
+              <tbody>${draft.roles.map((r, i) => html`<tr key=${r.id}>
+                <td><a href=${`#/project/roles/${i + 1}`}>${r.name.trim() || 'Unnamed role'}</a>${roleChanged(i) ? html` <span class="mark" title="Unsaved changes"></span>` : null}
+                  ${r.description.trim() ? html`<div class="small muted">${r.description.trim()}</div>` : null}</td>
+                <td>${r.personas.map((p) => p.name.trim()).filter(Boolean).join(', ') || html`<span class="muted">None</span>`}</td>
+                <td>${r.stories.map((x) => x.name.trim()).filter(Boolean).join(', ') || html`<span class="muted">None</span>`}</td>
+              </tr>`)}</tbody></table>`
+          : html`<div class="empty"><b>No roles yet</b>Add one, then give it at least one persona and one story.</div>`}
+      </div>`;
+  } else {
+    body = html`<div class="card">
+        <h2>General</h2>
+        <div class="fields">
+          <div class="field">
+            <label for="pj-name">Project name</label>
+            <input id="pj-name" value=${draft.name} placeholder="shop-staging"
+              onInput=${(e) => { const v = e.currentTarget.value; edit((d) => { d.name = v; }); }} />
+          </div>
+          <div class="field">
+            <label for="pj-model">Model</label>
+            <input id="pj-model" value=${draft.model} placeholder="Default"
+              onInput=${(e) => { const v = e.currentTarget.value; edit((d) => { d.model = v; }); }} />
+            <span class="hint">Leave empty to use the default model.</span>
+          </div>
+          <div class="field">
+            <label for="pj-pool">Node pool</label>
+            <input id="pj-pool" value=${draft.nodePool} placeholder="boardingparty.io/run=true"
+              onInput=${(e) => { const v = e.currentTarget.value; edit((d) => { d.nodePool = v; }); }} />
+            <span class="hint">Node label for the pool runs use, as key=value. The pool needs the same key=value as a NoSchedule taint. Leave empty to run on any node.</span>
+          </div>
+        </div>
+      </div>`;
+  }
+
+  const link = (href, label, on, edited, cls = '') => html`<a href=${href} class=${[cls, on ? 'on' : ''].join(' ').trim()} aria-current=${on ? 'page' : undefined}>
+      <span class="label">${label}</span>${edited ? html`<span class="mark" title="Unsaved changes"></span>` : null}</a>`;
+
   return html`
     <form class="page editor" onSubmit=${save} onKeyDown=${noEnterSubmit} ref=${top}>
       <div class="row between head">
         <div>
           <h1>${isNew ? 'Set up your project' : 'Project'}</h1>
-          <p class="lede">The site the cast may open, and who is in it. Saving replaces the whole project.</p>
+          <p class="lede">The site the cast may open, and who is in it. Save stores every section at once.</p>
         </div>
-        <div class="row">
-          ${dirty ? html`<span class="small muted">Unsaved changes</span>` : null}
-          <button class="btn" type="button" aria-expanded=${importOpen} onClick=${() => setImportOpen(!importOpen)}>Import YAML</button>
-          <button class="btn primary" type="submit" disabled=${saving}>${saving ? 'Saving…' : 'Save'}</button>
-        </div>
+        <button class="btn" type="button" aria-expanded=${importOpen} onClick=${() => setImportOpen(!importOpen)}>Import YAML</button>
       </div>
 
       ${saveErr ? html`<div class="note bad banner" role="alert"><b>Not saved.</b> ${saveErr}</div>` : null}
       ${importOpen ? html`<${ImportYAML} dirty=${dirty} onDone=${imported} onCancel=${() => setImportOpen(false)} />` : null}
 
-      <div class="stack">
-        <div class="card">
-          <h2>Site</h2>
-          <div class="fields">
-            <div class="field">
-              <label for="pj-name">Project name</label>
-              <input id="pj-name" value=${draft.name} placeholder="shop-staging"
-                onInput=${(e) => { const v = e.currentTarget.value; edit((d) => { d.name = v; }); }} />
-            </div>
-            <div class="field">
-              <label for="pj-model">Model</label>
-              <input id="pj-model" value=${draft.model} placeholder="Default"
-                onInput=${(e) => { const v = e.currentTarget.value; edit((d) => { d.model = v; }); }} />
-              <span class="hint">Leave empty to use the default model.</span>
-            </div>
-            <div class="field">
-              <label for="pj-pool">Node pool</label>
-              <input id="pj-pool" value=${draft.nodePool} placeholder="boardingparty.io/run=true"
-                onInput=${(e) => { const v = e.currentTarget.value; edit((d) => { d.nodePool = v; }); }} />
-              <span class="hint">Node label for the pool runs use, as key=value. The pool needs the same key=value as a NoSchedule taint. Leave empty to run on any node.</span>
-            </div>
+      <div class="projgrid">
+        <nav class="subnav" aria-label="Project sections">
+          ${link('#/project/general', 'General', section === 'general', changed('name', 'model', 'nodePool'))}
+          ${link('#/project/sites', 'Sites and hosts', section === 'sites', changed('sites', 'extraHosts'))}
+          ${link('#/project/inbox', 'Inbox', section === 'inbox', changed('inbox'))}
+          ${link('#/project/files', 'Test files', section === 'files', false)}
+          ${link('#/project/roles', html`Roles <span class="count">${draft.roles.length}</span>`, section === 'roles' && !roleN,
+            JSON.stringify(cur.roles) !== JSON.stringify(base.roles || []))}
+          ${draft.roles.map((r, i) => link(`#/project/roles/${i + 1}`, r.name.trim() || 'Unnamed role',
+            section === 'roles' && roleIndex === i, roleChanged(i), 'child'))}
+          <div class="savebox">
+            <button class="btn primary" type="submit" disabled=${saving}>${saving ? 'Saving…' : 'Save'}</button>
+            <span class="small muted">${dirty ? 'Unsaved changes' : 'All saved'}</span>
           </div>
-          <${ListField} label="Sites" hint="Staging URLs the cast may open, starting with https://. Never point it at production."
-            rows=${draft.sites} placeholder="https://staging.example.com" addLabel="Add site" warn=${siteWarning}
-            onChange=${(fn) => edit((d) => fn(d.sites))} />
-          <${ListField} label="Extra hosts" hint="Other hosts the site loads from or links to, such as fonts, a CDN, a sign-in or payment provider. Runs can reach only these and the sites."
-            rows=${draft.extraHosts} placeholder="cdn.example.com" addLabel="Add host"
-            onChange=${(fn) => edit((d) => fn(d.extraHosts))} />
-        </div>
-
-        <${InboxCard} allowFrom=${draft.allowFrom} authServId=${draft.authServId}
-          onChange=${(fn) => edit((d) => fn(d))} />
-
-        <${FilesCard} personas=${savedPersonas(baseline)} />
-
-        ${draft.roles.map((r, i) => html`<${RoleCard} key=${r.id} role=${r} n=${i + 1} profileFields=${profileFields}
-            onChange=${(fn) => edit((d) => fn(d.roles[i]))}
-            onRemove=${async () => {
-              const busy = r.name.trim() || r.description.trim() || r.personas.some(personaHasContent) || r.stories.some(storyHasContent);
-              if (busy && !(await confirmDialog(`Remove the role ${r.name.trim() ? `"${r.name.trim()}"` : 'without a name'} with its personas and stories?`, { confirm: 'Remove role', danger: true }))) return;
-              edit((d) => { d.roles.splice(d.roles.findIndex((x) => x.id === r.id), 1); });
-            }} />`)}
-
-        ${draft.roles.length ? null : html`<div class="empty"><b>No roles yet</b>A role is a kind of user, such as a customer or an admin. Each has personas and stories.</div>`}
-
-        <div class="row between">
-          <button class="btn" type="button" onClick=${() => edit((d) => { d.roles.push(newRole()); })}>Add role</button>
-          <button class="btn primary" type="submit" disabled=${saving}>${saving ? 'Saving…' : 'Save'}</button>
-        </div>
+        </nav>
+        <div class="stack">${body}</div>
       </div>
       ${toast ? html`<div class="toast" role="status">${toast}</div>` : null}
     </form>`;

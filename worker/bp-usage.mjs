@@ -12,7 +12,8 @@ const root = join(process.env.CLAUDE_CONFIG_DIR || join(process.env.HOME || "/wo
 
 const files = new Map(); // path -> { offset, rest }
 const seen = new Set(); // message ids already counted: one message spans several lines
-const total = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, turns: 0 };
+const zero = () => ({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0, turns: 0 });
+const total = { ...zero(), byModel: {} };
 let sent = "";
 
 async function transcripts(dir) {
@@ -37,11 +38,17 @@ function count(line) {
   const id = m.message.id || m.requestId || m.uuid;
   if (seen.has(id)) return;
   seen.add(id);
-  total.input += u.input_tokens || 0;
-  total.output += u.output_tokens || 0;
-  total.cacheRead += u.cache_read_input_tokens || 0;
-  total.cacheWrite += u.cache_creation_input_tokens || 0;
-  total.turns += 1;
+  let model = String(m.message.model || "");
+  if (model === "<synthetic>") return; // Claude Code's own placeholder, no model call
+  if (!/^[a-z0-9][a-z0-9.@_-]{0,99}$/.test(model)) model = "other"; // the director takes model ids only
+  const per = (total.byModel[model] ||= zero());
+  for (const c of [total, per]) {
+    c.input += u.input_tokens || 0;
+    c.output += u.output_tokens || 0;
+    c.cacheRead += u.cache_read_input_tokens || 0;
+    c.cacheWrite += u.cache_creation_input_tokens || 0;
+    c.turns += 1;
+  }
 }
 
 async function read(path) {
