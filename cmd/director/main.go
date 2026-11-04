@@ -36,6 +36,7 @@ import (
 	"github.com/boarding-party/boardingparty/internal/live"
 	"github.com/boarding-party/boardingparty/internal/mcpserver"
 	"github.com/boarding-party/boardingparty/internal/runs"
+	"github.com/boarding-party/boardingparty/internal/sched"
 	"github.com/boarding-party/boardingparty/internal/store"
 )
 
@@ -228,7 +229,11 @@ func run() error {
 	if err := svc.Reconcile(ctx, time.Now(), cfg.RunTimeout); err != nil {
 		log.Printf("startup reconcile: %v", err)
 	}
+	// OnFinish is set before Watch starts so the goroutines never race on it.
+	sch := &sched.Scheduler{Store: st, Runs: svc}
+	svc.OnFinish = sch.Poke
 	go svc.Watch(ctx, runs.DefaultPollInterval, cfg.RunTimeout)
+	go sch.Run(ctx)
 
 	go sweepLive(ctx, hub, 10*time.Second)
 	mail := &inbox.Service{Store: st, Secrets: inbox.NewSecretStore(kc, cfg.Namespace)}
