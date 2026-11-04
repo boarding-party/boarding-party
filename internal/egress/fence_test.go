@@ -56,7 +56,7 @@ func TestCheckFence(t *testing.T) {
 
 func TestWideEntries(t *testing.T) {
 	got := wideEntries("*\n.\n.co.uk\n.uk # all of it\n.example.co.uk\nexample.com\n# .com\n.githubusercontent.com\n.github.io\n.corp\n")
-	want := []string{"*", ".", ".co.uk", ".uk", ".corp"}
+	want := []string{"*", ".", ".co.uk", ".uk", ".github.io", ".corp"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("wideEntries = %v, want %v", got, want)
 	}

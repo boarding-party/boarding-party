@@ -77,11 +77,14 @@ func wideEntries(list string) []string {
 	return bad
 }
 
-// wholeTLD reports a domain ending anyone can register under: an ICANN
-// public suffix (com, co.uk) or a single label. Private suffixes on the list
-// (githubusercontent.com, github.io) belong to one company and are allowed;
-// tiny's default allow-list carries .githubusercontent.com.
+// tinyDefaultSuffixes are public suffixes tiny's own default allow-list
+// admits. githubusercontent.com serves repository files (package installs);
+// any other suffix (github.io, vercel.app, co.uk) hosts anyone's site.
+var tinyDefaultSuffixes = map[string]bool{"githubusercontent.com": true}
+
+// wholeTLD reports a domain ending anyone can put a site under: any entry on
+// the public suffix list, ICANN or private, or a single label.
 func wholeTLD(h string) bool {
-	suffix, icann := publicsuffix.PublicSuffix(h)
-	return suffix == h && (icann || !strings.Contains(h, "."))
+	suffix, _ := publicsuffix.PublicSuffix(h)
+	return suffix == h && !tinyDefaultSuffixes[h]
 }

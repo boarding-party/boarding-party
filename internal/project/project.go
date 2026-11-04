@@ -297,7 +297,7 @@ func publicHostProblem(h string) string {
 			return "is an internal name; runs may reach only public hosts"
 		}
 	}
-	if suffix, icann := publicsuffix.PublicSuffix(h); suffix == h && icann {
+	if suffix, _ := publicsuffix.PublicSuffix(h); suffix == h {
 		return "is a whole domain ending; name the host, such as fonts.gstatic.com"
 	}
 	return ""
