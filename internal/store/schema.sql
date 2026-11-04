@@ -69,3 +69,18 @@ CREATE TABLE IF NOT EXISTS queue (
   reason  TEXT NOT NULL DEFAULT '',
   created INTEGER NOT NULL DEFAULT 0
 );
+CREATE TABLE IF NOT EXISTS waits (
+  run_id   TEXT PRIMARY KEY,
+  kind     TEXT NOT NULL DEFAULT '',
+  sender   TEXT NOT NULL DEFAULT '',
+  subject  TEXT NOT NULL DEFAULT '',
+  role     TEXT NOT NULL DEFAULT '',
+  story    TEXT NOT NULL DEFAULT '',
+  at       INTEGER NOT NULL DEFAULT 0,
+  began    INTEGER NOT NULL DEFAULT 0,
+  deadline INTEGER NOT NULL DEFAULT 0,
+  status   TEXT NOT NULL,
+  detail   TEXT NOT NULL DEFAULT '',
+  ended    INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS waits_status ON waits(status);

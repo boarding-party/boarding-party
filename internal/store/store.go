@@ -401,11 +401,13 @@ func (s *Store) Unfollowed() ([]Run, error) {
 	return s.queryRuns(`SELECT ` + runCols + ` FROM runs WHERE state IN ('done','waiting') AND followed = 0 ORDER BY finished, rowid`)
 }
 
-func (s *Store) AddBug(b Bug) error {
-	_, err := s.db.Exec(`INSERT INTO bugs(id, run_id, summary, step, evidence, severity, note, created) VALUES(?,?,?,?,?,?,?,?)`,
+func insertBug(x execer, b Bug) error {
+	_, err := x.Exec(`INSERT INTO bugs(id, run_id, summary, step, evidence, severity, note, created) VALUES(?,?,?,?,?,?,?,?)`,
 		b.ID, b.RunID, b.Summary, b.Step, b.Evidence, b.Severity, b.Note, ts(b.Created))
 	return err
 }
+
+func (s *Store) AddBug(b Bug) error { return insertBug(s.db, b) }
 
 func (s *Store) Bugs(runID string) ([]Bug, error) {
 	rows, err := s.db.Query(`SELECT id, run_id, summary, step, evidence, severity, note, created FROM bugs WHERE run_id = ? ORDER BY created, rowid`, runID)
