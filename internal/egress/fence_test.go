@@ -35,7 +35,7 @@ func TestCheckFence(t *testing.T) {
 		{"no settings", nil, "proxy is off"},
 		{"proxy off", []client.Object{cm(tinySettings, map[string]string{"egressProxy": "false"}), cm(egressAllowCM, nil)}, "proxy is off"},
 		{"no allow-list", []client.Object{on}, "can't read allow-list"},
-		{"fenced", []client.Object{on, cm(egressAllowCM, map[string]string{"hosts": "staging.example.com\n.example.com # subdomains\napi.anthropic.com\n"})}, ""},
+		{"fenced", []client.Object{on, cm(egressAllowCM, map[string]string{"hosts": "staging.example.com\n.example.com # subdomains\napi.anthropic.com\n.githubusercontent.com\n"})}, ""},
 		{"public suffix", []client.Object{on, cm(egressAllowCM, map[string]string{"hosts": "staging.example.com\n.com\n"})}, "admits whole domains: .com"},
 	}
 	for _, c := range cases {
@@ -55,8 +55,8 @@ func TestCheckFence(t *testing.T) {
 }
 
 func TestWideEntries(t *testing.T) {
-	got := wideEntries("*\n.\n.co.uk\n.uk # all of it\n.example.co.uk\nexample.com\n# .com\n")
-	want := []string{"*", ".", ".co.uk", ".uk"}
+	got := wideEntries("*\n.\n.co.uk\n.uk # all of it\n.example.co.uk\nexample.com\n# .com\n.githubusercontent.com\n.github.io\n.corp\n")
+	want := []string{"*", ".", ".co.uk", ".uk", ".corp"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("wideEntries = %v, want %v", got, want)
 	}

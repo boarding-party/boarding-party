@@ -70,9 +70,18 @@ func wideEntries(list string) []string {
 		if !strings.HasPrefix(h, ".") {
 			continue
 		}
-		if suffix, _ := publicsuffix.PublicSuffix(h[1:]); suffix == h[1:] {
+		if wholeTLD(h[1:]) {
 			bad = append(bad, h)
 		}
 	}
 	return bad
+}
+
+// wholeTLD reports a domain ending anyone can register under: an ICANN
+// public suffix (com, co.uk) or a single label. Private suffixes on the list
+// (githubusercontent.com, github.io) belong to one company and are allowed;
+// tiny's default allow-list carries .githubusercontent.com.
+func wholeTLD(h string) bool {
+	suffix, icann := publicsuffix.PublicSuffix(h)
+	return suffix == h && (icann || !strings.Contains(h, "."))
 }
