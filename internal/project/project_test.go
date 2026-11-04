@@ -181,7 +181,8 @@ func TestExtraHosts(t *testing.T) {
 }
 
 func TestSitesMustBePublic(t *testing.T) {
-	for _, site := range []string{"https://10.0.0.5/", "https://[::1]/", "https://metadata.google.internal/", "https://app.svc/", "https://staging/"} {
+	for _, site := range []string{"https://10.0.0.5/", "https://[::1]/", "https://metadata.google.internal/", "https://app.svc/", "https://staging/",
+		"https://.com/", "https://.example.com/", "https://example.com./", "https://a..example.com/"} {
 		if _, err := LoadJSON([]byte(`{"name":"p","sites":["` + site + `"]}`)); err == nil {
 			t.Errorf("site %q accepted", site)
 		}

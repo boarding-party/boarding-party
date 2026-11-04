@@ -179,7 +179,11 @@ func (p Project) validate() error {
 		if err != nil || u.Scheme != "https" || u.Host == "" {
 			return fmt.Errorf("site %q must be an https:// URL", s)
 		}
-		if why := publicHostProblem(strings.ToLower(u.Hostname())); why != "" {
+		h := strings.ToLower(u.Hostname())
+		if len(validation.IsDNS1123Subdomain(h)) > 0 {
+			return fmt.Errorf("site %q must use a host name such as staging.example.com", s)
+		}
+		if why := publicHostProblem(h); why != "" {
 			return fmt.Errorf("site %q %s", s, why)
 		}
 	}
@@ -274,7 +278,11 @@ var internalSuffixes = []string{".internal", ".local", ".localhost", ".localdoma
 // an IP address or an internal name there would open the cluster's own
 // network (or the cloud metadata server) to the agents.
 func publicHostProblem(h string) string {
-	h = strings.TrimSuffix(h, ".")
+	// A leading dot means "every subdomain" to the proxy; empty labels and a
+	// trailing dot are spellings the checks below would misread.
+	if strings.HasPrefix(h, ".") || strings.HasSuffix(h, ".") || strings.Contains(h, "..") {
+		return "must be a plain host name such as fonts.gstatic.com"
+	}
 	if net.ParseIP(strings.Trim(h, "[]")) != nil || allDigitsLastLabel(h) {
 		return "is an IP address; use the site's host name"
 	}
