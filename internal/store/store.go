@@ -158,7 +158,14 @@ var runsAddedColumns = []struct{ name, ddl string }{
 // version. Runs that already exist become their own journey and count as
 // followed, so the scheduler does not act on history.
 func addColumns(db *sql.DB) (added bool, err error) {
-	rows, err := db.Query(`SELECT name FROM pragma_table_info('runs')`)
+	// One transaction: a crash between the ALTERs and the backfill must not
+	// leave old runs unfollowed. SQLite DDL is transactional.
+	tx, err := db.Begin()
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback()
+	rows, err := tx.Query(`SELECT name FROM pragma_table_info('runs')`)
 	if err != nil {
 		return false, err
 	}
@@ -181,22 +188,22 @@ func addColumns(db *sql.DB) (added bool, err error) {
 		if have[c.name] {
 			continue
 		}
-		if _, err := db.Exec(`ALTER TABLE runs ADD COLUMN ` + c.ddl); err != nil {
-			return added, err
+		if _, err := tx.Exec(`ALTER TABLE runs ADD COLUMN ` + c.ddl); err != nil {
+			return false, err
 		}
 		added = true
 		addedFollowed = addedFollowed || c.name == "followed"
 	}
 	if addedFollowed {
-		if _, err := db.Exec(`UPDATE runs SET followed = 1, journey = CASE journey WHEN '' THEN id ELSE journey END`); err != nil {
-			return added, err
+		if _, err := tx.Exec(`UPDATE runs SET followed = 1, journey = CASE journey WHEN '' THEN id ELSE journey END`); err != nil {
+			return false, err
 		}
 	}
 	// Created here, not in schema.sql: on an old database the column exists only now.
-	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS runs_journey ON runs(journey)`); err != nil {
-		return added, err
+	if _, err := tx.Exec(`CREATE INDEX IF NOT EXISTS runs_journey ON runs(journey)`); err != nil {
+		return false, err
 	}
-	return added, nil
+	return added, tx.Commit()
 }
 
 func (s *Store) Close() error { return s.db.Close() }

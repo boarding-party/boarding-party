@@ -176,3 +176,29 @@ func TestDeleteQueuedMissing(t *testing.T) {
 		t.Fatalf("err %v", err)
 	}
 }
+
+func TestAddColumnsAtomicAndIdempotent(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "bp.db")
+	db, err := sql.Open("sqlite", "file:"+path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	db.SetMaxOpenConns(1)
+	if _, err := db.Exec(`CREATE TABLE runs (id TEXT PRIMARY KEY, token TEXT NOT NULL UNIQUE, state TEXT NOT NULL);
+INSERT INTO runs VALUES('old','t','done')`); err != nil {
+		t.Fatal(err)
+	}
+	added, err := addColumns(db)
+	if err != nil || !added {
+		t.Fatalf("first: %v %v", added, err)
+	}
+	var followed int
+	var journey string
+	if err := db.QueryRow(`SELECT followed, journey FROM runs`).Scan(&followed, &journey); err != nil || followed != 1 || journey != "old" {
+		t.Fatalf("%d %q %v", followed, journey, err)
+	}
+	if added, err := addColumns(db); err != nil || added {
+		t.Fatalf("second: %v %v", added, err)
+	}
+}
