@@ -60,6 +60,7 @@ func (s *Service) Reconcile(ctx context.Context, now time.Time, timeout time.Dur
 			if err := s.Launcher.Stop(ctx, session); err != nil {
 				errs = append(errs, fmt.Errorf("run %s: stop session: %w", r.ID, err))
 			}
+			s.finished()
 		}
 	}
 	if err := s.reap(ctx); err != nil {
@@ -83,7 +84,7 @@ func (s *Service) reap(ctx context.Context) error {
 		case err != nil:
 			errs = append(errs, fmt.Errorf("run %s: %w", runID, err))
 			continue
-		case r.State != store.RunDone && r.State != store.RunStuck && r.State != store.RunFailed:
+		case !r.State.Final():
 			continue
 		}
 		if err := s.Launcher.Stop(ctx, session); err != nil {

@@ -162,6 +162,8 @@ type Service struct {
 	// Egress, when set, keeps the project's hosts on the fence's allow-list
 	// and says which hosts the fence refused during a run.
 	Egress Egress
+	// OnFinish, when set, is called after any run leaves the active states.
+	OnFinish func()
 
 	startMu sync.Mutex // makes the one-active-run check and CreateRun atomic
 }
@@ -176,6 +178,24 @@ func randHex(n int) (string, error) {
 
 // Start creates a run for persona doing story and launches its session.
 func (s *Service) Start(ctx context.Context, persona, story string) (store.Run, error) {
+	return s.start(ctx, persona, story, nil)
+}
+
+// StartQueued starts the run a queue item asks for. The run continues the
+// item's journey and the item is taken in the same transaction that creates
+// the run, so a refused start (busy, no fence) leaves it queued. It returns
+// store.ErrNotFound if the item was already taken.
+func (s *Service) StartQueued(ctx context.Context, q store.Queued) (store.Run, error) {
+	return s.start(ctx, q.Persona, q.Story, &q)
+}
+
+func (s *Service) finished() {
+	if s.OnFinish != nil {
+		s.OnFinish()
+	}
+}
+
+func (s *Service) start(ctx context.Context, persona, story string, q *store.Queued) (store.Run, error) {
 	p, err := s.Store.Project()
 	if err != nil {
 		return store.Run{}, fmt.Errorf("load project: %w", err)
@@ -198,7 +218,12 @@ func (s *Service) Start(ctx context.Context, persona, story string) (store.Run, 
 		}
 	}
 	r := store.Run{ID: id, Token: token, Persona: persona, Role: role, Story: st,
-		State: store.RunPending, Started: time.Now().UTC()}
+		State: store.RunPending, Started: time.Now().UTC(), Journey: id}
+	queueID := ""
+	if q != nil {
+		r.Journey, r.Follows, r.Via, r.Context = q.Journey, q.Follows, q.Via, q.Context
+		queueID = q.ID
+	}
 	s.startMu.Lock()
 	active, err := s.Store.ActiveRuns()
 	if err == nil && len(active) > 0 {
@@ -220,7 +245,7 @@ func (s *Service) Start(ctx context.Context, persona, story string) (store.Run, 
 		}
 	}
 	if err == nil {
-		err = s.Store.CreateRun(r)
+		err = s.Store.CreateRunFrom(r, queueID)
 	}
 	s.startMu.Unlock()
 	if err != nil {
@@ -232,6 +257,7 @@ func (s *Service) Start(ctx context.Context, persona, story string) (store.Run, 
 		if _, ferr := s.Store.FinishRun(r.ID, store.RunFailed, r.Outcome, r.Finished); ferr != nil {
 			return r, errors.Join(err, ferr)
 		}
+		s.finished()
 		return r, err
 	}
 	won, err := s.Store.SetRunSession(r.ID, session)
@@ -281,6 +307,7 @@ func (s *Service) Active(token string) (store.Run, error) {
 
 // Finish records the final state and stops the run's session. Only the
 // caller that actually moves the run out of an active state stops the session.
+// A waiting run needs a condition: see FinishWaiting.
 func (s *Service) Finish(ctx context.Context, token string, state store.RunState, outcome string) error {
 	switch state {
 	case store.RunDone, store.RunStuck, store.RunFailed:
@@ -299,8 +326,33 @@ func (s *Service) Finish(ctx context.Context, token string, state store.RunState
 	if !won {
 		return ErrNotActive
 	}
+	return s.ended(ctx, r, finished)
+}
+
+// FinishWaiting ends the run as waiting on w and stops its session.
+func (s *Service) FinishWaiting(ctx context.Context, token string, w store.Wait, outcome string) error {
+	r, err := s.Active(token)
+	if err != nil {
+		return err
+	}
+	finished := time.Now().UTC()
+	w.RunID = r.ID
+	won, err := s.Store.FinishRunWaiting(r.ID, outcome, finished, w)
+	if err != nil {
+		return err
+	}
+	if !won {
+		return ErrNotActive
+	}
+	return s.ended(ctx, r, finished)
+}
+
+// ended is the tail shared by every finish: keep what the session saw, stop
+// it, and tell the scheduler a slot is free.
+func (s *Service) ended(ctx context.Context, r store.Run, finished time.Time) error {
 	s.keepLastFrame(r.ID)
 	s.keepBlocked(ctx, r, finished)
+	defer s.finished()
 	if r.Session == "" {
 		return nil
 	}

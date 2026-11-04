@@ -188,3 +188,19 @@ func TestReconcileReapsTerminalAndUnknownSessions(t *testing.T) {
 		t.Errorf("active run's session was stopped")
 	}
 }
+
+func TestReapStopsWaitingSession(t *testing.T) {
+	svc, fl := newSvc(t)
+	r, _ := svc.Start(context.Background(), "ann", "checkout")
+	if err := svc.FinishWaiting(context.Background(), r.Token, store.Wait{Kind: "time", At: time.Now().Add(time.Hour), Deadline: time.Now().Add(2 * time.Hour)}, "later"); err != nil {
+		t.Fatal(err)
+	}
+	fl.stopped = nil
+	fl.sessions = map[string]string{r.Session: r.ID}
+	if err := svc.Reconcile(context.Background(), time.Now(), time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	if len(fl.stopped) != 1 || fl.stopped[0] != r.Session {
+		t.Fatalf("stopped: %v", fl.stopped)
+	}
+}

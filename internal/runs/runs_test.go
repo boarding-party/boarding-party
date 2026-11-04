@@ -412,3 +412,116 @@ func TestBlockedLiveThenSaved(t *testing.T) {
 		t.Fatalf("saved blocked = %v, %v", got, err)
 	}
 }
+
+func TestFinishWaitingStopsSession(t *testing.T) {
+	svc, fl := newSvc(t)
+	calls := 0
+	svc.OnFinish = func() { calls++ }
+	r, _ := svc.Start(context.Background(), "ann", "checkout")
+	w := store.Wait{Kind: "email", From: "shop@x.test", Deadline: time.Now().Add(time.Hour)}
+	if err := svc.FinishWaiting(context.Background(), r.Token, w, "waiting for the email"); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := svc.Store.RunByID(r.ID)
+	if got.State != store.RunWaiting || got.Outcome != "waiting for the email" || got.Finished.IsZero() {
+		t.Fatalf("run: %+v", got)
+	}
+	if len(fl.stopped) != 1 || fl.stopped[0] != r.Session {
+		t.Fatalf("stopped: %v", fl.stopped)
+	}
+	if calls != 1 {
+		t.Fatalf("OnFinish called %d times", calls)
+	}
+	if ws, _ := svc.Store.OpenWaits(); len(ws) != 1 || ws[0].RunID != r.ID {
+		t.Fatalf("waits: %+v", ws)
+	}
+	if err := svc.FinishWaiting(context.Background(), r.Token, w, "again"); !errors.Is(err, ErrNotActive) {
+		t.Fatalf("second FinishWaiting = %v", err)
+	}
+}
+
+func TestFinishRejectsWaiting(t *testing.T) {
+	svc, _ := newSvc(t)
+	r, _ := svc.Start(context.Background(), "ann", "checkout")
+	if err := svc.Finish(context.Background(), r.Token, store.RunWaiting, "x"); !errors.Is(err, ErrBadState) {
+		t.Fatalf("Finish waiting = %v", err)
+	}
+}
+
+func queueItem(t *testing.T, svc *Service) store.Queued {
+	t.Helper()
+	q := store.Queued{ID: "q1", Persona: "ann", Role: "buyer", Story: "checkout", Journey: "j1",
+		Follows: "r0", Via: "continue", Context: []byte(`{"kind":"continue"}`), Created: time.Now().UTC()}
+	if err := svc.Store.Enqueue(q); err != nil {
+		t.Fatal(err)
+	}
+	return q
+}
+
+func TestStartQueuedCarriesChain(t *testing.T) {
+	svc, _ := newSvc(t)
+	q := queueItem(t, svc)
+	r, err := svc.StartQueued(context.Background(), q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, _ := svc.Store.RunByID(r.ID)
+	if got.Journey != "j1" || got.Follows != "r0" || got.Via != "continue" || string(got.Context) != `{"kind":"continue"}` || got.State != store.RunRunning {
+		t.Fatalf("run: %+v", got)
+	}
+	if left, _ := svc.Store.Queue(); len(left) != 0 {
+		t.Fatalf("queue: %+v", left)
+	}
+	if _, err := svc.StartQueued(context.Background(), q); !errors.Is(err, store.ErrNotFound) && !errors.Is(err, ErrBusy) {
+		t.Fatalf("taken item: %v", err)
+	}
+}
+
+func TestStartQueuedTakenItem(t *testing.T) {
+	svc, fl := newSvc(t)
+	q := store.Queued{ID: "gone", Persona: "ann", Story: "checkout", Journey: "j1"}
+	if _, err := svc.StartQueued(context.Background(), q); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("got %v, want ErrNotFound", err)
+	}
+	if len(fl.started) != 0 {
+		t.Fatalf("launched: %v", fl.started)
+	}
+}
+
+func TestStartQueuedBusyKeepsItem(t *testing.T) {
+	svc, _ := newSvc(t)
+	if _, err := svc.Start(context.Background(), "ann", "checkout"); err != nil {
+		t.Fatal(err)
+	}
+	q := queueItem(t, svc)
+	if _, err := svc.StartQueued(context.Background(), q); !errors.Is(err, ErrBusy) {
+		t.Fatalf("got %v, want ErrBusy", err)
+	}
+	if left, _ := svc.Store.Queue(); len(left) != 1 {
+		t.Fatalf("queue: %+v", left)
+	}
+}
+
+func TestStartQueuedFenceKeepsItem(t *testing.T) {
+	svc, _ := newSvc(t)
+	svc.Fence = func(context.Context) error { return errors.New("proxy is off") }
+	q := queueItem(t, svc)
+	if _, err := svc.StartQueued(context.Background(), q); !errors.Is(err, ErrNoFence) {
+		t.Fatalf("got %v, want ErrNoFence", err)
+	}
+	if left, _ := svc.Store.Queue(); len(left) != 1 {
+		t.Fatalf("queue: %+v", left)
+	}
+}
+
+func TestManualStartNewJourney(t *testing.T) {
+	svc, _ := newSvc(t)
+	r, err := svc.Start(context.Background(), "ann", "checkout")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, _ := svc.Store.RunByID(r.ID)
+	if got.Journey != r.ID || got.Via != "" || got.Follows != "" {
+		t.Fatalf("run: %+v", got)
+	}
+}

@@ -68,7 +68,7 @@ func oneLine(s string) string {
 const maxPollErrors = 3
 
 func terminal(state string) bool {
-	return state == "done" || state == "stuck" || state == "failed"
+	return state == "done" || state == "stuck" || state == "failed" || state == "waiting"
 }
 
 // waitRun polls until the run reaches a terminal state or ctx ends.
