@@ -312,8 +312,8 @@ func (s *Scheduler) resolve(w store.Wait, followed bool, now time.Time) error {
 }
 
 // handoffLost returns why a handoff wait can no longer be met, or "" while it
-// still can: the hand-off is queued, its run is active or waiting, or nothing
-// decisive has happened yet.
+// still can: the hand-off is queued, its run is active or still waiting, or
+// nothing decisive has happened yet.
 func (s *Scheduler) handoffLost(w store.Wait, r store.Run) (string, error) {
 	rs, qs, err := s.chain(r.Journey)
 	if err != nil {
@@ -324,13 +324,31 @@ func (s *Scheduler) handoffLost(w store.Wait, r store.Run) (string, error) {
 			return "", nil
 		}
 	}
+	var ids []string
+	for _, x := range rs {
+		if x.State == store.RunWaiting {
+			ids = append(ids, x.ID)
+		}
+	}
+	waits, err := s.Store.WaitsFor(ids)
+	if err != nil {
+		return "", err
+	}
 	var last *store.Run
 	earlier := false
 	for i, x := range rs {
 		if x.Role != w.Role || x.Story != w.Story || x.ID == r.ID {
 			continue
 		}
-		if !x.State.Final() || x.State == store.RunWaiting {
+		if x.State == store.RunWaiting {
+			if xw, ok := waits[x.ID]; !ok || xw.Status == store.WaitOpen {
+				return "", nil
+			}
+			// Its wait is over: the continuation that follows it, queued or
+			// run, decides instead.
+			continue
+		}
+		if !x.State.Final() {
 			return "", nil
 		}
 		if x.Started.Before(w.Began) {

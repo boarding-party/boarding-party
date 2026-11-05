@@ -201,6 +201,16 @@ func (s *server) startRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	run, err := s.svc.Start(r.Context(), req.Persona, req.Story)
+	if errors.Is(err, runs.ErrBusy) {
+		// Another run is active or still shutting down: queue this one.
+		q, qerr := s.svc.Enqueue(req.Persona, req.Story, time.Now().UTC())
+		if qerr != nil {
+			err = qerr
+		} else {
+			writeJSON(w, http.StatusAccepted, map[string]any{"queued": q})
+			return
+		}
+	}
 	if err != nil {
 		// Unknown persona/story is a client error; a launcher failure leaves
 		// a failed run behind (run.ID set); anything else is internal.

@@ -525,3 +525,21 @@ func TestManualStartNewJourney(t *testing.T) {
 		t.Fatalf("run: %+v", got)
 	}
 }
+
+func TestQueuedStartWithoutJourneyStartsOne(t *testing.T) {
+	svc, _ := newSvc(t)
+	q, err := svc.Enqueue("ann", "checkout", time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, err := svc.StartQueued(context.Background(), q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Journey != r.ID || r.Follows != "" {
+		t.Fatalf("run = %+v, want its own journey", r)
+	}
+	if _, err := svc.Enqueue("nobody", "checkout", time.Now().UTC()); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("unknown persona: %v, want ErrInvalid", err)
+	}
+}

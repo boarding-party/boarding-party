@@ -228,8 +228,8 @@ func (failLauncher) Start(context.Context, store.Run, project.Project) (string, 
 	return "", errors.New("secret-detail")
 }
 
-func TestStartRunBusyIs409AndTokenRedacted(t *testing.T) {
-	srv, _ := setup(t, 1024)
+func TestStartRunBusyQueuesAndTokenRedacted(t *testing.T) {
+	srv, svc := setup(t, 1024)
 	if r := do(t, "POST", srv.URL+"/api/project", projYAML); r.StatusCode != 204 {
 		t.Fatalf("project: %d", r.StatusCode)
 	}
@@ -246,12 +246,28 @@ func TestStartRunBusyIs409AndTokenRedacted(t *testing.T) {
 		t.Errorf("start response leaks token: %s", b)
 	}
 	resp = do(t, "POST", srv.URL+"/api/runs", `{"persona":"ann","story":"checkout"}`)
-	if resp.StatusCode != 409 {
-		t.Fatalf("second start: %d, want 409", resp.StatusCode)
+	if resp.StatusCode != 202 {
+		t.Fatalf("second start: %d, want 202", resp.StatusCode)
 	}
-	b, _ = io.ReadAll(resp.Body)
-	if !strings.Contains(string(b), "another run is active") {
-		t.Errorf("message: %s", b)
+	var got struct{ Queued store.Queued }
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+		t.Fatal(err)
+	}
+	q, err := svc.Store.Queue()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(q) != 1 || q[0].ID != got.Queued.ID || q[0].Persona != "ann" || q[0].Story != "checkout" ||
+		q[0].Reason != "Started from the board" || q[0].Journey != "" || q[0].Follows != "" {
+		t.Fatalf("queue = %+v, response %+v", q, got.Queued)
+	}
+	// An invalid run is refused, not queued.
+	resp = do(t, "POST", srv.URL+"/api/runs", `{"persona":"nobody","story":"checkout"}`)
+	if resp.StatusCode != 400 {
+		t.Fatalf("invalid start: %d, want 400", resp.StatusCode)
+	}
+	if q, _ := svc.Store.Queue(); len(q) != 1 {
+		t.Fatalf("queue after invalid start = %+v", q)
 	}
 }
 

@@ -189,6 +189,25 @@ func (s *Service) StartQueued(ctx context.Context, q store.Queued) (store.Run, e
 	return s.start(ctx, q.Persona, q.Story, &q)
 }
 
+// Enqueue queues a fresh run of persona doing story for the scheduler to
+// start when nothing else runs. The run starts its own journey.
+func (s *Service) Enqueue(persona, story string, now time.Time) (store.Queued, error) {
+	p, err := s.Store.Project()
+	if err != nil {
+		return store.Queued{}, fmt.Errorf("load project: %w", err)
+	}
+	role, st, err := find(p, persona, story)
+	if err != nil {
+		return store.Queued{}, err
+	}
+	id, err := randHex(16)
+	if err != nil {
+		return store.Queued{}, err
+	}
+	q := store.Queued{ID: id, Persona: persona, Role: role, Story: st, Reason: "Started from the board", Created: now}
+	return q, s.Store.Enqueue(q)
+}
+
 func (s *Service) finished() {
 	if s.OnFinish != nil {
 		s.OnFinish()
@@ -221,7 +240,10 @@ func (s *Service) start(ctx context.Context, persona, story string, q *store.Que
 		State: store.RunPending, Started: time.Now().UTC(), Journey: id}
 	queueID := ""
 	if q != nil {
-		r.Journey, r.Follows, r.Via, r.Context = q.Journey, q.Follows, q.Via, q.Context
+		r.Follows, r.Via, r.Context = q.Follows, q.Via, q.Context
+		if q.Journey != "" {
+			r.Journey = q.Journey
+		}
 		queueID = q.ID
 	}
 	s.startMu.Lock()

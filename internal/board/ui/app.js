@@ -301,7 +301,7 @@ function StartRun({ project, active, onStarted }) {
   const goal = (stories.find((x) => x.name === s) || {}).goal;
 
   const roles = (project.roles || []).filter((r) => (r.personas || []).length);
-  const disabled = !!active || busy || !p || !s;
+  const disabled = busy || !p || !s;
 
   const submit = async (e) => {
     e.preventDefault();
@@ -314,9 +314,9 @@ function StartRun({ project, active, onStarted }) {
         body: JSON.stringify({ persona: p, story: s }),
       });
       await onStarted();
-      if (run && run.id) location.hash = runHref(run.id);
+      if (run && run.id) location.hash = runHref(run.id); // a queued run has no id yet
     } catch (e2) {
-      setErr(e2.message); // 409 busy and 400 invalid are shown verbatim
+      setErr(e2.message); // 400 invalid is shown verbatim
       onStarted();
     } finally {
       setBusy(false);
@@ -334,7 +334,7 @@ function StartRun({ project, active, onStarted }) {
       <div class="startform">
         <div class="field">
           <label for="sr-persona">Persona</label>
-          <select id="sr-persona" value=${p} disabled=${!!active || busy}
+          <select id="sr-persona" value=${p} disabled=${busy}
               onChange=${(e) => { setPersona(e.currentTarget.value); setStory(''); setErr(''); }}>
             ${roles.map((r) => html`<optgroup label=${r.name}>
               ${r.personas.map((x) => html`<option value=${x.name}>${x.name}</option>`)}
@@ -343,16 +343,16 @@ function StartRun({ project, active, onStarted }) {
         </div>
         <div class="field">
           <label for="sr-story">Story</label>
-          <select id="sr-story" value=${s} disabled=${!!active || busy || !stories.length}
+          <select id="sr-story" value=${s} disabled=${busy || !stories.length}
               onChange=${(e) => { setStory(e.currentTarget.value); setErr(''); }}>
             ${stories.length ? stories.map((x) => html`<option value=${x.name}>${x.name}</option>`)
               : html`<option value="">No stories for this role</option>`}
           </select>
         </div>
-        <button class="btn primary" type="submit" disabled=${disabled}>${busy ? 'Starting…' : 'Start run'}</button>
+        <button class="btn primary" type="submit" disabled=${disabled}>${busy ? (active ? 'Adding…' : 'Starting…') : (active ? 'Add to queue' : 'Start run')}</button>
       </div>
       ${goal ? html`<p class="goal">${goal}</p>` : null}
-      ${active ? html`<div class="note">A run is active (<a href=${runHref(active.id)}>${active.persona} · ${active.story}</a>). You can start another when it finishes.</div>` : null}
+      ${active ? html`<div class="note">A run is active (<a href=${runHref(active.id)}>${active.persona} · ${active.story}</a>). A new run waits in Up next and starts when it finishes.</div>` : null}
       ${err ? html`<div class="note bad" role="alert">${err}</div>` : null}
     </form>`;
 }

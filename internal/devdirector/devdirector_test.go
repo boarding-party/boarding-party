@@ -70,9 +70,18 @@ func TestRunLifecycle(t *testing.T) {
 	if run.State != store.RunRunning {
 		t.Fatalf("state after start = %q, want running", run.State)
 	}
-	// A second run while one is active is refused.
-	if resp, _ := do(t, d, "POST", "/api/runs", "application/json", d.Token, `{"persona":"Ada","story":"todos"}`); resp.StatusCode != http.StatusConflict {
-		t.Fatalf("second start: got %d, want 409", resp.StatusCode)
+	// A second run while one is active is queued; drop it so it does not
+	// start after this one.
+	resp, b = do(t, d, "POST", "/api/runs", "application/json", d.Token, `{"persona":"Ada","story":"todos"}`)
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("second start: got %d, want 202", resp.StatusCode)
+	}
+	var queued struct{ Queued store.Queued }
+	if err := json.Unmarshal(b, &queued); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.st.DeleteQueued(queued.Queued.ID); err != nil {
+		t.Fatal(err)
 	}
 
 	deadline := time.Now().Add(5 * time.Second)

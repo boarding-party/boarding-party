@@ -669,6 +669,33 @@ func TestHandoffWaitOpenWhileTargetWaits(t *testing.T) {
 	}
 }
 
+// A target that waited and was continued is represented by its continuation:
+// when that fails, the hand-off wait ends.
+func TestHandoffWaitStuckWhenContinuationFails(t *testing.T) {
+	f := newFix(t, schedYAML)
+	f.waiting("p1", "Ada", "patient", "book", "j1", handoffWait())
+	f.tick()
+	if ok, err := f.st.FinishRunWaiting("s1", "waits a minute", f.clk.Now(), timeWait(now.Add(time.Minute))); err != nil || !ok {
+		t.Fatal(ok, err)
+	}
+	f.clk.Add(2 * time.Minute)
+	f.tick() // s1's wait is met and its continuation s2 starts
+	if f.state("s2") != store.RunRunning {
+		t.Fatal("continuation not started")
+	}
+	if w := f.wait("p1"); w.Status != store.WaitOpen {
+		t.Fatalf("closed while continuation runs: %+v", w)
+	}
+	if ok, err := f.st.FinishRun("s2", store.RunFailed, "page broke", f.clk.Now()); err != nil || !ok {
+		t.Fatal(ok, err)
+	}
+	f.tick()
+	want := `clinician could not finish "approve": page broke`
+	if w := f.wait("p1"); w.Status != store.WaitStuck || w.Detail != want {
+		t.Fatalf("wait = %+v", w)
+	}
+}
+
 func TestContextOutcomeCapped(t *testing.T) {
 	f := newFix(t, schedYAML)
 	f.starter.SetErr(runs.ErrBusy)
