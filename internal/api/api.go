@@ -692,7 +692,7 @@ func (s *server) putPause(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) stopRun(w http.ResponseWriter, r *http.Request) {
-	if err := s.svc.StopRun(r.Context(), r.PathValue("id")); err != nil {
+	if err := s.svc.StopRun(context.WithoutCancel(r.Context()), r.PathValue("id")); err != nil {
 		fail(w, err)
 		return
 	}
