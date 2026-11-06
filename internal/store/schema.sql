@@ -96,3 +96,22 @@ CREATE TABLE IF NOT EXISTS settings (
   key   TEXT PRIMARY KEY,
   value TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS message_fired (
+  message_id TEXT PRIMARY KEY,
+  story      TEXT NOT NULL DEFAULT '',
+  at         INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS events (
+  persona     TEXT NOT NULL,
+  uid         TEXT NOT NULL,
+  title       TEXT NOT NULL DEFAULT '',
+  start       INTEGER NOT NULL DEFAULT 0,
+  "end"       INTEGER NOT NULL DEFAULT 0,
+  location    TEXT NOT NULL DEFAULT '',
+  url         TEXT NOT NULL DEFAULT '',
+  message_id  TEXT NOT NULL DEFAULT '',
+  fired_start INTEGER NOT NULL DEFAULT 0,
+  fired_story TEXT NOT NULL DEFAULT '',
+  PRIMARY KEY(persona, uid)
+);
+CREATE INDEX IF NOT EXISTS events_start ON events(start);

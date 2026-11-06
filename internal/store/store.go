@@ -60,13 +60,22 @@ type Run struct {
 
 // RunContext is what a chained run is told about the run before it.
 type RunContext struct {
-	Kind        string       `json:"kind"` // "continue" | "handoff"
-	WaitedFor   string       `json:"waitedFor,omitempty"`
-	Arrived     string       `json:"arrived,omitempty"`
-	MessageID   string       `json:"messageId,omitempty"`
-	PreviousRun string       `json:"previousRun"`
-	Previous    string       `json:"previous"` // that run's outcome summary
-	From        *ContextFrom `json:"from,omitempty"`
+	Kind        string        `json:"kind"` // "continue" | "handoff" | "message" | "calendar"
+	WaitedFor   string        `json:"waitedFor,omitempty"`
+	Arrived     string        `json:"arrived,omitempty"`
+	MessageID   string        `json:"messageId,omitempty"`
+	PreviousRun string        `json:"previousRun"`
+	Previous    string        `json:"previous"` // that run's outcome summary
+	From        *ContextFrom  `json:"from,omitempty"`
+	Event       *ContextEvent `json:"event,omitempty"`
+}
+
+// ContextEvent is the calendar entry a calendar-triggered run was started for.
+type ContextEvent struct {
+	Title    string    `json:"title"`
+	Start    time.Time `json:"start"`
+	Location string    `json:"location,omitempty"`
+	URL      string    `json:"url,omitempty"`
 }
 
 type ContextFrom struct {

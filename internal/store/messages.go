@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"strings"
 	"time"
 )
 
@@ -163,4 +164,57 @@ func (s *Store) PruneMessages(before time.Time) (int64, error) {
 		return 0, err
 	}
 	return res.RowsAffected()
+}
+
+// UnfiredMessages returns delivered, persona-routed messages stored at or after
+// since that no trigger has fired for yet, oldest first.
+func (s *Store) UnfiredMessages(since time.Time, limit int) ([]Message, error) {
+	rows, err := s.db.Query(`SELECT `+msgCols+`, mailbox FROM messages
+		WHERE filtered = '' AND persona != '' AND stored >= ?
+		AND id NOT IN (SELECT message_id FROM message_fired)
+		ORDER BY stored, rowid LIMIT ?`, ts(since), limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Message
+	for rows.Next() {
+		m, err := scanMessage(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, m)
+	}
+	return out, rows.Err()
+}
+
+// MarkMessageFired records that story was started for message id; a second call is ignored.
+func (s *Store) MarkMessageFired(id, story string, at time.Time) error {
+	_, err := s.db.Exec(`INSERT OR IGNORE INTO message_fired(message_id, story, at) VALUES(?,?,?)`, id, story, ts(at))
+	return err
+}
+
+// MessageFired maps each of ids that a trigger fired for to the story it started.
+func (s *Store) MessageFired(ids []string) (map[string]string, error) {
+	out := map[string]string{}
+	if len(ids) == 0 {
+		return out, nil
+	}
+	args := make([]any, len(ids))
+	for i, id := range ids {
+		args[i] = id
+	}
+	rows, err := s.db.Query(`SELECT message_id, story FROM message_fired WHERE message_id IN (?`+strings.Repeat(",?", len(ids)-1)+`)`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id, story string
+		if err := rows.Scan(&id, &story); err != nil {
+			return nil, err
+		}
+		out[id] = story
+	}
+	return out, rows.Err()
 }
