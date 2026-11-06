@@ -133,3 +133,55 @@ func TestFireSchedulerErrorLeavesFireUnsettled(t *testing.T) {
 		t.Fatalf("second settled = %q", second.settled)
 	}
 }
+
+const allTriggersYAML = `name: p
+sites: ["https://x.test"]
+roles:
+  - name: patient
+    activity: every 1 h
+    personas: [{name: Ada}]
+    stories:
+      - {name: book, goal: book a slot}
+      - name: confirm
+        goal: confirm the sign-up
+        trigger: {message: {subject: confirm}}
+      - name: visit
+        goal: join the video appointment
+        trigger: {calendar: {title: appointment, lead: 5m}}
+`
+
+// The calendar wins a persona that every source wants in one tick; the
+// message fires once the persona is free and the schedule at its next slot.
+func TestTriggersCalendarFirst(t *testing.T) {
+	f := newFix(t, allTriggersYAML)
+	f.s.Sources = Triggers(f.st, half)
+	f.fire() // first sight sets the due
+	f.clk.Add(time.Hour)
+	f.deliver("m1", "Ada", "hello@x.test", "Please confirm")
+	f.event("Ada", "e1", "Video appointment", f.clk.Now().Add(5*time.Minute))
+	f.fire()
+	if q := f.queue(); len(q) != 1 || q[0].Story != "visit" {
+		t.Fatalf("queue = %+v", q)
+	}
+	if f.unfired() != 1 {
+		t.Fatal("message settled while Ada was busy")
+	}
+	f.tick() // starts visit
+	if ok, err := f.st.FinishRun("s1", store.RunDone, "ok", f.clk.Now()); err != nil || !ok {
+		t.Fatal(ok, err)
+	}
+	f.clk.Add(time.Minute)
+	f.fire()
+	if q := f.queue(); len(q) != 1 || q[0].Story != "confirm" {
+		t.Fatalf("queue = %+v", q)
+	}
+	f.tick() // starts confirm
+	if ok, err := f.st.FinishRun("s2", store.RunDone, "ok", f.clk.Now()); err != nil || !ok {
+		t.Fatal(ok, err)
+	}
+	f.clk.Add(time.Hour)
+	f.fire()
+	if q := f.queue(); len(q) != 1 || q[0].Story != "book" {
+		t.Fatalf("queue = %+v", q)
+	}
+}

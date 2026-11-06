@@ -40,6 +40,14 @@ type Source interface {
 	Settle(f Fire, story string, now time.Time) error
 }
 
+// Triggers returns the sources the director runs, in the order they claim a
+// persona: an event has a fixed time, a message waits up to LookBack, and the
+// schedule just moves on to its next slot. rnd jitters the schedule; nil =
+// rand.Float64.
+func Triggers(st *store.Store, rnd func() float64) []Source {
+	return []Source{&Calendar{Store: st}, &Messages{Store: st}, &Schedule{Store: st, Rand: rnd}}
+}
+
 func (s *Scheduler) sources() []Source {
 	if s.Sources != nil {
 		return s.Sources
