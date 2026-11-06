@@ -318,7 +318,7 @@ function RunsPage({ project, projectErr, runs, runsErr, queue, status, active, o
         ${project === null
           ? html`<div class="empty"><b>Set up your project first</b>Runs need a site, a role, a persona and a story.
               <div style="margin-top:12px"><a class="btn primary" href="#/project">Set up your project</a></div></div>`
-          : project ? html`<${StartRun} project=${project} active=${active} onStarted=${onStarted} />` : null}
+          : project ? html`<${StartRun} project=${project} active=${active} status=${status} onStarted=${onStarted} />` : null}
         ${runsErr ? html`<div class="note bad">Could not load runs: ${runsErr}</div>` : null}
         ${runs && runs.length === 0 && project !== null
           ? html`<div class="empty"><b>No runs yet.</b>Start one above.</div>` : null}
@@ -328,12 +328,15 @@ function RunsPage({ project, projectErr, runs, runsErr, queue, status, active, o
     </section>`;
 }
 
-function StartRun({ project, active, onStarted }) {
+function StartRun({ project, active, status, onStarted }) {
   const personas = allPersonas(project);
   const [persona, setPersona] = useState('');
   const [story, setStory] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
+  // A pause or budget refusal is stale once that state changes.
+  const gate = status ? `${status.paused}/${status.overBudget}` : '';
+  useEffect(() => setErr(''), [gate]);
 
   // Keep the selection valid when the project changes.
   const personaOK = personas.some((p) => p.name === persona);
@@ -395,7 +398,7 @@ function StartRun({ project, active, onStarted }) {
       </div>
       ${goal ? html`<p class="goal">${goal}</p>` : null}
       ${active ? html`<div class="note">A run is active (<a href=${runHref(active.id)}>${active.persona} · ${active.story}</a>). A new run waits in Up next and starts when it finishes.</div>` : null}
-      ${err ? html`<div class="note bad" role="alert">${err}</div>` : null}
+      ${err ? html`<div class="note bad" role="alert">${err.charAt(0).toUpperCase() + err.slice(1)}</div>` : null}
     </form>`;
 }
 
