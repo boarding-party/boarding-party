@@ -1,6 +1,7 @@
 package sched
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -148,5 +149,22 @@ func TestCalendarSkippedWhenBusyIsNotReplayed(t *testing.T) {
 	f.fire()
 	if len(f.queue()) != 0 || len(f.dueEvents()) != 0 {
 		t.Fatalf("queue = %+v due = %+v", f.queue(), f.dueEvents())
+	}
+}
+
+func TestCalendarSettleWithoutEventErrors(t *testing.T) {
+	f := newCalFix(t)
+	if err := (&Calendar{Store: f.st}).Settle(Fire{Persona: "Ada", Context: []byte(`{"kind":"calendar"}`)}, "visit", now); err == nil {
+		t.Fatal("want error")
+	}
+}
+
+func TestCalendarReasonIsClipped(t *testing.T) {
+	f := newCalFix(t)
+	f.event("Ada", "e1", "Video appointment\x07 "+strings.Repeat("x", 100), f.clk.Now().Add(time.Minute))
+	f.fire()
+	q := f.queue()
+	if len(q) != 1 || q[0].Reason != "Calendar: Video appointment  "+strings.Repeat("x", 61) {
+		t.Fatalf("queue = %+v", q)
 	}
 }

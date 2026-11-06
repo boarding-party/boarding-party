@@ -8,10 +8,8 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"strings"
 	"sync"
 	"time"
-	"unicode"
 
 	"github.com/boarding-party/boardingparty/internal/project"
 	"github.com/boarding-party/boardingparty/internal/runs"
@@ -170,7 +168,7 @@ func (s *Scheduler) handoffs(p project.Project, r store.Run, targets []project.H
 	if err != nil {
 		return nil, "", err
 	}
-	outcome := clip(r.Outcome, MaxContextText)
+	outcome := store.Clip(r.Outcome, MaxContextText)
 	ctxJSON, err := json.Marshal(store.RunContext{Kind: "handoff", PreviousRun: r.ID, Previous: outcome,
 		From: &store.ContextFrom{Persona: r.Persona, Role: r.Role, Story: r.Story, Summary: outcome}})
 	if err != nil {
@@ -307,7 +305,7 @@ func (s *Scheduler) resolve(w store.Wait, followed bool, now time.Time) error {
 		return err
 	}
 	ctxJSON, err := json.Marshal(store.RunContext{Kind: "continue", WaitedFor: Describe(w), Arrived: a.Detail,
-		MessageID: a.MessageID, PreviousRun: r.ID, Previous: clip(r.Outcome, MaxContextText)})
+		MessageID: a.MessageID, PreviousRun: r.ID, Previous: store.Clip(r.Outcome, MaxContextText)})
 	if err != nil {
 		return err
 	}
@@ -374,21 +372,6 @@ func (s *Scheduler) handoffLost(w store.Wait, r store.Run) (string, error) {
 		return fmt.Sprintf("%s already did %q earlier in this chain, and a story is handed off only once per chain", w.Role, w.Story), nil
 	}
 	return fmt.Sprintf("the hand-off to %s %q was removed before it ran", w.Role, w.Story), nil
-}
-
-// clip makes outcome text fit a run context: control characters other than
-// newline and tab become spaces and it is cut to max runes.
-func clip(s string, max int) string {
-	s = strings.Map(func(r rune) rune {
-		if r != '\n' && r != '\t' && unicode.IsControl(r) {
-			return ' '
-		}
-		return r
-	}, s)
-	if r := []rune(s); len(r) > max {
-		s = string(r[:max])
-	}
-	return s
 }
 
 // drain starts the oldest queued run that can start, at most one per tick.

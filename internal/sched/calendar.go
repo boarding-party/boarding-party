@@ -3,6 +3,7 @@ package sched
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/boarding-party/boardingparty/internal/project"
@@ -61,12 +62,12 @@ func (c *Calendar) Due(_ context.Context, p project.Project, now time.Time) ([]F
 			continue // its lead is not reached yet
 		}
 		ctx, err := json.Marshal(store.RunContext{Kind: "calendar", Event: &store.ContextEvent{UID: e.UID,
-			Title: clip(e.Title, MaxContextText), Start: e.Start, Location: clip(e.Location, MaxContextText), URL: e.URL}})
+			Title: store.Clip(e.Title, MaxContextText), Start: e.Start, Location: store.Clip(e.Location, MaxContextText), URL: e.URL}})
 		if err != nil {
 			return nil, err
 		}
 		fires = append(fires, Fire{Source: c.Name(), Persona: e.Persona, Role: role.Name, Stories: ready,
-			Reason: "Calendar: " + clip(e.Title, 80), Context: ctx})
+			Reason: store.CalendarReason(e.Title), Context: ctx})
 	}
 	return fires, nil
 }
@@ -77,6 +78,9 @@ func (c *Calendar) Settle(f Fire, story string, _ time.Time) error {
 	var rc store.RunContext
 	if err := json.Unmarshal(f.Context, &rc); err != nil {
 		return err
+	}
+	if rc.Event == nil {
+		return fmt.Errorf("calendar fire for %s has no event", f.Persona)
 	}
 	return c.Store.MarkEventFired(f.Persona, rc.Event.UID, rc.Event.Start, story)
 }

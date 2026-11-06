@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/boarding-party/boardingparty/internal/project"
+	"github.com/boarding-party/boardingparty/internal/store"
 )
 
 // price is USD per million tokens.
@@ -165,22 +166,19 @@ func (s *Service) Status(now time.Time) (Status, error) {
 	if err != nil {
 		return Status{}, err
 	}
-	roleOf := map[string]string{}
+	roleOf := map[string]project.Role{}
 	for _, r := range p.Roles {
-		if r.Activity == "" {
-			continue
-		}
 		for _, pe := range r.Personas {
-			roleOf[pe.Name] = r.Name
+			roleOf[pe.Name] = r
 		}
 	}
 	due := []DueView{}
 	for name, d := range dues {
-		if role, ok := roleOf[name]; ok {
-			due = append(due, DueView{Persona: name, Role: role, At: d.At})
+		if role, ok := roleOf[name]; ok && role.Activity != "" {
+			due = append(due, DueView{Persona: name, Role: role.Name, At: d.At})
 		}
 	}
-	cal, err := s.calendarDues(p, now)
+	cal, err := s.calendarDues(roleOf, now)
 	if err != nil {
 		return Status{}, err
 	}
@@ -199,16 +197,10 @@ func (s *Service) Status(now time.Time) (Status, error) {
 // calendarDues lists the unfired events whose story starts within
 // calendarWindow of now. An event matching several stories is due when the
 // first of them starts, at the longest lead.
-func (s *Service) calendarDues(p project.Project, now time.Time) ([]DueView, error) {
+func (s *Service) calendarDues(roleOf map[string]project.Role, now time.Time) ([]DueView, error) {
 	events, err := s.Store.Events("", now, now.Add(calendarWindow+project.MaxLead))
 	if err != nil {
 		return nil, err
-	}
-	roleOf := map[string]project.Role{}
-	for _, r := range p.Roles {
-		for _, pe := range r.Personas {
-			roleOf[pe.Name] = r
-		}
 	}
 	var out []DueView
 	for _, e := range events {
@@ -229,7 +221,7 @@ func (s *Service) calendarDues(p project.Project, now time.Time) ([]DueView, err
 		if !matched || at.Before(now) || at.After(now.Add(calendarWindow)) {
 			continue
 		}
-		out = append(out, DueView{Persona: e.Persona, Role: role.Name, At: at, Reason: "Calendar: " + e.Title})
+		out = append(out, DueView{Persona: e.Persona, Role: role.Name, At: at, Reason: store.CalendarReason(e.Title)})
 	}
 	return out, nil
 }

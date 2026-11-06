@@ -15,6 +15,9 @@ type Event struct {
 
 const eventCols = `persona, uid, title, start, "end", location, url, message_id, fired_start, fired_story`
 
+// CalendarReason is the board reason for a run started by an event.
+func CalendarReason(title string) string { return "Calendar: " + Clip(title, 80) }
+
 // UpsertEvent inserts the event or updates its fields, keeping the fired state.
 func (s *Store) UpsertEvent(e Event) error {
 	_, err := s.db.Exec(`INSERT INTO events(persona, uid, title, start, "end", location, url, message_id) VALUES(?,?,?,?,?,?,?,?)

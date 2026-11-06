@@ -762,3 +762,17 @@ func TestCalendarListTool(t *testing.T) {
 		t.Fatalf("got %s", out)
 	}
 }
+
+func TestCalendarListNoPersona(t *testing.T) {
+	_, st, srv, _ := setup(t)
+	if err := st.CreateRun(store.Run{ID: "np", Token: "tok-np", Role: "buyer", Story: "checkout", State: store.RunRunning, Started: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.UpsertEvent(store.Event{Persona: "ann", UID: "e1", Title: "Video appointment", Start: time.Now().Add(time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	out, isErr := call(t, connect(t, srv, "tok-np"), "calendar_list", nil)
+	if !isErr || out != "this run has no persona" {
+		t.Fatalf("%v %q", isErr, out)
+	}
+}

@@ -49,9 +49,9 @@ func (m *Messages) Due(_ context.Context, p project.Project, now time.Time) ([]F
 			}
 			continue
 		}
-		subject := clip(msg.Subject, 80)
+		subject := store.Clip(msg.Subject, 80)
 		ctx, err := json.Marshal(store.RunContext{Kind: "message", MessageID: msg.ID,
-			Arrived: "Email from " + clip(msg.From, MaxContextText) + ": " + clip(msg.Subject, MaxContextText)})
+			Arrived: "Email from " + store.Clip(msg.From, MaxContextText) + ": " + store.Clip(msg.Subject, MaxContextText)})
 		if err != nil {
 			return nil, err
 		}
