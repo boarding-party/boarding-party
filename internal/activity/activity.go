@@ -165,6 +165,15 @@ func (p Pattern) bounds(d time.Time, loc *time.Location) (time.Time, time.Time) 
 	return minute(d, p.start, loc), minute(d, p.end, loc)
 }
 
+// Slack is how early Next can place a daily time (its jitter), 0 for other
+// patterns. Asking Next(now+Slack) after a time fired skips that slot's repeat.
+func (p Pattern) Slack() time.Duration {
+	if p.kind == daily {
+		return 10 * time.Minute
+	}
+	return 0
+}
+
 // Next returns the next due time after the given instant. u yields values in
 // [0,1); u() == 0.5 applies no jitter.
 func (p Pattern) Next(after time.Time, loc *time.Location, u func() float64) time.Time {

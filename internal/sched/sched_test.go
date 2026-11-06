@@ -83,6 +83,7 @@ type fakeStarter struct {
 	calls  []store.Queued
 	n      int
 	called chan struct{}
+	gate   error // returned by Gate
 }
 
 func (f *fakeStarter) StartQueued(ctx context.Context, q store.Queued) (store.Run, error) {
@@ -112,6 +113,18 @@ func (f *fakeStarter) StartQueued(ctx context.Context, q store.Queued) (store.Ru
 		return store.Run{}, err
 	}
 	return r, nil
+}
+
+func (f *fakeStarter) Gate(time.Time) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.gate
+}
+
+func (f *fakeStarter) SetGate(err error) {
+	f.mu.Lock()
+	f.gate = err
+	f.mu.Unlock()
 }
 
 func (f *fakeStarter) Calls() []store.Queued {

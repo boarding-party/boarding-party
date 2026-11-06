@@ -232,6 +232,7 @@ func run() error {
 	}
 	// OnFinish is set before Watch starts so the goroutines never race on it.
 	sch := &sched.Scheduler{Store: st, Runs: svc}
+	sch.Sources = []sched.Source{&sched.Schedule{Store: st}}
 	svc.OnFinish = sch.Poke
 	go svc.Watch(ctx, runs.DefaultPollInterval, cfg.RunTimeout)
 	go sch.Run(ctx)

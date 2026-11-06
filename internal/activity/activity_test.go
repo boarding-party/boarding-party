@@ -115,3 +115,22 @@ func TestNextAlwaysAfter(t *testing.T) {
 		}
 	}
 }
+
+func TestSlack(t *testing.T) {
+	for in, want := range map[string]time.Duration{
+		"daily at 09:00":               10 * time.Minute,
+		"every 1 h":                    0,
+		"2–4 times a day, 09:00–17:00": 0,
+	} {
+		p, err := Parse(in)
+		if err != nil {
+			t.Fatalf("%q: %v", in, err)
+		}
+		if got := p.Slack(); got != want {
+			t.Errorf("%q: Slack = %v, want %v", in, got, want)
+		}
+	}
+	if (Pattern{}).Slack() != 0 {
+		t.Error("zero pattern has slack")
+	}
+}

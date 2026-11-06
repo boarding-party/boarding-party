@@ -32,6 +32,8 @@ var chainFull = fmt.Sprintf("the chain reached %d runs", MaxChainRuns)
 // Starter starts the run a queue item asks for (runs.Service does).
 type Starter interface {
 	StartQueued(ctx context.Context, q store.Queued) (store.Run, error)
+	// Gate returns runs.ErrPaused or runs.ErrOverBudget when no run may start.
+	Gate(now time.Time) error
 }
 
 // Scheduler hands stories off, resolves waits and starts queued runs, one at
@@ -42,6 +44,9 @@ type Scheduler struct {
 	Every time.Duration    // 0 = DefaultEvery
 	Now   func() time.Time // nil = time.Now
 	NewID func() string    // nil = 16 random bytes, hex
+	// Sources start runs on their own; nil = the activity schedule.
+	Sources []Source
+	Rand    func() float64 // nil = rand.Float64; jitter for the schedule
 
 	mu       sync.Mutex // one Tick at a time
 	pokeOnce sync.Once
@@ -98,13 +103,14 @@ func (s *Scheduler) Run(ctx context.Context) {
 	}
 }
 
-// Tick hands off finished runs' stories, resolves waits, then starts at most
+// Tick hands off finished runs' stories, resolves waits, asks the trigger
+// sources what is due, then starts at most
 // one queued run. A failure in one phase does not skip the others.
 func (s *Scheduler) Tick(ctx context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	now := s.now()
-	return errors.Join(s.followAll(now), s.resolveAll(now), s.drain(ctx))
+	return errors.Join(s.followAll(now), s.resolveAll(now), s.fire(ctx, now), s.drain(ctx))
 }
 
 // followAll acts once on every done or waiting run not yet acted on.
@@ -396,6 +402,8 @@ func (s *Scheduler) drain(ctx context.Context) error {
 		switch {
 		case err == nil:
 			return nil
+		case errors.Is(err, runs.ErrPaused), errors.Is(err, runs.ErrOverBudget):
+			return nil // the item stays until the gate opens
 		case errors.Is(err, runs.ErrBusy):
 			return nil // the item stays for a later tick
 		case errors.Is(err, runs.ErrNoFence):

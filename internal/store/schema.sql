@@ -85,6 +85,12 @@ CREATE TABLE IF NOT EXISTS waits (
   after_id TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS waits_status ON waits(status);
+CREATE TABLE IF NOT EXISTS persona_due (
+  persona    TEXT PRIMARY KEY,
+  activity   TEXT NOT NULL,
+  due        INTEGER NOT NULL,
+  next_story INTEGER NOT NULL DEFAULT 0
+);
 CREATE TABLE IF NOT EXISTS settings (
   key   TEXT PRIMARY KEY,
   value TEXT NOT NULL
