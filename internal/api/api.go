@@ -72,6 +72,9 @@ func admin(svc *runs.Service, maxBytes int64, token string, hub *live.Hub, mail 
 	mux.HandleFunc("POST /api/runs", s.startRun)
 	mux.HandleFunc("GET /api/runs", s.listRuns)
 	mux.HandleFunc("GET /api/runs/{id}", s.getRun)
+	mux.HandleFunc("POST /api/runs/{id}/stop", s.stopRun)
+	mux.HandleFunc("GET /api/status", s.getStatus)
+	mux.HandleFunc("PUT /api/pause", s.putPause)
 	mux.HandleFunc("GET /api/runs/{id}/artifacts/{name}", s.getArtifact)
 	mux.HandleFunc("GET /api/runs/{id}/live", s.streamLive)
 	mux.HandleFunc("GET /api/runs/{id}/live.jpg", s.liveStill)
@@ -115,6 +118,8 @@ func fail(w http.ResponseWriter, err error) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 	case errors.Is(err, runs.ErrBusy):
 		http.Error(w, runs.ErrBusy.Error(), http.StatusConflict)
+	case errors.Is(err, runs.ErrPaused), errors.Is(err, runs.ErrOverBudget):
+		http.Error(w, err.Error(), http.StatusConflict)
 	case errors.Is(err, runs.ErrAllowList):
 		log.Printf("api: %v", err)
 		http.Error(w, err.Error(), http.StatusBadGateway)
@@ -307,6 +312,7 @@ func (s *server) getRun(w http.ResponseWriter, r *http.Request) {
 		log.Printf("api: run %s usage: %v", run.ID, err)
 	} else if u != nil {
 		out["usage"] = u
+		out["cost"] = runs.Cost(*u)
 	}
 	if stage, reason, isLive := s.progress(r.Context(), run); stage != "" || isLive {
 		if stage != "" {
@@ -650,4 +656,45 @@ func (s *server) getProfileFields(w http.ResponseWriter, _ *http.Request) {
 		out = append(out, pf)
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *server) getStatus(w http.ResponseWriter, _ *http.Request) {
+	st, err := s.svc.Status(time.Now())
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, st)
+}
+
+// putPause flips the pause switch. Pausing stops nothing: it only gates new
+// starts. Resuming pokes the scheduler so due work is picked up at once.
+func (s *server) putPause(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Paused *bool `json:"paused"`
+	}
+	if !mediaTypeIs(r, jsonType) {
+		http.Error(w, "content type must be application/json", http.StatusUnsupportedMediaType)
+		return
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<10)).Decode(&req); err != nil || req.Paused == nil {
+		http.Error(w, "bad json", http.StatusBadRequest)
+		return
+	}
+	if err := s.svc.Store.SetPaused(*req.Paused); err != nil {
+		fail(w, err)
+		return
+	}
+	if !*req.Paused && s.svc.OnFinish != nil {
+		s.svc.OnFinish()
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *server) stopRun(w http.ResponseWriter, r *http.Request) {
+	if err := s.svc.StopRun(r.Context(), r.PathValue("id")); err != nil {
+		fail(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }

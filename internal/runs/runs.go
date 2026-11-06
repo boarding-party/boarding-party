@@ -344,6 +344,27 @@ func (s *Service) Finish(ctx context.Context, token string, state store.RunState
 	if err != nil {
 		return err
 	}
+	return s.finish(ctx, r, state, outcome)
+}
+
+// StopRun ends an active run from the board: failed, session stopped,
+// artifacts kept, scheduler poked. A run that is not active is ErrNotActive.
+func (s *Service) StopRun(ctx context.Context, id string) error {
+	r, err := s.Store.RunByID(id)
+	if errors.Is(err, store.ErrNotFound) {
+		return ErrNotActive
+	}
+	if err != nil {
+		return err
+	}
+	if r.State != store.RunPending && r.State != store.RunRunning {
+		return ErrNotActive
+	}
+	return s.finish(ctx, r, store.RunFailed, "Stopped from the board.")
+}
+
+// finish moves an active run to a final state and runs the shared tail.
+func (s *Service) finish(ctx context.Context, r store.Run, state store.RunState, outcome string) error {
 	finished := time.Now().UTC()
 	won, err := s.Store.FinishRun(r.ID, state, outcome, finished)
 	if err != nil {

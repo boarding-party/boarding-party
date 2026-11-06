@@ -3,6 +3,7 @@ package runs
 import (
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 )
@@ -115,4 +116,69 @@ func (s *Service) Gate(now time.Time) error {
 		return fmt.Errorf("%w: $%.2f of $%.2f; runs start again at midnight (%s) or when you raise the budget", ErrOverBudget, spent, budget, loc)
 	}
 	return nil
+}
+
+// Status is what the board shows about spend and scheduling.
+type Status struct {
+	Paused      bool      `json:"paused"`
+	SpentToday  float64   `json:"spentToday"`
+	DailyBudget float64   `json:"dailyBudget"`
+	OverBudget  bool      `json:"overBudget"`
+	Timezone    string    `json:"timezone"`
+	ResetsAt    time.Time `json:"resetsAt"` // next local midnight
+	Due         []DueView `json:"due"`      // scheduled personas, soonest first
+}
+
+// DueView is one scheduled persona and when it is next due.
+type DueView struct {
+	Persona string    `json:"persona"`
+	Role    string    `json:"role"`
+	At      time.Time `json:"at"`
+}
+
+// Status reports pause state, today's spend against the budget, and the
+// schedule. Only personas of roles with an activity pattern have a due.
+func (s *Service) Status(now time.Time) (Status, error) {
+	paused, err := s.Store.Paused()
+	if err != nil {
+		return Status{}, err
+	}
+	p, err := s.Store.Project()
+	if err != nil {
+		return Status{}, fmt.Errorf("load project: %w", err)
+	}
+	loc, budget := p.Location(), p.Budget()
+	start := DayStart(now, loc)
+	spent, err := s.SpentSince(start)
+	if err != nil {
+		return Status{}, err
+	}
+	dues, err := s.Store.Dues()
+	if err != nil {
+		return Status{}, err
+	}
+	roleOf := map[string]string{}
+	for _, r := range p.Roles {
+		if r.Activity == "" {
+			continue
+		}
+		for _, pe := range r.Personas {
+			roleOf[pe.Name] = r.Name
+		}
+	}
+	due := []DueView{}
+	for name, d := range dues {
+		if role, ok := roleOf[name]; ok {
+			due = append(due, DueView{Persona: name, Role: role, At: d.At})
+		}
+	}
+	sort.Slice(due, func(i, j int) bool {
+		if !due[i].At.Equal(due[j].At) {
+			return due[i].At.Before(due[j].At)
+		}
+		return due[i].Persona < due[j].Persona
+	})
+	y, m, d := start.In(loc).Date()
+	return Status{Paused: paused, SpentToday: spent, DailyBudget: budget, OverBudget: spent >= budget,
+		Timezone: loc.String(), ResetsAt: time.Date(y, m, d+1, 0, 0, 0, 0, loc).UTC(), Due: due}, nil
 }
