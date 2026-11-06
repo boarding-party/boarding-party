@@ -483,6 +483,13 @@ func TestPollerStoresEvents(t *testing.T) {
 		t.Fatalf("event = %+v", e)
 	}
 
+	moved := strings.ReplaceAll(invite, "20261110T143000", "20261112T110000") // the inline part; the attachment is base64
+	ts.add(t, moved)
+	runCycle(t, s)
+	if evs := events(); len(evs) != 1 || !evs[0].Start.Equal(time.Date(2026, 11, 12, 11, 0, 0, 0, time.UTC)) || evs[0].MessageID != all(t, s)[3].ID {
+		t.Fatalf("after reschedule: %+v", evs)
+	}
+
 	ts.add(t, crlf(fixture(t, "invite-cancel.eml")))
 	runCycle(t, s)
 	if evs := events(); len(evs) != 0 {

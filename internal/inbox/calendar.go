@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"net/url"
 	"strings"
 	"time"
@@ -32,8 +33,14 @@ const allDayHour = 9
 
 // ParseICS reads an iCalendar object. METHOD absent, PUBLISH or REQUEST yield events to add or update;
 // CANCEL yields Cancel events; any other method yields none. Events without a UID or a readable
-// DTSTART are skipped. Floating and all-day times, and unknown TZIDs, use loc.
-func ParseICS(b []byte, loc *time.Location) ([]Event, error) {
+// DTSTART are skipped; a VEVENT with STATUS:CANCELLED is a Cancel event whatever the method.
+// Floating and all-day times, and unknown TZIDs, use loc. At most MaxEvents are returned.
+func ParseICS(b []byte, loc *time.Location) (out []Event, err error) {
+	defer func() { // go-ical panics on some malformed input; one bad invite must not crash the poller
+		if r := recover(); r != nil {
+			out, err = nil, fmt.Errorf("ical: %v", r)
+		}
+	}()
 	cal, err := ical.NewDecoder(bytes.NewReader(b)).Decode()
 	if err != nil {
 		return nil, err
@@ -46,13 +53,15 @@ func ParseICS(b []byte, loc *time.Location) ([]Event, error) {
 	if !cancel && method != "" && method != "PUBLISH" && method != "REQUEST" {
 		return nil, nil
 	}
-	var out []Event
 	for _, ve := range cal.Events() {
+		if len(out) >= MaxEvents {
+			break
+		}
 		uid := text(ve.Props, ical.PropUID)
 		if uid == "" {
 			continue
 		}
-		if cancel {
+		if cancel || strings.EqualFold(text(ve.Props, ical.PropStatus), "CANCELLED") {
 			out = append(out, Event{UID: uid, Cancel: true})
 			continue
 		}
@@ -94,7 +103,8 @@ func icsTime(p *ical.Prop, loc *time.Location) (time.Time, bool) {
 	if p.ValueType() == ical.ValueDate || len(v) == len("20060102") {
 		return parseDate(v, loc)
 	}
-	if tzid := strings.Trim(p.Params.Get(ical.PropTimezoneID), `"`); tzid != "" && !strings.HasSuffix(v, "Z") {
+	// "Local" would mean the director's own zone, not the sender's: treat it as unknown.
+	if tzid := strings.TrimSpace(strings.Trim(p.Params.Get(ical.PropTimezoneID), `"`)); tzid != "" && tzid != "Local" && !strings.HasSuffix(v, "Z") {
 		if l, err := time.LoadLocation(tzid); err == nil {
 			loc = l
 		}

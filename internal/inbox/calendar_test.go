@@ -1,6 +1,7 @@
 package inbox
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -77,10 +78,56 @@ func TestParseICSCancel(t *testing.T) {
 	}
 }
 
+func TestParseICSStatusCancelled(t *testing.T) {
+	for _, m := range []string{"REQUEST", "PUBLISH"} {
+		evs, err := ParseICS(ics(m, "UID:u", "DTSTART:20261110T143000Z", "STATUS:CANCELLED"), time.UTC)
+		if err != nil || len(evs) != 1 || !evs[0].Cancel || evs[0].UID != "u" {
+			t.Errorf("%s: %+v, %v", m, evs, err)
+		}
+	}
+}
+
+// hostile is input that makes go-ical panic or fail mid-way.
+var hostile = map[string][]byte{
+	"quoted param": ics("REQUEST", "UID:u", `DTSTART;TZID="Europe/London"x:20261110T143000`),
+	"truncated":    []byte("BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:u\r\nDTSTART:20261110T143000Z\r\n"),
+}
+
+func TestParseICSHostileInput(t *testing.T) {
+	for name, b := range hostile {
+		evs, err := ParseICS(b, time.UTC)
+		if err == nil || len(evs) != 0 {
+			t.Errorf("%s: %+v, %v; want an error and no events", name, evs, err)
+		}
+	}
+}
+
+func TestParseICSCap(t *testing.T) {
+	lines := []string{"BEGIN:VCALENDAR", "VERSION:2.0", "METHOD:PUBLISH"}
+	for i := range 30 {
+		lines = append(lines, "BEGIN:VEVENT", "UID:u"+strconv.Itoa(i), "DTSTART:20261110T143000Z", "END:VEVENT")
+	}
+	lines = append(lines, "END:VCALENDAR", "")
+	evs, err := ParseICS([]byte(strings.Join(lines, "\r\n")), time.UTC)
+	if err != nil || len(evs) != MaxEvents {
+		t.Fatalf("events = %d, %v; want %d", len(evs), err, MaxEvents)
+	}
+}
+
+func TestCalendarEventsSkipsBadPart(t *testing.T) {
+	good := ics("REQUEST", "UID:good", "DTSTART:20261110T143000Z")
+	m := Message{calendar: [][]byte{hostile["quoted param"], hostile["truncated"], good}}
+	evs := m.CalendarEvents(time.UTC)
+	if len(evs) != 1 || evs[0].UID != "good" {
+		t.Fatalf("events = %+v", evs)
+	}
+}
+
 func TestParseICSUnknownTZIDAndFloating(t *testing.T) {
 	loc := london(t)
 	want := time.Date(2026, 11, 10, 9, 0, 0, 0, loc)
-	for _, start := range []string{"DTSTART;TZID=Made/Up:20261110T090000", "DTSTART:20261110T090000"} {
+	for _, start := range []string{"DTSTART;TZID=Made/Up:20261110T090000", "DTSTART:20261110T090000",
+		"DTSTART;TZID=Local:20261110T090000", `DTSTART;TZID=" ":20261110T090000`} {
 		evs, err := ParseICS(ics("REQUEST", "UID:u", start), loc)
 		if err != nil || len(evs) != 1 {
 			t.Fatalf("%s: %+v, %v", start, evs, err)
