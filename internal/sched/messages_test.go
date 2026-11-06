@@ -99,37 +99,85 @@ func TestMessageUnknownPersonaIsMarked(t *testing.T) {
 	}
 }
 
+// A burst starts one run; the second message waits for the persona to be free.
 func TestMessageBurstFiresOnce(t *testing.T) {
 	f := newMsgFix(t)
 	f.deliver("m1", "Ada", "hello@smesolutions.uk", "Confirm one")
 	f.deliver("m2", "Ada", "hello@smesolutions.uk", "Confirm two")
 	f.fire()
-	if len(f.queue()) != 1 {
-		t.Fatalf("queue = %+v", f.queue())
+	if q := f.queue(); len(q) != 1 || ctxOf(t, q[0]).MessageID != "m1" {
+		t.Fatalf("queue = %+v", q)
 	}
 	if s, _ := f.firedStory("m1"); s != "confirm" {
 		t.Fatalf("m1 story = %q", s)
 	}
-	if s, ok := f.firedStory("m2"); !ok || s != "" {
-		t.Fatalf("m2 = %q %v", s, ok)
+	if _, ok := f.firedStory("m2"); ok {
+		t.Fatal("m2 settled while Ada was busy")
+	}
+	f.tick() // starts m1's run
+	f.fire()
+	if len(f.queue()) != 0 {
+		t.Fatalf("queued while running: %+v", f.queue())
+	}
+	if ok, err := f.st.FinishRun("s1", store.RunDone, "ok", f.clk.Now()); err != nil || !ok {
+		t.Fatal(ok, err)
+	}
+	f.clk.Add(time.Minute)
+	f.fire()
+	if q := f.queue(); len(q) != 1 || ctxOf(t, q[0]).MessageID != "m2" {
+		t.Fatalf("queue = %+v", q)
+	}
+	if s, _ := f.firedStory("m2"); s != "confirm" {
+		t.Fatalf("m2 story = %q", s)
 	}
 }
 
+func TestMessageWhileBusyFiresLater(t *testing.T) {
+	f := newMsgFix(t)
+	f.running("r1", "Ada", "patient", "lone", "j1")
+	f.deliver("m1", "Ada", "hello@smesolutions.uk", "Confirm your sign-up")
+	f.fire()
+	if len(f.queue()) != 0 || f.unfired() != 1 {
+		t.Fatalf("queue = %+v unfired = %d", f.queue(), f.unfired())
+	}
+	if ok, err := f.st.FinishRun("r1", store.RunDone, "ok", f.clk.Now()); err != nil || !ok {
+		t.Fatal(ok, err)
+	}
+	f.clk.Add(time.Minute)
+	f.fire()
+	if q := f.queue(); len(q) != 1 || q[0].Story != "confirm" || ctxOf(t, q[0]).MessageID != "m1" {
+		t.Fatalf("queue = %+v", q)
+	}
+}
+
+// The message that ends a wait belongs to the continuation: it never starts a
+// triggered story, not even after the continuation finishes.
 func TestMessageResolvingWaitDoesNotTrigger(t *testing.T) {
 	f := newMsgFix(t)
 	f.waiting("p1", "Ada", "patient", "lone", "j1", store.Wait{Kind: "email", Subject: "confirm", Deadline: now.Add(24 * time.Hour)})
 	f.clk.Add(time.Minute)
 	f.deliver("m1", "Ada", "hello@smesolutions.uk", "Confirm your sign-up")
 	f.clk.Add(time.Minute)
-	if err := f.s.Tick(t.Context()); err != nil {
-		t.Fatal(err)
-	}
+	f.tick()
 	calls := f.starter.Calls()
 	if len(calls) != 1 || calls[0].Via != "continue" || calls[0].Story != "lone" {
 		t.Fatalf("calls = %+v queue = %+v", calls, f.queue())
 	}
 	if len(f.queue()) != 0 {
 		t.Fatalf("queue = %+v", f.queue())
+	}
+	if s, ok := f.firedStory("m1"); !ok || s != "" {
+		t.Fatalf("fired = %q %v", s, ok)
+	}
+	if ok, err := f.st.FinishRun("s1", store.RunDone, "ok", f.clk.Now()); err != nil || !ok {
+		t.Fatal(ok, err)
+	}
+	for i := 0; i < 3; i++ {
+		f.clk.Add(time.Minute)
+		f.tick()
+	}
+	if calls := f.starter.Calls(); len(calls) != 1 || len(f.queue()) != 0 {
+		t.Fatalf("calls = %+v queue = %+v", calls, f.queue())
 	}
 }
 

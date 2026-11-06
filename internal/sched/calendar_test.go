@@ -142,13 +142,26 @@ func TestCalendarWaitsForItsOwnLead(t *testing.T) {
 	}
 }
 
-func TestCalendarSkippedWhenBusyIsNotReplayed(t *testing.T) {
+// An event due while the persona is busy fires once the persona is free,
+// while the event is still in its window.
+func TestCalendarWhileBusyFiresLater(t *testing.T) {
 	f := newCalFix(t)
 	f.running("r1", "Ada", "patient", "lone", "j1")
 	f.event("Ada", "e1", "Clinic visit", f.clk.Now().Add(10*time.Minute))
 	f.fire()
-	if len(f.queue()) != 0 || len(f.dueEvents()) != 0 {
+	if len(f.queue()) != 0 || len(f.dueEvents()) != 1 {
 		t.Fatalf("queue = %+v due = %+v", f.queue(), f.dueEvents())
+	}
+	if ok, err := f.st.FinishRun("r1", store.RunDone, "ok", f.clk.Now()); err != nil || !ok {
+		t.Fatal(ok, err)
+	}
+	f.clk.Add(20 * time.Minute) // after the start, inside the hour after it
+	f.fire()
+	if q := f.queue(); len(q) != 1 || q[0].Story != "prepare" {
+		t.Fatalf("queue = %+v", q)
+	}
+	if len(f.dueEvents()) != 0 {
+		t.Fatalf("due = %+v", f.dueEvents())
 	}
 }
 

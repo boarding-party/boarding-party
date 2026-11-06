@@ -20,6 +20,9 @@ type Fire struct {
 	Stories []string        // candidates, preferred first; the scheduler takes the first eligible
 	Reason  string          // shown on the board, e.g. "Scheduled: every 1 h"
 	Context json.RawMessage // handed to the run (a message in 2d); nil for schedule
+	// RetryWhenBusy keeps a fire that meets a busy persona unsettled, so the
+	// source offers it again on a later tick. The source bounds how long.
+	RetryWhenBusy bool
 }
 
 // Source is anything that can ask for a run: a schedule, a mailbox, a calendar.
@@ -30,6 +33,7 @@ type Source interface {
 	// Settle tells the source what became of a fire: story is the one queued,
 	// or "" when it was skipped (gated, persona busy, no eligible story).
 	// A source advances its own cursor here; a skipped fire is never replayed.
+	// A RetryWhenBusy fire that meets a busy persona is not settled.
 	// Settle is called exactly once per fire, when the scheduler has decided
 	// its fate. If the scheduler itself fails on a fire (a store error), it
 	// does not settle it, so the source offers the fire again on a later tick.
@@ -46,6 +50,7 @@ func (s *Scheduler) sources() []Source {
 // fire asks every source what is due and queues the runs the shared policy
 // allows: not while gated, not for a busy persona, and only for a story that
 // is neither stuck nor waiting. A source error does not stop the others.
+// Earlier sources win a persona that several want in the same tick.
 func (s *Scheduler) fire(ctx context.Context, now time.Time) error {
 	p, err := s.Store.Project()
 	if errors.Is(err, store.ErrNotFound) {
@@ -77,6 +82,9 @@ func (s *Scheduler) fire(ctx context.Context, now time.Time) error {
 			errs = append(errs, fmt.Errorf("source %s: %w", src.Name(), err))
 		}
 		for _, f := range fires {
+			if !gated && busy[f.Persona] && f.RetryWhenBusy {
+				continue // unsettled: offered again once the persona is free
+			}
 			story := ""
 			if !gated && !busy[f.Persona] {
 				if story, err = s.pick(f, waiting); err != nil {

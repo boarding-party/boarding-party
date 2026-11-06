@@ -56,13 +56,14 @@ func (m *Messages) Due(_ context.Context, p project.Project, now time.Time) ([]F
 			return nil, err
 		}
 		fires = append(fires, Fire{Source: m.Name(), Persona: msg.Persona, Role: role.Name, Stories: matches,
-			Reason: "Email: " + subject, Context: ctx})
+			Reason: "Email: " + subject, Context: ctx, RetryWhenBusy: true})
 	}
 	return fires, nil
 }
 
 // Settle marks the message fired with the story queued, or "" when it was
-// skipped: a message is never replayed.
+// skipped: a message is never replayed. A message that met a busy persona is
+// not settled, so it fires once the persona is free, within LookBack.
 func (m *Messages) Settle(f Fire, story string, now time.Time) error {
 	var c store.RunContext
 	if err := json.Unmarshal(f.Context, &c); err != nil {

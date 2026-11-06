@@ -67,13 +67,15 @@ func (c *Calendar) Due(_ context.Context, p project.Project, now time.Time) ([]F
 			return nil, err
 		}
 		fires = append(fires, Fire{Source: c.Name(), Persona: e.Persona, Role: role.Name, Stories: ready,
-			Reason: store.CalendarReason(e.Title), Context: ctx})
+			Reason: store.CalendarReason(e.Title), Context: ctx, RetryWhenBusy: true})
 	}
 	return fires, nil
 }
 
 // Settle marks the event fired for its current start with the story queued,
 // or "" when it was skipped: it fires again only if the event is rescheduled.
+// An event that met a busy persona is not settled, so it fires once the
+// persona is free, until an hour after it starts.
 func (c *Calendar) Settle(f Fire, story string, _ time.Time) error {
 	var rc store.RunContext
 	if err := json.Unmarshal(f.Context, &rc); err != nil {

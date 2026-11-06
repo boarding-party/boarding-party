@@ -309,6 +309,12 @@ func (s *Scheduler) resolve(w store.Wait, followed bool, now time.Time) error {
 	if err != nil {
 		return err
 	}
+	if a.MessageID != "" {
+		// The message belongs to the continuation: it never starts a triggered story too.
+		if err := s.Store.MarkMessageFired(a.MessageID, "", now); err != nil {
+			return err
+		}
+	}
 	next := store.Queued{ID: s.newID(), Persona: r.Persona, Role: r.Role, Story: r.Story, Journey: r.Journey,
 		Follows: r.ID, Via: "continue", Context: ctxJSON, Reason: "Continues after " + a.Detail, Created: now}
 	_, err = s.Store.ResolveWait(r.ID, store.Resolution{Status: store.WaitMet, Detail: a.Detail, Ended: now, Next: &next})
