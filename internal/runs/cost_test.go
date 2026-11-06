@@ -81,3 +81,12 @@ func TestGateIgnoresYesterday(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestCostPricesUnsplitExcess(t *testing.T) {
+	u := Usage{Counts: Counts{Output: 1_000_000},
+		ByModel: map[string]Counts{"claude-haiku-5-5": {Output: 400_000}}}
+	// 0.4M haiku output = 0.2, plus 0.6M unsplit at opus = 12.
+	if got := Cost(u); math.Abs(got-12.2) > 1e-9 {
+		t.Fatal(got)
+	}
+}

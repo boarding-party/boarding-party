@@ -57,3 +57,30 @@ func TestSaveUsage(t *testing.T) {
 		t.Fatalf("unknown token = %v", err)
 	}
 }
+
+func TestSaveUsageNeverLowers(t *testing.T) {
+	svc, _ := newSvc(t)
+	r, _ := svc.Start(context.Background(), "ann", "checkout")
+	first := Usage{Counts: Counts{Output: 1000, Turns: 3},
+		ByModel: map[string]Counts{"claude-opus-5-5": {Output: 1000}}}
+	if err := svc.SaveUsage(r.Token, first, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	second := Usage{Counts: Counts{Output: 10},
+		ByModel: map[string]Counts{"claude-opus-5-5": {Output: 10}, "claude-haiku-5-5": {Output: 5}}}
+	if err := svc.SaveUsage(r.Token, second, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	u, _ := svc.Usage(r.ID)
+	if u == nil || u.Output != 1000 || u.Turns != 3 || u.ByModel["claude-opus-5-5"].Output != 1000 || u.ByModel["claude-haiku-5-5"].Output != 5 {
+		t.Fatalf("usage = %+v", u)
+	}
+	// Merging must not exceed the model cap.
+	many := map[string]Counts{}
+	for _, m := range []string{"a", "b", "c", "d", "e", "f", "g"} {
+		many[m] = Counts{}
+	}
+	if err := svc.SaveUsage(r.Token, Usage{ByModel: many}, time.Now()); !errors.Is(err, ErrBadUsage) {
+		t.Fatalf("merged over cap = %v", err)
+	}
+}

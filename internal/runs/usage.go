@@ -47,8 +47,10 @@ const maxUsageModels = 8
 
 var modelID = regexp.MustCompile(`^[a-z0-9][a-z0-9.@_-]{0,99}$`)
 
-// SaveUsage replaces the usage of the run holding token. The worker sends a
-// running total, so the newest report wins.
+// SaveUsage records the usage of the run holding token. The worker sends a
+// running total, but a report may never lower spend: it is merged with the
+// stored usage so every counter is the max of old and new, over the union of
+// models.
 func (s *Service) SaveUsage(token string, u Usage, now time.Time) error {
 	r, err := s.Store.RunByToken(token)
 	if errors.Is(err, store.ErrNotFound) {
@@ -66,6 +68,16 @@ func (s *Service) SaveUsage(token string, u Usage, now time.Time) error {
 	}
 	for m := range u.ByModel {
 		if !modelID.MatchString(m) {
+			return ErrBadUsage
+		}
+	}
+	old, err := s.Usage(r.ID)
+	if err != nil {
+		return err
+	}
+	if old != nil {
+		u = mergeUsage(*old, u)
+		if len(u.ByModel) > maxUsageModels {
 			return ErrBadUsage
 		}
 	}
@@ -92,4 +104,25 @@ func (s *Service) Usage(runID string) (*Usage, error) {
 		return nil, err
 	}
 	return &u, nil
+}
+
+func maxCounts(a, b Counts) Counts {
+	return Counts{Input: max(a.Input, b.Input), Output: max(a.Output, b.Output),
+		CacheRead: max(a.CacheRead, b.CacheRead), CacheWrite: max(a.CacheWrite, b.CacheWrite),
+		Turns: max(a.Turns, b.Turns)}
+}
+
+// mergeUsage takes the per-counter maximum of a and b, over the union of models.
+func mergeUsage(a, b Usage) Usage {
+	out := Usage{Counts: maxCounts(a.Counts, b.Counts)}
+	if len(a.ByModel)+len(b.ByModel) > 0 {
+		out.ByModel = map[string]Counts{}
+		for m, c := range a.ByModel {
+			out.ByModel[m] = c
+		}
+		for m, c := range b.ByModel {
+			out.ByModel[m] = maxCounts(out.ByModel[m], c)
+		}
+	}
+	return out
 }

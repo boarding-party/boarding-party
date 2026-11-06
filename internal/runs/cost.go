@@ -35,8 +35,10 @@ func Cost(u Usage) float64 {
 	if len(u.ByModel) == 0 {
 		return dearest.cost(u.Counts)
 	}
-	var total float64
+	var total, split = 0.0, Counts{}
 	for model, c := range u.ByModel {
+		split = Counts{split.Input + c.Input, split.Output + c.Output,
+			split.CacheRead + c.CacheRead, split.CacheWrite + c.CacheWrite, 0}
 		p := dearest
 		for _, row := range prices {
 			if strings.HasPrefix(model, row.prefix) {
@@ -46,7 +48,18 @@ func Cost(u Usage) float64 {
 		}
 		total += p.cost(c)
 	}
-	return total
+	// Top-level counts beyond what the split accounts for are priced dearest,
+	// so mismatched reports can never under-count.
+	excess := Counts{Input: over(u.Input, split.Input), Output: over(u.Output, split.Output),
+		CacheRead: over(u.CacheRead, split.CacheRead), CacheWrite: over(u.CacheWrite, split.CacheWrite)}
+	return total + dearest.cost(excess)
+}
+
+func over(total, part uint64) uint64 {
+	if total > part {
+		return total - part
+	}
+	return 0
 }
 
 // DayStart is the most recent midnight in loc at or before now, as UTC.
