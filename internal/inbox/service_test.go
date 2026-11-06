@@ -144,3 +144,23 @@ func TestKickBypassesErrorBackoff(t *testing.T) {
 		t.Fatal("Kick did not start a cycle")
 	}
 }
+
+func TestPruneDropsOldMailAndEvents(t *testing.T) {
+	s := newService(t, nil, "")
+	now := time.Now()
+	s.Now = func() time.Time { return now }
+	if _, err := s.Store.AddMessage(store.Message{ID: "old", UIDValidity: 1, UID: 1, Persona: "John", Stored: now.Add(-Retention - time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Store.UpsertEvent(store.Event{Persona: "John", UID: "e1", Title: "Gone", Start: now.Add(-Retention - 2*time.Hour),
+		End: now.Add(-Retention - time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	s.prune()
+	if _, err := s.Store.Message("old"); err == nil {
+		t.Fatal("old mail kept")
+	}
+	if es, err := s.Store.Events("", now.Add(-2*Retention), now); err != nil || len(es) != 0 {
+		t.Fatalf("events = %+v %v", es, err)
+	}
+}

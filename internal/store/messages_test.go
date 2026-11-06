@@ -196,3 +196,25 @@ INSERT INTO messages(id, uidvalidity, uid, persona, subject, stored) VALUES('old
 	}
 	s2.Close()
 }
+
+func TestPruneMessagesDropsTheirFiredRows(t *testing.T) {
+	s := open(t)
+	now := time.Now().UTC()
+	s.AddMessage(msg("old", 1, "ada", "", now.Add(-72*time.Hour)))
+	s.AddMessage(msg("new", 2, "ada", "", now))
+	for _, id := range []string{"old", "new", "never-stored"} {
+		if err := s.MarkMessageFired(id, "", now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := s.PruneMessages(now.Add(-24 * time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	fired, err := s.MessageFired([]string{"old", "new", "never-stored"})
+	if err != nil || len(fired) != 1 {
+		t.Fatalf("fired = %v %v", fired, err)
+	}
+	if _, ok := fired["new"]; !ok {
+		t.Fatalf("fired = %v", fired)
+	}
+}

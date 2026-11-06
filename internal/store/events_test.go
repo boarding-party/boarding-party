@@ -68,3 +68,26 @@ func TestDueEventsSkipsStale(t *testing.T) {
 		t.Fatalf("due = %+v %v", due, err)
 	}
 }
+
+func TestPruneEvents(t *testing.T) {
+	s := open(t)
+	cut := time.Date(2026, 11, 6, 0, 0, 0, 0, time.UTC)
+	for _, e := range []Event{
+		{Persona: "ada", UID: "ended", Title: "a", Start: cut.Add(-2 * time.Hour), End: cut.Add(-time.Hour)},
+		{Persona: "ada", UID: "spans", Title: "b", Start: cut.Add(-2 * time.Hour), End: cut.Add(time.Hour)},
+		{Persona: "ada", UID: "noend-old", Title: "c", Start: cut.Add(-time.Hour)},
+		{Persona: "ada", UID: "noend-new", Title: "d", Start: cut.Add(time.Hour)},
+	} {
+		if err := s.UpsertEvent(e); err != nil {
+			t.Fatal(err)
+		}
+	}
+	n, err := s.PruneEvents(cut)
+	if err != nil || n != 2 {
+		t.Fatalf("n=%d err=%v", n, err)
+	}
+	left, err := s.Events("", cut.Add(-24*time.Hour), cut.Add(24*time.Hour))
+	if err != nil || len(left) != 2 || left[0].UID != "spans" || left[1].UID != "noend-new" {
+		t.Fatalf("left = %+v %v", left, err)
+	}
+}

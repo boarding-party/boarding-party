@@ -51,6 +51,16 @@ func (s *Store) DueEvents(now time.Time, maxLead time.Duration) ([]Event, error)
 		ts(now.Add(maxLead)), ts(now.Add(-time.Hour)))
 }
 
+// PruneEvents deletes events that ended before before; an event without an
+// end counts from its start.
+func (s *Store) PruneEvents(before time.Time) (int64, error) {
+	res, err := s.db.Exec(`DELETE FROM events WHERE (CASE WHEN "end" = 0 THEN start ELSE "end" END) < ?`, ts(before))
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
 // MarkEventFired records that story was started for the event at start.
 func (s *Store) MarkEventFired(persona, uid string, start time.Time, story string) error {
 	_, err := s.db.Exec(`UPDATE events SET fired_start = ?, fired_story = ? WHERE persona = ? AND uid = ?`,

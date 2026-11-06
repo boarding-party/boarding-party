@@ -157,13 +157,21 @@ func (s *Store) ClearMailCursor() error {
 	return err
 }
 
-// PruneMessages deletes messages stored before the cutoff and returns the count.
+// PruneMessages deletes messages stored before the cutoff, and the fired marks
+// of messages no longer stored, and returns how many messages went.
 func (s *Store) PruneMessages(before time.Time) (int64, error) {
 	res, err := s.db.Exec(`DELETE FROM messages WHERE stored < ?`, ts(before))
 	if err != nil {
 		return 0, err
 	}
-	return res.RowsAffected()
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	if _, err := s.db.Exec(`DELETE FROM message_fired WHERE message_id NOT IN (SELECT id FROM messages)`); err != nil {
+		return n, err
+	}
+	return n, nil
 }
 
 // UnfiredMessages returns delivered, persona-routed messages stored at or after

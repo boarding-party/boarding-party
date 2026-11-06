@@ -11,7 +11,7 @@ import (
 	"github.com/boarding-party/boardingparty/internal/store"
 )
 
-// Retention of stored mail, and how often it is enforced.
+// Retention of stored mail and past calendar events, and how often it is enforced.
 const (
 	Retention  = 30 * 24 * time.Hour
 	pruneEvery = time.Hour
@@ -141,6 +141,9 @@ func (s *Service) prune() {
 	s.lastPrune = now
 	if _, err := s.Store.PruneMessages(now.Add(-Retention)); err != nil {
 		log.Printf("inbox: prune: %v", err)
+	}
+	if _, err := s.Store.PruneEvents(now.Add(-Retention)); err != nil {
+		log.Printf("inbox: prune events: %v", err)
 	}
 }
 
