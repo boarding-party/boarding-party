@@ -272,4 +272,9 @@ fieldset.handoffs p { margin: 0; }
 .msglinks { margin-top: 10px; }
 .msglinks ul { margin: 4px 0; padding-left: 18px; font: 12.5px/1.5 var(--mono); overflow-wrap: anywhere; }
 .msglinks p { margin: 4px 0 0; }
+.secret { position: relative; }
+.secret input { padding-right: 38px; }
+.secret input.masked { -webkit-text-security: disc; }
+.secret .btn.icon { position: absolute; top: 50%; right: 4px; transform: translateY(-50%); border-color: transparent; background: transparent; padding: 4px 6px; display: flex; }
+.secret .btn.icon:hover { color: var(--ink); border-color: transparent; }
 @media (max-width: 860px) { .mbform { grid-template-columns: minmax(0, 1fr); } .inboxbar .field { min-width: 0; flex: 1; } }

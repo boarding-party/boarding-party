@@ -803,6 +803,13 @@ const fmtChecked = (s) => {
   return d.toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
 };
 
+// The app password field is a text input masked with CSS where the browser
+// supports it: a type=password field makes browsers offer to generate or save
+// a password, which is wrong for a mailbox app password.
+const maskByCSS = typeof CSS !== 'undefined' && CSS.supports && CSS.supports('-webkit-text-security', 'disc');
+const eye = html`<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>`;
+const eyeOff = html`<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.6 5.1A10.4 10.4 0 0 1 12 5c6.5 0 10 7 10 7a17.6 17.6 0 0 1-2.6 3.6M6.6 6.6C3.8 8.5 2 12 2 12s3.5 7 10 7a9.7 9.7 0 0 0 5.4-1.6"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/><path d="M3 3l18 18"/></svg>`;
+
 function InboxCard({ allowFrom, authServId, onChange }) {
   const [mb, setMb] = useState(null); // the saved mailbox, as the director reports it
   const [loadErr, setLoadErr] = useState('');
@@ -810,6 +817,7 @@ function InboxCard({ allowFrom, authServId, onChange }) {
   const [port, setPort] = useState('993');
   const [user, setUser] = useState('');
   const [pass, setPass] = useState('');
+  const [showPass, setShowPass] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
 
@@ -840,7 +848,7 @@ function InboxCard({ allowFrom, authServId, onChange }) {
     try {
       adopt(await api('/api/mailbox', {
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ host: host.trim(), port: n, username: user.trim(), password: pass }),
+        body: JSON.stringify({ host: host.trim(), port: n, username: user.trim(), password: pass.replace(/\s+/g, '') }),
       }));
     } catch (e) { setErr(e.message); } finally { setBusy(false); }
   };
@@ -873,12 +881,21 @@ function InboxCard({ allowFrom, authServId, onChange }) {
         </div>
         <div class="field">
           <label for="mb-user">Username</label>
-          <input id="mb-user" value=${user} placeholder="cast@yourdomain.com" autocomplete="off" onInput=${(e) => setUser(e.currentTarget.value)} />
+          <input id="mb-user" value=${user} placeholder="cast@yourdomain.com" autocomplete="off" autocapitalize="off" spellcheck=${false}
+            data-1p-ignore data-lpignore="true" data-bwignore data-form-type="other" onInput=${(e) => setUser(e.currentTarget.value)} />
         </div>
         <div class="field">
           <label for="mb-pass">App password</label>
-          <input id="mb-pass" type="password" value=${pass} autocomplete="new-password"
-            placeholder=${mb && mb.passwordSet ? 'Saved' : ''} onInput=${(e) => setPass(e.currentTarget.value)} />
+          <div class="secret">
+            <input id="mb-pass" type=${maskByCSS || showPass ? 'text' : 'password'} class=${showPass ? '' : 'masked'} value=${pass}
+              autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck=${false}
+              data-1p-ignore data-lpignore="true" data-bwignore data-form-type="other"
+              placeholder=${mb && mb.passwordSet ? 'Saved' : ''} onInput=${(e) => setPass(e.currentTarget.value)} />
+            <button class="btn icon" type="button" aria-pressed=${showPass} aria-controls="mb-pass"
+              title=${showPass ? 'Hide password' : 'Show password'} aria-label=${showPass ? 'Hide password' : 'Show password'}
+              onClick=${() => setShowPass((v) => !v)}>${showPass ? eyeOff : eye}</button>
+          </div>
+          <span class="hint">Spaces are removed when you save.</span>
         </div>
       </div>
       <div class="row" style="margin-top:12px">
