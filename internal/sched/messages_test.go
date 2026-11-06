@@ -1,9 +1,13 @@
 package sched
 
 import (
+	"encoding/json"
+	"fmt"
+	"hash/crc32"
 	"testing"
 	"time"
 
+	"github.com/boarding-party/boardingparty/internal/project"
 	"github.com/boarding-party/boardingparty/internal/runs"
 	"github.com/boarding-party/boardingparty/internal/store"
 )
@@ -29,7 +33,7 @@ func newMsgFix(t *testing.T) *fix {
 
 func (f *fix) deliver(id, persona, from, subject string) {
 	f.t.Helper()
-	if _, err := f.st.AddMessage(store.Message{ID: id, UID: uint32(len(id)) + uint32(id[len(id)-1]), UIDValidity: 1,
+	if _, err := f.st.AddMessage(store.Message{ID: id, UID: crc32.ChecksumIEEE([]byte(id)), UIDValidity: 1,
 		Persona: persona, From: from, Subject: subject, Stored: f.clk.Now()}); err != nil {
 		f.t.Fatal(err)
 	}
@@ -37,7 +41,7 @@ func (f *fix) deliver(id, persona, from, subject string) {
 
 func (f *fix) unfired() int {
 	f.t.Helper()
-	ms, err := f.st.UnfiredMessages(f.clk.Now().Add(-LookBack), 10)
+	ms, err := f.st.UnfiredMessages(f.clk.Now().Add(-LookBack), 10, 10)
 	if err != nil {
 		f.t.Fatal(err)
 	}
@@ -200,4 +204,76 @@ func TestMessageRespectsStuckAndPaused(t *testing.T) {
 	if len(g.queue()) != 0 || g.unfired() != 0 {
 		t.Fatalf("paused: queue = %+v", g.queue())
 	}
+}
+
+const twoPatientsYAML = `name: p
+sites: ["https://x.test"]
+roles:
+  - name: patient
+    personas: [{name: Ada}, {name: Bo}]
+    stories:
+      - {name: lone, goal: g}
+      - name: confirm
+        goal: confirm the sign-up
+        trigger: {message: {subject: confirm}}
+`
+
+// A busy persona's backlog of matching mail does not starve another persona's.
+func TestMessageBacklogDoesNotStarveOthers(t *testing.T) {
+	f := newFix(t, twoPatientsYAML)
+	f.s.Sources = []Source{&Messages{Store: f.st}}
+	f.running("r1", "Ada", "patient", "lone", "j1")
+	for i := range 250 {
+		f.deliver(fmt.Sprintf("a%03d", i), "Ada", "hello@x.test", "Confirm")
+	}
+	f.clk.Add(time.Minute)
+	f.deliver("b1", "Bo", "hello@x.test", "Confirm")
+	f.fire()
+	if q := f.queue(); len(q) != 1 || q[0].Persona != "Bo" || q[0].Story != "confirm" {
+		t.Fatalf("queue = %+v", q)
+	}
+}
+
+// One persona gets at most one message fire per tick, the oldest match;
+// mail that matches nothing is marked at once.
+func TestMessageOneFirePerPersona(t *testing.T) {
+	f := newMsgFix(t)
+	f.deliver("m1", "Ada", "news@elsewhere.test", "Weekly news")
+	f.deliver("m2", "Ada", "hello@smesolutions.uk", "Confirm one")
+	f.deliver("m3", "Ada", "hello@smesolutions.uk", "Confirm two")
+	f.deliver("m4", "Ada", "news@elsewhere.test", "More news")
+	fires, err := (&Messages{Store: f.st}).Due(t.Context(), mustProject(t, f), f.clk.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(fires) != 1 || ctxMsg(t, fires[0]) != "m2" {
+		t.Fatalf("fires = %+v", fires)
+	}
+	if s, ok := f.firedStory("m1"); !ok || s != "" {
+		t.Fatalf("m1 = %q %v", s, ok)
+	}
+	if _, ok := f.firedStory("m3"); ok {
+		t.Fatal("m3 settled")
+	}
+	if s, ok := f.firedStory("m4"); !ok || s != "" {
+		t.Fatalf("m4 = %q %v", s, ok)
+	}
+}
+
+func mustProject(t *testing.T, f *fix) project.Project {
+	t.Helper()
+	p, err := f.st.Project()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+func ctxMsg(t *testing.T, fr Fire) string {
+	t.Helper()
+	var c store.RunContext
+	if err := json.Unmarshal(fr.Context, &c); err != nil {
+		t.Fatal(err)
+	}
+	return c.MessageID
 }

@@ -17,6 +17,10 @@ const LookBack = 24 * time.Hour
 // maxMessages bounds the messages one tick looks at.
 const maxMessages = 200
 
+// perPersona bounds one persona's messages one tick looks at, so a backlog
+// waiting for a busy persona never hides anyone else's mail.
+const perPersona = 5
+
 // Messages is the trigger source for delivered email: a story starts when a
 // message for its persona matches the story's trigger rule.
 type Messages struct {
@@ -26,11 +30,12 @@ type Messages struct {
 func (*Messages) Name() string { return "message" }
 
 func (m *Messages) Due(_ context.Context, p project.Project, now time.Time) ([]Fire, error) {
-	msgs, err := m.Store.UnfiredMessages(now.Add(-LookBack), maxMessages)
+	msgs, err := m.Store.UnfiredMessages(now.Add(-LookBack), perPersona, maxMessages)
 	if err != nil {
 		return nil, err
 	}
 	var fires []Fire
+	fired := map[string]bool{} // personas with a fire this tick
 	for _, msg := range msgs {
 		role, ok := roleOf(p, msg.Persona)
 		var matches []string
@@ -49,12 +54,16 @@ func (m *Messages) Due(_ context.Context, p project.Project, now time.Time) ([]F
 			}
 			continue
 		}
+		if fired[msg.Persona] {
+			continue // one fire per persona per tick; the rest stay for later
+		}
 		subject := store.Clip(msg.Subject, 80)
 		ctx, err := json.Marshal(store.RunContext{Kind: "message", MessageID: msg.ID,
 			Arrived: "Email from " + store.Clip(msg.From, MaxContextText) + ": " + store.Clip(msg.Subject, MaxContextText)})
 		if err != nil {
 			return nil, err
 		}
+		fired[msg.Persona] = true
 		fires = append(fires, Fire{Source: m.Name(), Persona: msg.Persona, Role: role.Name, Stories: matches,
 			Reason: "Email: " + subject, Context: ctx, RetryWhenBusy: true})
 	}

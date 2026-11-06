@@ -167,12 +167,15 @@ func (s *Store) PruneMessages(before time.Time) (int64, error) {
 }
 
 // UnfiredMessages returns delivered, persona-routed messages stored at or after
-// since that no trigger has fired for yet, oldest first.
-func (s *Store) UnfiredMessages(since time.Time, limit int) ([]Message, error) {
-	rows, err := s.db.Query(`SELECT `+msgCols+`, mailbox FROM messages
+// since that no trigger has fired for yet: at most perPersona per persona, so
+// one persona's backlog never hides another's, and at most limit in all. Each
+// persona's oldest comes first, then each one's second, and so on.
+func (s *Store) UnfiredMessages(since time.Time, perPersona, limit int) ([]Message, error) {
+	rows, err := s.db.Query(`SELECT `+msgCols+`, mailbox FROM (
+		SELECT *, ROW_NUMBER() OVER (PARTITION BY persona ORDER BY stored, rowid) AS n, rowid AS r FROM messages
 		WHERE filtered = '' AND persona != '' AND stored >= ?
-		AND id NOT IN (SELECT message_id FROM message_fired)
-		ORDER BY stored, rowid LIMIT ?`, ts(since), limit)
+		AND id NOT IN (SELECT message_id FROM message_fired))
+		WHERE n <= ? ORDER BY n, stored, r LIMIT ?`, ts(since), perPersona, limit)
 	if err != nil {
 		return nil, err
 	}
