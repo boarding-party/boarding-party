@@ -665,7 +665,8 @@ function StartsOnItsOwn({ story, onChange }) {
             <label for=${id + '-lead'}>Start this many minutes early</label>
             <input id=${id + '-lead'} type="number" min="0" max="1440" inputmode="numeric" value=${t.lead} placeholder="2" onInput=${set('lead')} />
           </div>
-        </div>` : null}
+        </div>
+        <span class="hint">If several stories match one event, only the one with the longest lead runs.</span>` : null}
     </div>`;
 }
 

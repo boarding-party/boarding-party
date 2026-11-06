@@ -3,6 +3,7 @@ package mcpserver
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
@@ -774,5 +775,28 @@ func TestCalendarListNoPersona(t *testing.T) {
 	out, isErr := call(t, connect(t, srv, "tok-np"), "calendar_list", nil)
 	if !isErr || out != "this run has no persona" {
 		t.Fatalf("%v %q", isErr, out)
+	}
+}
+
+func TestCalendarListCapsRows(t *testing.T) {
+	_, st, srv, run := setup(t)
+	soon := time.Now().UTC().Truncate(time.Second)
+	for i := range maxCalendarRows + 5 {
+		if err := st.UpsertEvent(store.Event{Persona: "ann", UID: fmt.Sprintf("e%03d", i), Title: fmt.Sprintf("Event %03d", i),
+			Start: soon.Add(time.Duration(maxCalendarRows+5-i) * time.Minute)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	out, isErr := call(t, connect(t, srv, run.Token), "calendar_list", nil)
+	if isErr {
+		t.Fatal(out)
+	}
+	var got []map[string]string
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("%v: %s", err, out)
+	}
+	// Soonest first: the last one inserted starts first.
+	if len(got) != maxCalendarRows || got[0]["title"] != fmt.Sprintf("Event %03d", maxCalendarRows+4) {
+		t.Fatalf("got %d rows, first %v", len(got), got[0])
 	}
 }
