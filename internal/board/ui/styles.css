@@ -225,6 +225,8 @@ fieldset.handoffs legend { font-size: 13px; font-weight: 500; padding: 0; margin
 fieldset.handoffs .picks { display: flex; flex-direction: column; gap: 2px; max-height: 168px; overflow-y: auto; background: #fff; border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; }
 fieldset.handoffs .check { font-weight: 400; padding: 3px 0; overflow-wrap: anywhere; }
 fieldset.handoffs p { margin: 0; }
+.trigger { display: flex; flex-direction: column; gap: 8px; }
+.field .flabel { font-size: 13px; font-weight: 500; }
 
 @media (max-width: 860px) {
   .app { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto 1fr; }
@@ -267,6 +269,7 @@ fieldset.handoffs p { margin: 0; }
 .tabs button + button { border-left: 1px solid var(--line); }
 .tabs button.on { background: var(--accent-soft); color: var(--accent); }
 .mailtab td.from, .mailtab td.subj { overflow-wrap: anywhere; }
+.mailtab .tag.started { font-weight: 500; white-space: normal; }
 .mailtab tr.sel td { background: #F7F9FB; }
 .mailtab tr.detail td { padding: 0 8px 12px; background: #F7F9FB; }
 .msgtext { margin: 6px 0 0; padding: 10px 12px; background: #fff; border: 1px solid var(--line-soft); border-radius: 6px; font: 12.5px/1.5 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 360px; overflow: auto; }

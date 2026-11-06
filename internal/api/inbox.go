@@ -136,6 +136,8 @@ type messageSummary struct {
 	Subject  string    `json:"subject"`
 	Received time.Time `json:"received"`
 	Filtered string    `json:"filtered"`
+	// Started names the story this message started; set by the list only.
+	Started string `json:"started,omitempty"`
 }
 
 type messageFull struct {
@@ -169,9 +171,20 @@ func (s *server) listMessages(w http.ResponseWriter, r *http.Request) {
 		fail(w, err)
 		return
 	}
+	ids := make([]string, 0, len(msgs))
+	for _, x := range msgs {
+		ids = append(ids, x.ID)
+	}
+	fired, err := m.Store.MessageFired(ids)
+	if err != nil {
+		fail(w, err)
+		return
+	}
 	out := make([]messageSummary, 0, len(msgs))
 	for _, x := range msgs {
-		out = append(out, summary(x))
+		ms := summary(x)
+		ms.Started = fired[x.ID]
+		out = append(out, ms)
 	}
 	writeJSON(w, http.StatusOK, out)
 }

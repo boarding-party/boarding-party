@@ -440,7 +440,7 @@ function UpNext({ queue, due, zone, onChange }) {
         </li>`)}</ul>
       ${err ? html`<div class="note bad" role="alert">Could not remove the run: ${err}</div>` : null}
       ${due.length ? html`<h3 class="later">Later</h3>
-        <ul>${due.slice(0, 5).map((d, i) => html`<li key=${i + d.persona}><span class="what">${d.persona} · ${fmtReset(d.at, zone)}</span></li>`)}
+        <ul>${due.slice(0, 5).map((d, i) => html`<li key=${i + d.persona}><span class="what">${d.persona} · ${fmtReset(d.at, zone)}</span>${d.reason ? html`<span class="why muted">${d.reason}</span>` : null}</li>`)}
           ${due.length > 5 ? html`<li class="muted">and ${due.length - 5} more</li>` : null}</ul>` : null}
     </div>`;
 }
@@ -582,7 +582,7 @@ function InboxPage({ project }) {
                       onKeyDown=${(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setOpenID(openID === m.id ? '' : m.id); } }}>
                     <td>${m.persona || html`<span class="muted">—</span>`}</td>
                     <td class="from">${m.from}</td>
-                    <td class="subj">${m.subject || html`<span class="muted">(no subject)</span>`}</td>
+                    <td class="subj">${m.subject || html`<span class="muted">(no subject)</span>`}${m.started ? html` <span class="tag run started">Started ${m.started}</span>` : null}</td>
                     <td class="when" title=${fmtFull(m.received)}>${fmtWhen(m.received)}</td>
                     ${tab === 'kept' ? html`<td><span class="tag wait">${m.filtered}</span></td>` : null}
                   </tr>

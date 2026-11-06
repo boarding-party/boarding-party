@@ -16,7 +16,50 @@ const nid = () => `r${++seq}`;
 
 const row = (v = '') => ({ id: nid(), v });
 const newPersona = () => ({ id: nid(), name: '', profile: {}, traits: [], identity: [] });
-const newStory = () => ({ id: nid(), name: '', goal: '', model: '', handoffs: [] });
+const newTrigger = (kind = '') => ({ kind, from: '', subject: '', keywords: [], linkHost: '', title: '', lead: '2' });
+const newStory = () => ({ id: nid(), name: '', goal: '', model: '', handoffs: [], trigger: newTrigger() });
+
+// leadMinutes turns a Go duration such as "5m" or "1h30m" into minutes for
+// the editor; an empty lead is the director's default of 2.
+function leadMinutes(lead) {
+  if (!lead) return '2';
+  const unit = { h: 3600, m: 60, s: 1, ms: 1e-3, us: 1e-6, 'µs': 1e-6, ns: 1e-9 };
+  let sec = 0;
+  const re = /(\d+(?:\.\d+)?)(ms|us|µs|ns|h|m|s)/g;
+  let rest = lead, x;
+  while ((x = re.exec(lead))) { sec += Number(x[1]) * unit[x[2]]; rest = rest.replace(x[0], ''); }
+  // Not a duration the editor understands: keep the text so a save sends it back.
+  if (rest !== '' && rest !== '0') return lead;
+  return String(Math.round((sec / 60) * 1000) / 1000);
+}
+
+function triggerFromProject(t) {
+  if (t && t.message) {
+    const m = t.message;
+    return { ...newTrigger('message'), from: m.from || '', subject: m.subject || '', keywords: [...(m.keywords || [])], linkHost: m.linkHost || '' };
+  }
+  if (t && t.calendar) return { ...newTrigger('calendar'), title: t.calendar.title || '', lead: leadMinutes(t.calendar.lead) };
+  return newTrigger();
+}
+
+function triggerToJSON(t) {
+  if (t.kind === 'message') {
+    const m = {};
+    if (t.from.trim()) m.from = t.from.trim();
+    if (t.subject.trim()) m.subject = t.subject.trim();
+    if (t.keywords.length) m.keywords = t.keywords;
+    if (t.linkHost.trim()) m.linkHost = t.linkHost.trim();
+    return { message: m };
+  }
+  if (t.kind === 'calendar') {
+    const c = {};
+    if (t.title.trim()) c.title = t.title.trim();
+    const n = t.lead.trim();
+    if (n) c.lead = /^\d+(\.\d+)?$/.test(n) ? `${n}m` : n;
+    return { calendar: c };
+  }
+  return null;
+}
 const newRole = () => ({ id: nid(), name: '', description: '', canWatchRecordings: false, activity: '', personas: [newPersona()], stories: [newStory()] });
 
 // A story's handoffs are kept as the draft ids of the stories they point
@@ -50,7 +93,7 @@ function fromProject(p) {
         traits: [...(pe.traits || [])],
         identity: Object.entries(pe.identity || {}).map(([k, v]) => ({ id: nid(), k, v: String(v) })),
       })),
-      stories: (r.stories || []).map((s) => ({ id: nid(), name: s.name || '', goal: s.goal || '', model: s.model || '', handoffs: s.handoffs || [] })),
+      stories: (r.stories || []).map((s) => ({ id: nid(), name: s.name || '', goal: s.goal || '', model: s.model || '', handoffs: s.handoffs || [], trigger: triggerFromProject(s.trigger) })),
     })),
   };
   const ids = new Map();
@@ -113,7 +156,8 @@ function toJSON(d) {
       })),
       stories: r.stories.map((s) => {
         const h = handoffs(s);
-        return { name: s.name.trim(), goal: s.goal.trim(), ...(s.model ? { model: s.model } : {}), ...(h.length ? { handoffs: h } : {}) };
+        const t = triggerToJSON(s.trigger);
+        return { name: s.name.trim(), goal: s.goal.trim(), ...(s.model ? { model: s.model } : {}), ...(h.length ? { handoffs: h } : {}), ...(t ? { trigger: t } : {}) };
       }),
     })),
   };
@@ -569,6 +613,59 @@ function StoryRow({ story, targets, onChange, onRemove }) {
         <${ModelSelect} value=${story.model} empty="Project's model" onChange=${(v) => onChange((s) => { s.model = v; })} />
       </label>
       <${HandsOffTo} story=${story} targets=${targets} onChange=${onChange} />
+      <${StartsOnItsOwn} story=${story} onChange=${onChange} />
+    </div>`;
+}
+
+// StartsOnItsOwn edits the story's trigger: an email or a calendar event
+// that starts it without the schedule. Switching kind drops the other rule.
+function StartsOnItsOwn({ story, onChange }) {
+  const t = story.trigger;
+  const id = `tr-${story.id}`;
+  const set = (k) => (e) => { const v = e.currentTarget.value; onChange((s) => { s.trigger[k] = v; }); };
+  return html`
+    <div class="trigger">
+      <div class="field">
+        <label for=${id}>Starts on its own</label>
+        <select id=${id} value=${t.kind}
+          onChange=${(e) => { const v = e.currentTarget.value; onChange((s) => { s.trigger = newTrigger(v); }); }}>
+          <option value="" selected=${t.kind === ''}>Only by schedule or by hand</option>
+          <option value="message" selected=${t.kind === 'message'}>When an email arrives</option>
+          <option value="calendar" selected=${t.kind === 'calendar'}>When a calendar event starts</option>
+        </select>
+      </div>
+      ${t.kind === 'message' ? html`
+        <div class="fields">
+          <div class="field">
+            <label for=${id + '-from'}>From</label>
+            <input id=${id + '-from'} value=${t.from} placeholder="smesolutions.uk" onInput=${set('from')} />
+          </div>
+          <div class="field">
+            <label for=${id + '-subject'}>Subject contains</label>
+            <input id=${id + '-subject'} value=${t.subject} onInput=${set('subject')} />
+          </div>
+          <div class="field">
+            <span class="flabel">Words in the email</span>
+            <${Tags} tags=${t.keywords} label="Words in the email" placeholder="Enter adds" more="Add word"
+              onChange=${(fn) => onChange((s) => fn(s.trigger.keywords))} />
+          </div>
+          <div class="field">
+            <label for=${id + '-link'}>Link to</label>
+            <input id=${id + '-link'} value=${t.linkHost} placeholder="smesolutions.uk" onInput=${set('linkHost')} />
+          </div>
+        </div>
+        <span class="hint">Every filled box must match. Only mail that passed Accept mail from counts.</span>` : null}
+      ${t.kind === 'calendar' ? html`
+        <div class="fields">
+          <div class="field">
+            <label for=${id + '-title'}>Title contains</label>
+            <input id=${id + '-title'} value=${t.title} placeholder="appointment" onInput=${set('title')} />
+          </div>
+          <div class="field">
+            <label for=${id + '-lead'}>Start this many minutes early</label>
+            <input id=${id + '-lead'} type="number" min="0" max="1440" inputmode="numeric" value=${t.lead} placeholder="2" onInput=${set('lead')} />
+          </div>
+        </div>` : null}
     </div>`;
 }
 

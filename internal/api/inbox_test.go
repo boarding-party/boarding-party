@@ -206,6 +206,27 @@ func TestMessagesListAndFilteredSplit(t *testing.T) {
 	}
 }
 
+func TestMessagesListShowsStartedStory(t *testing.T) {
+	srv, _, _, st := setupMail(t, okCheck)
+	now := time.Now()
+	for i, id := range []string{"m1", "m2"} {
+		if _, err := st.AddMessage(store.Message{ID: id, UIDValidity: 1, UID: uint32(i + 1), Persona: "ann", From: "a@x.test",
+			Subject: "s-" + id, Received: now, Stored: now}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := st.MarkMessageFired("m1", "confirm-signup", now); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.MarkMessageFired("m2", "", now); err != nil {
+		t.Fatal(err)
+	}
+	_, body := mailDo(t, "GET", srv.URL+"/api/messages", "")
+	if !strings.Contains(body, `"started":"confirm-signup"`) || strings.Count(body, `"started"`) != 1 {
+		t.Fatalf("started: %s", body)
+	}
+}
+
 func TestMessageGetUnknown404(t *testing.T) {
 	srv, _, _, _ := setupMail(t, okCheck)
 	if code, _ := mailDo(t, "GET", srv.URL+"/api/messages/nope", ""); code != 404 {
