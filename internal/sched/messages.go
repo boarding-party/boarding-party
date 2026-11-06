@@ -57,9 +57,9 @@ func (m *Messages) Due(_ context.Context, p project.Project, now time.Time) ([]F
 		if fired[msg.Persona] {
 			continue // one fire per persona per tick; the rest stay for later
 		}
-		subject := store.Clip(msg.Subject, 80)
+		subject := plain(msg.Subject, 80)
 		ctx, err := json.Marshal(store.RunContext{Kind: "message", MessageID: msg.ID,
-			Arrived: "Email from " + store.Clip(msg.From, MaxContextText) + ": " + store.Clip(msg.Subject, MaxContextText)})
+			Arrived: "Email from " + plain(msg.From, MaxContextText) + ": " + plain(msg.Subject, MaxContextText)})
 		if err != nil {
 			return nil, err
 		}
