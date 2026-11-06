@@ -11,12 +11,15 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"time"
 
 	"golang.org/x/net/publicsuffix"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/util/validation"
 
 	"sigs.k8s.io/yaml"
+
+	"github.com/boarding-party/boardingparty/internal/activity"
 )
 
 type Project struct {
@@ -36,6 +39,40 @@ type Project struct {
 	// Inbox configures inbound persona email. Optional; without it every
 	// received message is filtered.
 	Inbox *Inbox `json:"inbox,omitempty"`
+	// Timezone is the IANA zone that role schedules are read in. Optional;
+	// empty means DefaultTimezone.
+	Timezone string `json:"timezone,omitempty"`
+	// DailyBudget caps a day's spend, in US dollars. Optional; nil means
+	// DefaultDailyBudget.
+	DailyBudget *float64 `json:"dailyBudget,omitempty"`
+}
+
+// Time zone and budget defaults and bounds.
+const (
+	DefaultTimezone    = "Europe/London"
+	DefaultDailyBudget = 5.0
+	MaxDailyBudget     = 1000.0
+)
+
+// Location returns the project's time zone, DefaultTimezone when unset.
+func (p Project) Location() *time.Location {
+	name := p.Timezone
+	if name == "" {
+		name = DefaultTimezone
+	}
+	loc, err := time.LoadLocation(name)
+	if err != nil {
+		return time.UTC // unreachable for a validated project
+	}
+	return loc
+}
+
+// Budget returns the daily budget in US dollars, DefaultDailyBudget when unset.
+func (p Project) Budget() float64 {
+	if p.DailyBudget == nil {
+		return DefaultDailyBudget
+	}
+	return *p.DailyBudget
 }
 
 // Inbox is the project's inbound email policy.
@@ -126,6 +163,15 @@ type Role struct {
 	CanWatchRecordings bool      `json:"canWatchRecordings"`
 	Personas           []Persona `json:"personas"` // explicit in Plan 1; generated in Plan 2
 	Stories            []Story   `json:"stories"`
+	// Activity is when the role's personas are active, such as
+	// "every 30 min, 09:00–17:30". Stored in canonical form. Optional.
+	Activity string `json:"activity,omitempty"`
+}
+
+// Pattern returns the parsed Activity; validation guarantees it parses.
+func (r Role) Pattern() activity.Pattern {
+	p, _ := activity.Parse(r.Activity)
+	return p
 }
 
 type Persona struct {
@@ -228,6 +274,14 @@ func (p Project) validate() error {
 			return err
 		}
 	}
+	if p.Timezone != "" {
+		if _, err := time.LoadLocation(p.Timezone); err != nil {
+			return fmt.Errorf("timezone %q is not a time zone, such as Europe/London", p.Timezone)
+		}
+	}
+	if b := p.DailyBudget; b != nil && (!(*b > 0) || *b > MaxDailyBudget) {
+		return fmt.Errorf("dailyBudget must be more than 0 and at most 1000 (US dollars)")
+	}
 	if p.NodePool != "" {
 		k, v, ok := p.Pool()
 		if !ok || len(validation.IsQualifiedName(k)) > 0 || v == "" || len(validation.IsValidLabelValue(v)) > 0 {
@@ -236,7 +290,8 @@ func (p Project) validate() error {
 	}
 	seen := map[string]bool{}
 	personas := map[string]bool{} // runs and persona state are keyed by persona name
-	for _, r := range p.Roles {
+	for i := range p.Roles {
+		r := &p.Roles[i]
 		if r.Name == "" {
 			return fmt.Errorf("role needs a name")
 		}
@@ -244,6 +299,11 @@ func (p Project) validate() error {
 			return fmt.Errorf("duplicate role %q", r.Name)
 		}
 		seen[r.Name] = true
+		pat, err := activity.Parse(r.Activity)
+		if err != nil {
+			return fmt.Errorf("role %q: %w", r.Name, err)
+		}
+		r.Activity = pat.String()
 		for _, pe := range r.Personas {
 			if pe.Name == "" {
 				return fmt.Errorf("role %q: persona needs a name", r.Name)

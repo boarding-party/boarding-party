@@ -6,6 +6,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"sigs.k8s.io/yaml"
 )
 
 func TestLoadRejects(t *testing.T) {
@@ -298,5 +300,53 @@ func TestFindStory(t *testing.T) {
 	}
 	if _, ok := p.Role("nobody"); ok {
 		t.Fatal("found missing role")
+	}
+}
+
+func TestProjectTimezoneAndBudget(t *testing.T) {
+	base := "name: p\nsites: [\"https://x.test\"]\n"
+	p, err := Load([]byte(base))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Location().String() != "Europe/London" || p.Budget() != 5 {
+		t.Errorf("defaults: %v %v", p.Location(), p.Budget())
+	}
+	p, err = Load([]byte(base + "timezone: America/New_York\ndailyBudget: 12.5\n"))
+	if err != nil || p.Location().String() != "America/New_York" || p.Budget() != 12.5 {
+		t.Errorf("set: %v %v %v", err, p.Location(), p.Budget())
+	}
+	for _, tc := range []struct{ yaml, want string }{
+		{"timezone: Mars/Base\n", `timezone "Mars/Base" is not a time zone, such as Europe/London`},
+		{"dailyBudget: 0\n", "dailyBudget must be more than 0 and at most 1000 (US dollars)"},
+		{"dailyBudget: 1001\n", "dailyBudget must be more than 0 and at most 1000 (US dollars)"},
+	} {
+		if _, err := Load([]byte(base + tc.yaml)); err == nil || err.Error() != tc.want {
+			t.Errorf("%q: got %v, want %q", tc.yaml, err, tc.want)
+		}
+		js, _ := yamlToJSON(base + tc.yaml)
+		if _, err := LoadJSON(js); err == nil || err.Error() != tc.want {
+			t.Errorf("json %q: got %v", tc.yaml, err)
+		}
+	}
+}
+
+func yamlToJSON(s string) ([]byte, error) { return yaml.YAMLToJSON([]byte(s)) }
+
+func TestRoleActivity(t *testing.T) {
+	base := "name: p\nsites: [\"https://x.test\"]\nroles:\n  - name: buyer\n    activity: "
+	p, err := Load([]byte(base + "every 30 mins, 09:00-17:30\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := p.Roles[0].Activity; got != "every 30 min, 09:00–17:30" {
+		t.Errorf("canonical = %q", got)
+	}
+	if p.Roles[0].Pattern().IsZero() {
+		t.Error("Pattern is zero")
+	}
+	_, err = Load([]byte(base + "sometimes\n"))
+	if err == nil || !strings.Contains(err.Error(), `role "buyer": activity "sometimes"`) {
+		t.Errorf("err = %v", err)
 	}
 }
