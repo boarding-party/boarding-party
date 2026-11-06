@@ -1,0 +1,31 @@
+From: Clinic <bookings@smesolutions.uk>
+To: cast+john@ex.test
+Subject: Cancelled: Video appointment
+Authentication-Results: mx.google.com;
+       dkim=pass header.i=@smesolutions.uk header.s=s1 header.b=abc;
+       spf=pass smtp.mailfrom=smesolutions.uk;
+       dmarc=pass (p=NONE sp=NONE dis=NONE) header.from=smesolutions.uk
+MIME-Version: 1.0
+Content-Type: multipart/alternative; boundary="ALT"
+
+--ALT
+Content-Type: text/plain; charset=utf-8
+
+Your appointment has been cancelled.
+--ALT
+Content-Type: text/calendar; charset=utf-8; method=CANCEL
+
+BEGIN:VCALENDAR
+PRODID:-//Clinic//Bookings//EN
+VERSION:2.0
+METHOD:CANCEL
+BEGIN:VEVENT
+UID:appt-42@smesolutions.uk
+DTSTAMP:20261102T100000Z
+DTSTART;TZID=Europe/London:20261110T143000
+SEQUENCE:1
+STATUS:CANCELLED
+SUMMARY:Video appointment
+END:VEVENT
+END:VCALENDAR
+--ALT--

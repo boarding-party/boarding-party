@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"slices"
 	"strconv"
@@ -218,7 +219,7 @@ func (s *Service) fetchNew(ctx context.Context, cl *client.Client, mailbox strin
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		m, err := s.readOne(cl, mt, p)
+		m, events, err := s.readOne(cl, mt, p)
 		if err != nil {
 			return err
 		}
@@ -226,6 +227,9 @@ func (s *Service) fetchNew(ctx context.Context, cl *client.Client, mailbox strin
 		added, err := s.Store.AddMessage(m)
 		if err != nil {
 			return err
+		}
+		if added {
+			s.storeEvents(m, events)
 		}
 		if err := s.Store.SetMailCursor(validity, mt.uid); err != nil {
 			return err
@@ -237,11 +241,12 @@ func (s *Service) fetchNew(ctx context.Context, cl *client.Client, mailbox strin
 	return nil
 }
 
-// readOne turns one new message into a stored row. Only connection errors are returned;
-// a message that is too large or unreadable becomes a filtered stub so it cannot stall the cursor.
-func (s *Service) readOne(cl *client.Client, mt meta, p project.Project) (store.Message, error) {
+// readOne turns one new message into a stored row and, when it is delivered, the calendar events it
+// carries. Only connection errors are returned; a message that is too large or unreadable becomes a
+// filtered stub so it cannot stall the cursor.
+func (s *Service) readOne(cl *client.Client, mt meta, p project.Project) (store.Message, []Event, error) {
 	if mt.size > MaxMessage {
-		return s.stub(mt, p, FilteredTooLarge), nil
+		return s.stub(mt, p, FilteredTooLarge), nil, nil
 	}
 	seq := new(imap.SeqSet)
 	seq.AddNum(mt.uid)
@@ -257,17 +262,40 @@ func (s *Service) readOne(cl *client.Client, mt meta, p project.Project) (store.
 		}
 	})
 	if err != nil {
-		return store.Message{}, fmt.Errorf("fetch message %d: %w", mt.uid, err)
+		return store.Message{}, nil, fmt.Errorf("fetch message %d: %w", mt.uid, err)
 	}
 	if raw == nil || readErr != nil || len(raw) > MaxMessage {
-		return s.stub(mt, p, FilteredUnreadable), nil
+		return s.stub(mt, p, FilteredUnreadable), nil, nil
 	}
 	im, err := Parse(raw)
 	if err != nil {
-		return s.stub(mt, p, FilteredUnreadable), nil
+		return s.stub(mt, p, FilteredUnreadable), nil, nil
 	}
 	im.Persona, im.Filtered = Route(im, p)
-	return s.toStore(im, mt.uid), nil
+	var events []Event
+	if im.Filtered == "" && im.Persona != "" {
+		events = im.CalendarEvents(p.Location())
+	}
+	return s.toStore(im, mt.uid), events, nil
+}
+
+// storeEvents syncs a delivered message's events into its persona's calendar. A failure is logged
+// and skipped: it must not hold up the mail cursor.
+func (s *Service) storeEvents(m store.Message, events []Event) {
+	for _, e := range events {
+		var err error
+		if e.Cancel {
+			err = s.Store.DeleteEvent(m.Persona, e.UID)
+		} else {
+			err = s.Store.UpsertEvent(store.Event{
+				Persona: m.Persona, UID: e.UID, Title: e.Title, Start: e.Start, End: e.End,
+				Location: e.Location, URL: e.URL, MessageID: m.ID,
+			})
+		}
+		if err != nil {
+			log.Printf("inbox: calendar event for message %s: %v", m.ID, err)
+		}
+	}
 }
 
 // stub records a message the poller could not parse, using what the envelope says.

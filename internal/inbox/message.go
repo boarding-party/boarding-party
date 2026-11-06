@@ -21,4 +21,7 @@ type Message struct {
 	AuthServ string `json:"authServ"`
 	// Filtered is why the message was not delivered to the persona; empty when delivered.
 	Filtered string `json:"filtered"`
+
+	// calendar holds the raw .ics parts; CalendarEvents resolves them once the persona's zone is known.
+	calendar [][]byte `json:"-"`
 }

@@ -443,3 +443,49 @@ func TestConnectHonoursContextOnSilentServer(t *testing.T) {
 		t.Fatalf("err=%v after %v, want a prompt error", err, time.Since(start))
 	}
 }
+
+func TestPollerStoresEvents(t *testing.T) {
+	ts := startServer(t)
+	s := newService(t, ts, testPass)
+	runCycle(t, s)
+	crlf := func(b []byte) string { return strings.ReplaceAll(string(b), "\n", "\r\n") }
+	invite := crlf(fixture(t, "invite-request.eml"))
+	from, to := time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC), time.Date(2026, 12, 1, 0, 0, 0, 0, time.UTC)
+	events := func() []store.Event {
+		t.Helper()
+		evs, err := s.Store.Events("", from, to)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return evs
+	}
+
+	ts.add(t, strings.ReplaceAll(invite, "bookings@smesolutions.uk", "bookings@other.test")) // filtered: sender denied
+	ts.add(t, strings.ReplaceAll(invite, "cast+john@ex.test", "nobody@ex.test"))             // filtered: no persona
+	runCycle(t, s)
+	if got := all(t, s); len(got) != 2 || got[0].Filtered == "" || got[1].Filtered == "" {
+		t.Fatalf("messages = %+v", got)
+	}
+	if evs := events(); len(evs) != 0 {
+		t.Fatalf("filtered mail stored events: %+v", evs)
+	}
+
+	ts.add(t, invite)
+	runCycle(t, s)
+	evs := events()
+	if len(evs) != 1 {
+		t.Fatalf("events = %+v", evs)
+	}
+	e := evs[0]
+	msgs := all(t, s)
+	if e.Persona != "John" || e.UID != "appt-42@smesolutions.uk" || e.Title != "Video appointment, Dr Lee" ||
+		!e.Start.Equal(time.Date(2026, 11, 10, 14, 30, 0, 0, time.UTC)) || e.MessageID != msgs[2].ID {
+		t.Fatalf("event = %+v", e)
+	}
+
+	ts.add(t, crlf(fixture(t, "invite-cancel.eml")))
+	runCycle(t, s)
+	if evs := events(); len(evs) != 0 {
+		t.Fatalf("after cancel: %+v", evs)
+	}
+}

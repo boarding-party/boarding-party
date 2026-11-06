@@ -1,0 +1,13 @@
+From: Clinic <bookings@smesolutions.uk>
+To: cast+john@ex.test
+Subject: Your booking
+Authentication-Results: mx.google.com;
+       dkim=pass header.i=@smesolutions.uk header.s=s1 header.b=abc;
+       spf=pass smtp.mailfrom=smesolutions.uk;
+       dmarc=pass (p=NONE sp=NONE dis=NONE) header.from=smesolutions.uk
+MIME-Version: 1.0
+Content-Type: text/html; charset=utf-8
+
+<p>Booked.</p>
+<p><a href="https://calendar.google.com/calendar/render?action=TEMPLATE&amp;text=Video+appointment&amp;dates=20261110T143000Z/20261110T150000Z&amp;location=Online">Add to Google Calendar</a></p>
+<p><a href="https://smesolutions.uk/manage">Manage</a></p>

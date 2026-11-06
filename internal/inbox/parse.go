@@ -66,7 +66,8 @@ func Parse(raw []byte) (Message, error) {
 		}
 	}
 
-	plain, htmlBody := collect(ent)
+	plain, htmlBody, cal := collect(ent)
+	m.calendar = cal
 	text, hrefs := plain, []string(nil)
 	if htmlBody != "" {
 		htmlText, htmlHrefs := htmlToText(htmlBody)
@@ -92,8 +93,9 @@ func addrs(v string) []string {
 	return out
 }
 
-// collect walks the entity and returns the first text/plain body and the first text/html body.
-func collect(e *message.Entity) (plain, htmlBody string) {
+// collect walks the entity and returns the first text/plain body, the first text/html body and up
+// to MaxEvents calendar parts (attachments included).
+func collect(e *message.Entity) (plain, htmlBody string, cal [][]byte) {
 	var walk func(e *message.Entity)
 	walk = func(e *message.Entity) {
 		if mr := e.MultipartReader(); mr != nil {
@@ -105,8 +107,15 @@ func collect(e *message.Entity) (plain, htmlBody string) {
 				walk(p)
 			}
 		}
-		mt, _, _ := e.Header.ContentType()
-		if disp, _, _ := e.Header.ContentDisposition(); disp == "attachment" {
+		mt, ctParams, _ := e.Header.ContentType()
+		disp, dispParams, _ := e.Header.ContentDisposition()
+		if isCalendar(mt, ctParams["name"], dispParams["filename"]) {
+			if len(cal) < MaxEvents {
+				cal = append(cal, []byte(readBody(e)))
+			}
+			return
+		}
+		if disp == "attachment" {
 			return
 		}
 		switch mt {
@@ -121,7 +130,20 @@ func collect(e *message.Entity) (plain, htmlBody string) {
 		}
 	}
 	walk(e)
-	return plain, htmlBody
+	return plain, htmlBody, cal
+}
+
+// isCalendar reports whether a part is an iCalendar object, by media type or .ics file name.
+func isCalendar(mediaType, name, filename string) bool {
+	if mediaType == "text/calendar" || mediaType == "application/ics" {
+		return true
+	}
+	for _, n := range []string{name, filename} {
+		if strings.HasSuffix(strings.ToLower(strings.TrimSpace(n)), ".ics") {
+			return true
+		}
+	}
+	return false
 }
 
 func readBody(e *message.Entity) string {

@@ -1,0 +1,55 @@
+From: Clinic <bookings@smesolutions.uk>
+To: cast+john@ex.test
+Subject: Invitation: Video appointment
+Authentication-Results: mx.google.com;
+       dkim=pass header.i=@smesolutions.uk header.s=s1 header.b=abc;
+       spf=pass smtp.mailfrom=smesolutions.uk;
+       dmarc=pass (p=NONE sp=NONE dis=NONE) header.from=smesolutions.uk
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="MIX"
+
+--MIX
+Content-Type: multipart/alternative; boundary="ALT"
+
+--ALT
+Content-Type: text/plain; charset=utf-8
+
+You are invited to a video appointment.
+--ALT
+Content-Type: text/calendar; charset=utf-8; method=REQUEST
+
+BEGIN:VCALENDAR
+PRODID:-//Clinic//Bookings//EN
+VERSION:2.0
+METHOD:REQUEST
+BEGIN:VTIMEZONE
+TZID:Europe/London
+BEGIN:STANDARD
+DTSTART:19701025T020000
+TZOFFSETFROM:+0100
+TZOFFSETTO:+0000
+END:STANDARD
+END:VTIMEZONE
+BEGIN:VEVENT
+UID:appt-42@smesolutions.uk
+DTSTAMP:20261101T100000Z
+DTSTART;TZID=Europe/London:20261110T143000
+DTEND;TZID=Europe/London:20261110T150000
+SUMMARY:Video appointment\, Dr Lee
+LOCATION:Online
+URL:https://smesolutions.uk/appointments/42
+END:VEVENT
+END:VCALENDAR
+--ALT--
+--MIX
+Content-Type: application/ics; name="invite.ics"
+Content-Disposition: attachment; filename="invite.ics"
+Content-Transfer-Encoding: base64
+
+QkVHSU46VkNBTEVOREFSDQpWRVJTSU9OOjIuMA0KTUVUSE9EOlJFUVVFU1QNCkJFR0lOOlZFVkVO
+VA0KVUlEOmFwcHQtNDJAc21lc29sdXRpb25zLnVrDQpEVFNUQVJUO1RaSUQ9RXVyb3BlL0xvbmRv
+bjoyMDI2MTExMFQxNDMwMDANCkRURU5EO1RaSUQ9RXVyb3BlL0xvbmRvbjoyMDI2MTExMFQxNTAw
+MDANClNVTU1BUlk6VmlkZW8gYXBwb2ludG1lbnRcLCBEciBMZWUNCkxPQ0FUSU9OOk9ubGluZQ0K
+VVJMOmh0dHBzOi8vc21lc29sdXRpb25zLnVrL2FwcG9pbnRtZW50cy80Mg0KRU5EOlZFVkVOVA0K
+RU5EOlZDQUxFTkRBUg0K
+--MIX--
