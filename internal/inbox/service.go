@@ -168,6 +168,13 @@ func (s *Service) Status() Status {
 	return s.status
 }
 
+// Verified records that the saved mailbox was just signed in to, so the status
+// reads as connected until the next cycle reports otherwise.
+func (s *Service) Verified() {
+	s.init()
+	s.setStatus(Status{State: "ok", Checked: s.now()})
+}
+
 // Kick starts the next cycle now, even during the error backoff. Use it after the mailbox
 // settings changed and the new login was already checked.
 func (s *Service) Kick() {

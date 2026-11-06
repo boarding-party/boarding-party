@@ -820,6 +820,7 @@ function InboxCard({ allowFrom, authServId, onChange }) {
   const [showPass, setShowPass] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
+  const [done, setDone] = useState(''); // what the last Save and test did
 
   const adopt = (m) => {
     setMb(m);
@@ -844,17 +845,18 @@ function InboxCard({ allowFrom, authServId, onChange }) {
     const n = Number(port);
     if (!host.trim() || !user.trim()) { setErr('Enter the IMAP server and the username.'); return; }
     if (!Number.isInteger(n) || n < 1 || n > 65535) { setErr('The port must be a number from 1 to 65535.'); return; }
-    setBusy(true); setErr('');
+    setBusy(true); setErr(''); setDone('');
     try {
       adopt(await api('/api/mailbox', {
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ host: host.trim(), port: n, username: user.trim(), password: pass.replace(/\s+/g, '') }),
       }));
+      setDone(`Signed in to ${user.trim()}. New mail reaches the personas within a few seconds.`);
     } catch (e) { setErr(e.message); } finally { setBusy(false); }
   };
   const remove = async () => {
     if (!(await confirmDialog('Remove the mailbox? Personas stop receiving mail. Mail already received stays on the Inbox page.', { confirm: 'Remove mailbox', danger: true }))) return;
-    setBusy(true); setErr('');
+    setBusy(true); setErr(''); setDone('');
     try { await api('/api/mailbox', { method: 'DELETE' }); await load(); } catch (e) { setErr(e.message); } finally { setBusy(false); }
   };
 
@@ -903,6 +905,7 @@ function InboxCard({ allowFrom, authServId, onChange }) {
         ${saved ? html`<button class="btn danger-ghost" type="button" disabled=${busy} onClick=${remove}>Remove</button>` : null}
       </div>
       ${err ? html`<div class="note bad" role="alert">${err}</div>` : null}
+      ${done && !err ? html`<div class="note ok" role="status">${done}</div>` : null}
 
       <div class="field" style="margin-top:16px">
         <label>Accept mail from</label>

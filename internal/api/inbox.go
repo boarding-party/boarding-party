@@ -107,6 +107,7 @@ func (s *server) putMailbox(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	m.Verified()
 	m.Kick()
 	writeJSON(w, http.StatusOK, view(c, true, m.Status()))
 }

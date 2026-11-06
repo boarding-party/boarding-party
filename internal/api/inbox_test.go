@@ -89,6 +89,14 @@ func TestMailboxGetNeverReturnsPassword(t *testing.T) {
 	}
 }
 
+func TestMailboxPutReportsTheCheckedLogin(t *testing.T) {
+	srv, _, _, _ := setupMail(t, okCheck)
+	code, body := mailDo(t, "PUT", srv.URL+"/api/mailbox", putBody)
+	if code != 200 || !strings.Contains(body, `"state":"ok"`) || !strings.Contains(body, `"checked":`) {
+		t.Fatalf("put: %d %s", code, body)
+	}
+}
+
 func TestMailboxPutChecksBeforeSaving(t *testing.T) {
 	srv, _, sec, _ := setupMail(t, func(context.Context, inbox.Config) error { return errors.New("bad login") })
 	code, body := mailDo(t, "PUT", srv.URL+"/api/mailbox", putBody)
