@@ -36,33 +36,13 @@ func Route(m Message, p project.Project) (persona, filtered string) {
 	if persona == "" {
 		return "", FilteredNoPersona
 	}
-	if p.Inbox == nil || !senderAllowed(m.From, p.Inbox.AllowFrom) {
+	if p.Inbox == nil || !project.SenderMatches(m.From, p.Inbox.AllowFrom) {
 		return persona, FilteredSenderDenied
 	}
 	if !m.Verified || m.AuthServ != trustedAuthServ(p) {
 		return persona, FilteredUnverified
 	}
 	return persona, ""
-}
-
-func senderAllowed(from string, allow []string) bool {
-	from = strings.ToLower(from)
-	at := strings.LastIndexByte(from, '@')
-	if at < 0 {
-		return false
-	}
-	domain := from[at+1:]
-	for _, e := range allow {
-		e = strings.ToLower(e)
-		if strings.Contains(e, "@") {
-			if from == e {
-				return true
-			}
-		} else if e != "" && (domain == e || strings.HasSuffix(domain, "."+e)) {
-			return true
-		}
-	}
-	return false
 }
 
 // DefaultAuthServID is the authserv-id trusted when the project sets none: Gmail, where persona mailboxes live.

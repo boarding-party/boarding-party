@@ -190,6 +190,9 @@ type Story struct {
 	Model string `json:"model,omitempty"`
 	// Handoffs name the stories that follow this one, each in another role.
 	Handoffs []Handoff `json:"handoffs,omitempty"`
+	// Trigger starts the story from a message or calendar event instead of
+	// the role's schedule.
+	Trigger *Trigger `json:"trigger,omitempty"`
 }
 
 // Handoff points at a story of another role that this story passes work to.
@@ -322,6 +325,11 @@ func (p Project) validate() error {
 			}
 			if st.Model != "" && !modelID.MatchString(st.Model) {
 				return fmt.Errorf("role %q: story %q: %q is not a model id, such as claude-haiku-5-5", r.Name, st.Name, st.Model)
+			}
+			if st.Trigger != nil {
+				if err := st.Trigger.validate(); err != nil {
+					return fmt.Errorf("role %q: story %q: %w", r.Name, st.Name, err)
+				}
 			}
 		}
 	}
