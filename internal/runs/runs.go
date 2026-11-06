@@ -223,6 +223,9 @@ func (s *Service) start(ctx context.Context, persona, story string, q *store.Que
 	if err != nil {
 		return store.Run{}, err
 	}
+	if err := s.Gate(time.Now()); err != nil {
+		return store.Run{}, err
+	}
 	id, err := randHex(16)
 	if err != nil {
 		return store.Run{}, err
