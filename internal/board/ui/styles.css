@@ -44,6 +44,9 @@ main { min-width: 0; }
 @keyframes pulse { 70% { box-shadow: 0 0 0 7px rgba(30,138,90,0); } 100% { box-shadow: 0 0 0 0 rgba(30,138,90,0); } }
 @media (prefers-reduced-motion: reduce) { .dot.live { animation: none; } }
 .runbar .stat { color: var(--muted); font-size: 13px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.runbar .spend { overflow: visible; white-space: normal; }
+.runbar .bad-text { color: var(--bad); }
+.upnext h3.later { margin: 12px 0 2px; font-size: 12px; font-weight: 600; color: var(--muted); }
 .runbar .stat b { color: var(--ink); font-weight: 600; }
 .grow { flex: 1; }
 

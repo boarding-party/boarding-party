@@ -164,6 +164,7 @@ function App() {
   const [runsErr, setRunsErr] = useState('');
   const [queue, setQueue] = useState([]);
   const [director, setDirector] = useState('unknown'); // unknown | ok | down
+  const [status, setStatus] = useState(null); // /api/status: spend, pause, scheduled personas
 
   const loadProject = useCallback(async () => {
     try {
@@ -185,9 +186,14 @@ function App() {
     } catch (_) { return null; }
   }, []);
 
+  // Like the queue, the status rides along; the last known one stays on error.
+  const loadStatus = useCallback(async () => {
+    try { setStatus(await api('/api/status')); } catch (_) { /* keep the last status */ }
+  }, []);
+
   const loadRuns = useCallback(async () => {
     try {
-      const [rs] = await Promise.all([api('/api/runs').then((x) => x || []), loadQueue()]);
+      const [rs] = await Promise.all([api('/api/runs').then((x) => x || []), loadQueue(), loadStatus()]);
       setRuns(rs);
       setRunsErr('');
       setDirector('ok');
@@ -197,7 +203,7 @@ function App() {
       setDirector(directorDown(e) ? 'down' : 'ok');
       return null;
     }
-  }, [loadQueue]);
+  }, [loadQueue, loadStatus]);
 
   // Poll quickly while a run is active or one is up next: the director starts
   // queued runs on its own.
@@ -216,12 +222,12 @@ function App() {
     <div class="app">
       <${Sidebar} route=${route} project=${project} runs=${runs} />
       <main>
-        <${RunStrip} director=${director} active=${active} />
+        <${RunStrip} director=${director} active=${active} status=${status} onChange=${loadRuns} />
         ${route.page === 'run' ? html`<${RunPage} key=${route.id} id=${route.id} onChange=${loadRuns} />`
           : route.page === 'project' ? html`<${ProjectPage} section=${route.section} roleN=${route.roleN} onSaved=${loadProject} onDirty=${onDirty} />`
           : route.page === 'inbox' ? html`<${InboxPage} project=${project} />`
           : html`<${RunsPage} project=${project} projectErr=${projectErr} runs=${runs} runsErr=${runsErr}
-                    queue=${queue} active=${active} onStarted=${loadRuns} />`}
+                    queue=${queue} status=${status} active=${active} onStarted=${loadRuns} />`}
       </main>
       <${DialogHost} />
     </div>`;
@@ -247,7 +253,36 @@ function Sidebar({ route, project, runs }) {
     </aside>`;
 }
 
-function RunStrip({ director, active }) {
+// fmtMoney writes US dollars with two decimals.
+const fmtMoney = (n) => '$' + (Number(n) || 0).toFixed(2);
+
+// fmtCost is a run's cost; a fraction of a cent reads as "< $0.01".
+const fmtCost = (n) => (n > 0 && n < 0.005 ? '< $0.01' : '≈ ' + fmtMoney(n));
+
+// fmtReset is the clock time the daily budget resets, in the project's zone.
+function fmtReset(iso, zone) {
+  const d = parseTime(iso);
+  if (!d) return 'midnight';
+  const opts = { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' };
+  try { return d.toLocaleTimeString('en-GB', { ...opts, timeZone: zone || undefined }); } catch (_) { return d.toLocaleTimeString('en-GB', opts); }
+}
+
+function RunStrip({ director, active, status, onChange }) {
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const act = async (fn) => {
+    setBusy(true); setErr('');
+    try { await fn(); } catch (e) { if (e.status !== 404) setErr(e.message); } finally { setBusy(false); onChange(); }
+  };
+  const togglePause = async () => {
+    const pausing = !status.paused;
+    if (pausing && !(await confirmDialog('Pause the cast? Running runs finish; nothing new starts until you resume.', { confirm: 'Pause' }))) return;
+    act(() => api('/api/pause', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ paused: pausing }) }));
+  };
+  const stop = async () => {
+    if (!(await confirmDialog('Stop this run now? Its recording so far is kept.', { confirm: 'Stop run', danger: true }))) return;
+    act(() => api(`/api/runs/${encodeURIComponent(active.id)}/stop`, { method: 'POST' }));
+  };
   const state = director === 'ok' ? { dot: 'ok', label: 'Director ready' }
     : director === 'down' ? { dot: 'bad', label: 'Director unreachable' }
     : { dot: '', label: 'Connecting…' };
@@ -259,14 +294,21 @@ function RunStrip({ director, active }) {
             <a href=${runHref(active.id)}><b>${active.persona}</b></a> is on <b>${active.story}</b>
             <span class="muted"> · ${active.state} since ${fmtWhen(active.started)}</span></div>`
         : director === 'ok' ? html`<div class="stat">No run active</div>` : null}
+      ${status ? html`
+        <div class="stat spend">Today <b>${fmtMoney(status.spentToday)}</b>${status.dailyBudget > 0 ? html` of <b>${fmtMoney(status.dailyBudget)}</b>` : null}
+          ${status.overBudget ? html` <span class="tag bad">Budget reached</span> No new runs until ${fmtReset(status.resetsAt, status.timezone)}` : null}
+          ${status.paused ? html` <span class="tag hold">Paused</span>` : null}</div>` : null}
       <div class="grow"></div>
+      ${err ? html`<span class="small bad-text" role="alert">${err}</span>` : null}
+      ${status ? html`<button class="btn" type="button" disabled=${busy} onClick=${togglePause}>${status.paused ? 'Resume' : 'Pause'}</button>` : null}
+      ${active ? html`<button class="btn danger-ghost" type="button" disabled=${busy} onClick=${stop}>Stop run</button>` : null}
       <a class="btn" href="#/project">Edit project</a>
     </div>`;
 }
 
 // ---- runs page ----------------------------------------------------------
 
-function RunsPage({ project, projectErr, runs, runsErr, queue, active, onStarted }) {
+function RunsPage({ project, projectErr, runs, runsErr, queue, status, active, onStarted }) {
   return html`
     <section class="page">
       <h1>Runs</h1>
@@ -280,7 +322,7 @@ function RunsPage({ project, projectErr, runs, runsErr, queue, active, onStarted
         ${runsErr ? html`<div class="note bad">Could not load runs: ${runsErr}</div>` : null}
         ${runs && runs.length === 0 && project !== null
           ? html`<div class="empty"><b>No runs yet.</b>Start one above.</div>` : null}
-        ${queue.length ? html`<${UpNext} queue=${queue} onChange=${onStarted} />` : null}
+        ${queue.length || (status && status.due.length) ? html`<${UpNext} queue=${queue} due=${status ? status.due : []} onChange=${onStarted} />` : null}
         ${runs && runs.length > 0 ? html`<${RunsTable} runs=${runs} />` : null}
       </div>
     </section>`;
@@ -367,7 +409,7 @@ function StateTag({ state, wait }) {
 }
 
 // UpNext lists the runs the director will start next, oldest first.
-function UpNext({ queue, onChange }) {
+function UpNext({ queue, due, onChange }) {
   const [busy, setBusy] = useState('');
   const [err, setErr] = useState('');
   const remove = async (q) => {
@@ -393,6 +435,9 @@ function UpNext({ queue, onChange }) {
             aria-label=${`Remove ${q.persona} · ${q.story} from the queue`} onClick=${() => remove(q)}>×</button>
         </li>`)}</ul>
       ${err ? html`<div class="note bad" role="alert">Could not remove the run: ${err}</div>` : null}
+      ${due.length ? html`<h3 class="later">Later</h3>
+        <ul>${due.slice(0, 5).map((d, i) => html`<li key=${i + d.persona}><span class="what">${d.persona} · ${fmtWhen(d.at)}</span></li>`)}
+          ${due.length > 5 ? html`<li class="muted">and ${due.length - 5} more</li>` : null}</ul>` : null}
     </div>`;
 }
 
@@ -736,6 +781,7 @@ function RunPage({ id, onChange }) {
               ${took ? html`<dt>Duration</dt><dd>${took}</dd>` : null}
               ${usage && usage.byModel ? html`<dt>Model</dt><dd>${fmtModels(usage.byModel)}</dd>` : null}
               ${usage ? html`<dt>Tokens</dt><dd>${fmtUsage(usage)}</dd>` : null}
+              ${typeof data.cost === 'number' ? html`<dt>Cost</dt><dd>${fmtCost(data.cost)}</dd>` : null}
               ${run.session ? html`<dt>Session</dt><dd><code>${run.session}</code></dd>` : null}
             </dl>
           </div>

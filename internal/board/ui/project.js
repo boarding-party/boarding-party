@@ -17,7 +17,7 @@ const nid = () => `r${++seq}`;
 const row = (v = '') => ({ id: nid(), v });
 const newPersona = () => ({ id: nid(), name: '', profile: {}, traits: [], identity: [] });
 const newStory = () => ({ id: nid(), name: '', goal: '', model: '', handoffs: [] });
-const newRole = () => ({ id: nid(), name: '', description: '', canWatchRecordings: false, personas: [newPersona()], stories: [newStory()] });
+const newRole = () => ({ id: nid(), name: '', description: '', canWatchRecordings: false, activity: '', personas: [newPersona()], stories: [newStory()] });
 
 // A story's handoffs are kept as the draft ids of the stories they point
 // at, so renaming a role or story carries through and removing one drops
@@ -31,6 +31,8 @@ function fromProject(p) {
     extraHosts: (p.extraHosts || []).map(row),
     model: p.model || '',
     nodePool: p.nodePool || '',
+    timezone: p.timezone || '',
+    dailyBudget: p.dailyBudget != null ? String(p.dailyBudget) : '',
     // Not edited here, but carried so a save never drops it.
     resources: p.resources || null,
     allowFrom: [...((p.inbox && p.inbox.allowFrom) || [])],
@@ -40,6 +42,7 @@ function fromProject(p) {
       name: r.name || '',
       description: r.description || '',
       canWatchRecordings: !!r.canWatchRecordings,
+      activity: r.activity || '',
       personas: (r.personas || []).map((pe) => ({
         id: nid(),
         name: pe.name || '',
@@ -93,12 +96,15 @@ function toJSON(d) {
     extraHosts: vals(d.extraHosts),
     model: d.model.trim(),
     nodePool: d.nodePool.trim(),
+    ...(d.timezone.trim() ? { timezone: d.timezone.trim() } : {}),
+    ...(d.dailyBudget.trim() !== '' && isFinite(Number(d.dailyBudget)) ? { dailyBudget: Number(d.dailyBudget) } : {}),
     ...(d.resources ? { resources: d.resources } : {}),
     ...(d.allowFrom.length || d.authServId.trim() ? { inbox: { allowFrom: d.allowFrom, ...(d.authServId.trim() ? { authServId: d.authServId.trim() } : {}) } } : {}),
     roles: d.roles.map((r) => ({
       name: r.name.trim(),
       description: r.description.trim(),
       canWatchRecordings: r.canWatchRecordings,
+      ...(r.activity.trim() ? { activity: r.activity.trim() } : {}),
       personas: r.personas.map((pe) => ({
         name: pe.name.trim(),
         ...(Object.values(pe.profile).some(Boolean) ? { profile: Object.fromEntries(Object.entries(pe.profile).filter(([, v]) => v)) } : {}),
@@ -199,7 +205,18 @@ export function ProjectPage({ section = 'general', roleN = '', onSaved, onDirty 
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(toJSON(draft)),
       });
-      setBaseline(JSON.stringify(toJSON(draft)));
+      // The server canonicalises each role's activity; show what it kept.
+      let next = draft;
+      try {
+        const saved = await api('/api/project');
+        const roles = (saved && saved.roles) || [];
+        if (roles.length === draft.roles.length) {
+          next = structuredClone(draft);
+          next.roles.forEach((r, i) => { r.activity = roles[i].activity || ''; });
+          setDraft(next);
+        }
+      } catch (_) { /* the save worked; keep what was typed */ }
+      setBaseline(JSON.stringify(toJSON(next)));
       setIsNew(false);
       setToast('Project saved');
       onSaved();
@@ -323,6 +340,17 @@ export function ProjectPage({ section = 'general', roleN = '', onSaved, onDirty 
               onInput=${(e) => { const v = e.currentTarget.value; edit((d) => { d.nodePool = v; }); }} />
             <span class="hint">Node label for the pool runs use, as key=value. The pool needs the same key=value as a NoSchedule taint. Leave empty to run on any node.</span>
           </div>
+          <div class="field">
+            <label for="pj-budget">Daily budget</label>
+            <input id="pj-budget" type="number" min="0" step="0.5" value=${draft.dailyBudget} placeholder="5"
+              onInput=${(e) => { const v = e.currentTarget.value; edit((d) => { d.dailyBudget = v; }); }} />
+            <span class="hint">Spend cap in US dollars per day. Running runs finish; new ones wait until midnight.</span>
+          </div>
+          <div class="field">
+            <label for="pj-tz">Time zone</label>
+            <input id="pj-tz" value=${draft.timezone} placeholder="Europe/London"
+              onInput=${(e) => { const v = e.currentTarget.value; edit((d) => { d.timezone = v; }); }} />
+          </div>
         </div>
       </div>`;
   }
@@ -345,7 +373,7 @@ export function ProjectPage({ section = 'general', roleN = '', onSaved, onDirty 
 
       <div class="projgrid">
         <nav class="subnav" aria-label="Project sections">
-          ${link('#/project/general', 'General', section === 'general', changed('name', 'model', 'nodePool'))}
+          ${link('#/project/general', 'General', section === 'general', changed('name', 'model', 'nodePool', 'timezone', 'dailyBudget'))}
           ${link('#/project/sites', 'Sites and hosts', section === 'sites', changed('sites', 'extraHosts'))}
           ${link('#/project/inbox', 'Inbox', section === 'inbox', changed('inbox'))}
           ${link('#/project/files', 'Test files', section === 'files', false)}
@@ -420,6 +448,12 @@ function RoleCard({ role, n, profileFields, roles, onChange, onRemove }) {
         <label for=${id + '-desc'}>Description</label>
         <textarea id=${id + '-desc'} rows="2" value=${role.description} placeholder="Who they are and what they want from the site."
           onInput=${(e) => { const v = e.currentTarget.value; onChange((r) => { r.description = v; }); }}></textarea>
+      </div>
+      <div class="field">
+        <label for=${id + '-activity'}>Activity</label>
+        <input id=${id + '-activity'} value=${role.activity} placeholder="every 30 min, 09:00–17:30"
+          onInput=${(e) => { const v = e.currentTarget.value; onChange((r) => { r.activity = v; }); }} />
+        <span class="hint">How often personas in this role act on their own. Examples: daily at 09:00 · every 2 h, 09:00–17:30 · 2–4 times a day, 07:00–23:00. Leave empty to run them only by hand or hand-off.</span>
       </div>
       <label class="check">
         <input type="checkbox" checked=${role.canWatchRecordings}
