@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/boarding-party/boardingparty/internal/project"
 	"github.com/boarding-party/boardingparty/internal/store"
 )
 
@@ -88,5 +89,50 @@ func TestCostPricesUnsplitExcess(t *testing.T) {
 	// 0.4M haiku output = 0.2, plus 0.6M unsplit at opus = 12.
 	if got := Cost(u); math.Abs(got-12.2) > 1e-9 {
 		t.Fatal(got)
+	}
+}
+
+func TestStatusIncludesCalendarDue(t *testing.T) {
+	svc, _ := newSvc(t)
+	p := project.Project{Name: "p", Sites: []string{"https://x.test"}, Roles: []project.Role{{
+		Name: "buyer", Activity: "every 1 h",
+		Personas: []project.Persona{{Name: "ann"}, {Name: "bo"}},
+		Stories: []project.Story{{Name: "checkout", Goal: "buy a thing"},
+			{Name: "join", Goal: "join the call", Trigger: &project.Trigger{Calendar: &project.CalendarRule{Title: "appointment", Lead: "10m"}}},
+			{Name: "early", Goal: "prepare", Trigger: &project.Trigger{Calendar: &project.CalendarRule{Title: "video", Lead: "30m"}}}},
+	}}}
+	if err := svc.Store.PutProject(p); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC().Truncate(time.Second)
+	if err := svc.Store.SetDue(store.Due{Persona: "ann", Activity: "every 1 h", At: now.Add(20 * time.Minute)}); err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range []store.Event{
+		{Persona: "bo", UID: "e1", Title: "Video appointment", Start: now.Add(time.Hour)},  // due at start-30m
+		{Persona: "bo", UID: "lunch", Title: "Team lunch", Start: now.Add(time.Hour)},      // no story matches
+		{Persona: "bo", UID: "tmrw", Title: "Appointment", Start: now.Add(30 * time.Hour)}, // beyond 24 h
+		{Persona: "gone", UID: "x", Title: "Appointment", Start: now.Add(time.Hour)},       // not in the project
+		{Persona: "bo", UID: "fired", Title: "Appointment", Start: now.Add(2 * time.Hour)}, // already fired
+	} {
+		if err := svc.Store.UpsertEvent(e); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := svc.Store.MarkEventFired("bo", "fired", now.Add(2*time.Hour), "join"); err != nil {
+		t.Fatal(err)
+	}
+	s, err := svc.Status(now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(s.Due) != 2 {
+		t.Fatalf("due = %+v", s.Due)
+	}
+	if d := s.Due[0]; d.Persona != "ann" || !d.At.Equal(now.Add(20*time.Minute)) || d.Reason != "" {
+		t.Fatalf("due[0] = %+v", d)
+	}
+	if d := s.Due[1]; d.Persona != "bo" || d.Role != "buyer" || !d.At.Equal(now.Add(30*time.Minute)) || d.Reason != "Calendar: Video appointment" {
+		t.Fatalf("due[1] = %+v", d)
 	}
 }

@@ -728,3 +728,37 @@ func TestNextAssignmentContext(t *testing.T) {
 		t.Errorf("context %v %v", c, err)
 	}
 }
+
+func TestCalendarListTool(t *testing.T) {
+	_, st, srv, run := setup(t)
+	soon := time.Now().UTC().Truncate(time.Second)
+	for _, e := range []store.Event{
+		{Persona: "ann", UID: "late", Title: "Follow-up", Start: soon.Add(48 * time.Hour), End: soon.Add(49 * time.Hour)},
+		{Persona: "ann", UID: "soon", Title: "Video appointment", Start: soon.Add(time.Hour), End: soon.Add(2 * time.Hour),
+			Location: "Online", URL: "https://meet.x.test/r"},
+		{Persona: "bob", UID: "theirs", Title: "Not yours", Start: soon.Add(2 * time.Hour)},
+		{Persona: "ann", UID: "past", Title: "Long gone", Start: soon.Add(-3 * time.Hour)},
+		{Persona: "ann", UID: "far", Title: "Too far", Start: soon.Add(15 * 24 * time.Hour)},
+	} {
+		if err := st.UpsertEvent(e); err != nil {
+			t.Fatal(err)
+		}
+	}
+	out, isErr := call(t, connect(t, srv, run.Token), "calendar_list", nil)
+	if isErr {
+		t.Fatal(out)
+	}
+	var got []map[string]string
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("%v: %s", err, out)
+	}
+	if len(got) != 2 || got[0]["title"] != "Video appointment" || got[1]["title"] != "Follow-up" {
+		t.Fatalf("got %s", out)
+	}
+	g := got[0]
+	loc, _ := time.LoadLocation("Europe/London")
+	if g["start"] != soon.Add(time.Hour).Format(time.RFC3339) || g["end"] != soon.Add(2*time.Hour).Format(time.RFC3339) ||
+		g["location"] != "Online" || g["url"] != "https://meet.x.test/r" || g["local"] != soon.Add(time.Hour).In(loc).Format("Mon 2 Jan, 15:04") {
+		t.Fatalf("got %s", out)
+	}
+}

@@ -282,6 +282,7 @@ func newServer(svc *runs.Service, st *store.Store, directorURL, token string, ma
 			return text("finished")
 		})
 	addMailTools(s, st, mail, active)
+	addCalendarTool(s, st, active)
 	return s
 }
 
@@ -419,6 +420,44 @@ func mailUnavailable(mail mailbox) string {
 		return errMailDown // generic on purpose: the detail can name the host and user, and stays on the admin API
 	}
 	return ""
+}
+
+// calendarItem is one calendar_list entry; local is start in the project time zone.
+type calendarItem struct {
+	Title    string `json:"title"`
+	Start    string `json:"start"`
+	End      string `json:"end"`
+	Local    string `json:"local"`
+	Location string `json:"location"`
+	URL      string `json:"url"`
+}
+
+func addCalendarTool(s *mcp.Server, st *store.Store, active func() (store.Run, *mcp.CallToolResult, error)) {
+	mcp.AddTool(s, &mcp.Tool{Name: "calendar_list",
+		Description: "List your persona's calendar events from an hour ago to 14 days ahead, soonest first (title, start, end, local start time, location, url)."},
+		func(ctx context.Context, _ *mcp.CallToolRequest, _ noArgs) (*mcp.CallToolResult, any, error) {
+			r, bad, err := active()
+			if bad != nil || err != nil {
+				return bad, nil, err
+			}
+			p, err := st.Project()
+			if err != nil {
+				return nil, nil, fmt.Errorf("load project: %w", err)
+			}
+			now := time.Now()
+			events, err := st.Events(r.Persona, now.Add(-time.Hour), now.Add(14*24*time.Hour))
+			if err != nil {
+				return nil, nil, err
+			}
+			loc := p.Location()
+			out := make([]calendarItem, 0, len(events))
+			for _, e := range events {
+				out = append(out, calendarItem{Title: e.Title, Start: e.Start.UTC().Format(time.RFC3339),
+					End: e.End.UTC().Format(time.RFC3339), Local: e.Start.In(loc).Format("Mon 2 Jan, 15:04"),
+					Location: e.Location, URL: e.URL})
+			}
+			return jsonText(out)
+		})
 }
 
 func addMailTools(s *mcp.Server, st *store.Store, mail mailbox, active func() (store.Run, *mcp.CallToolResult, error)) {

@@ -6,6 +6,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/boarding-party/boardingparty/internal/project"
 )
 
 // price is USD per million tokens.
@@ -126,18 +128,24 @@ type Status struct {
 	OverBudget  bool      `json:"overBudget"`
 	Timezone    string    `json:"timezone"`
 	ResetsAt    time.Time `json:"resetsAt"` // next local midnight
-	Due         []DueView `json:"due"`      // scheduled personas, soonest first
+	Due         []DueView `json:"due"`      // scheduled personas and calendar events, soonest first
 }
 
-// DueView is one scheduled persona and when it is next due.
+// DueView is one scheduled persona, or one calendar event, and when it is next due.
 type DueView struct {
 	Persona string    `json:"persona"`
 	Role    string    `json:"role"`
 	At      time.Time `json:"at"`
+	Reason  string    `json:"reason,omitempty"` // set for a calendar event, e.g. "Calendar: Video appointment"
 }
 
+// calendarWindow is how far ahead Status lists calendar dues.
+const calendarWindow = 24 * time.Hour
+
 // Status reports pause state, today's spend against the budget, and the
-// schedule. Only personas of roles with an activity pattern have a due.
+// schedule. Only personas of roles with an activity pattern have a schedule
+// due; calendar events have one when a story of the persona's role triggers
+// on them.
 func (s *Service) Status(now time.Time) (Status, error) {
 	paused, err := s.Store.Paused()
 	if err != nil {
@@ -172,6 +180,11 @@ func (s *Service) Status(now time.Time) (Status, error) {
 			due = append(due, DueView{Persona: name, Role: role, At: d.At})
 		}
 	}
+	cal, err := s.calendarDues(p, now)
+	if err != nil {
+		return Status{}, err
+	}
+	due = append(due, cal...)
 	sort.Slice(due, func(i, j int) bool {
 		if !due[i].At.Equal(due[j].At) {
 			return due[i].At.Before(due[j].At)
@@ -181,4 +194,42 @@ func (s *Service) Status(now time.Time) (Status, error) {
 	y, m, d := start.In(loc).Date()
 	return Status{Paused: paused, SpentToday: spent, DailyBudget: budget, OverBudget: spent >= budget,
 		Timezone: loc.String(), ResetsAt: time.Date(y, m, d+1, 0, 0, 0, 0, loc).UTC(), Due: due}, nil
+}
+
+// calendarDues lists the unfired events whose story starts within
+// calendarWindow of now. An event matching several stories is due when the
+// first of them starts, at the longest lead.
+func (s *Service) calendarDues(p project.Project, now time.Time) ([]DueView, error) {
+	events, err := s.Store.Events("", now, now.Add(calendarWindow+project.MaxLead))
+	if err != nil {
+		return nil, err
+	}
+	roleOf := map[string]project.Role{}
+	for _, r := range p.Roles {
+		for _, pe := range r.Personas {
+			roleOf[pe.Name] = r
+		}
+	}
+	var out []DueView
+	for _, e := range events {
+		if e.FiredStart.Equal(e.Start) {
+			continue
+		}
+		role, ok := roleOf[e.Persona]
+		if !ok {
+			continue
+		}
+		lead, matched := time.Duration(0), false
+		for _, st := range role.Stories {
+			if st.Trigger != nil && st.Trigger.Calendar != nil && st.Trigger.Calendar.Matches(e.Title) {
+				lead, matched = max(lead, st.Trigger.Calendar.LeadTime()), true
+			}
+		}
+		at := e.Start.Add(-lead)
+		if !matched || at.Before(now) || at.After(now.Add(calendarWindow)) {
+			continue
+		}
+		out = append(out, DueView{Persona: e.Persona, Role: role.Name, At: at, Reason: "Calendar: " + e.Title})
+	}
+	return out, nil
 }

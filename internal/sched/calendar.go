@@ -1,0 +1,82 @@
+package sched
+
+import (
+	"context"
+	"encoding/json"
+	"time"
+
+	"github.com/boarding-party/boardingparty/internal/project"
+	"github.com/boarding-party/boardingparty/internal/store"
+)
+
+// Calendar is the trigger source for persona calendar events: a story starts
+// its lead time before an event whose title matches the story's trigger rule.
+type Calendar struct {
+	Store *store.Store
+}
+
+func (*Calendar) Name() string { return "calendar" }
+
+func (c *Calendar) Due(_ context.Context, p project.Project, now time.Time) ([]Fire, error) {
+	maxLead, found := time.Duration(0), false
+	for _, r := range p.Roles {
+		for _, st := range r.Stories {
+			if st.Trigger != nil && st.Trigger.Calendar != nil {
+				maxLead, found = max(maxLead, st.Trigger.Calendar.LeadTime()), true
+			}
+		}
+	}
+	if !found {
+		return nil, nil
+	}
+	events, err := c.Store.DueEvents(now, maxLead)
+	if err != nil {
+		return nil, err
+	}
+	var fires []Fire
+	for _, e := range events {
+		role, ok := roleOf(p, e.Persona)
+		var ready []string
+		matched := false
+		if ok {
+			for _, st := range role.Stories {
+				if st.Trigger == nil || st.Trigger.Calendar == nil || !st.Trigger.Calendar.Matches(e.Title) {
+					continue
+				}
+				matched = true
+				if !e.Start.Add(-st.Trigger.Calendar.LeadTime()).After(now) {
+					ready = append(ready, st.Name)
+				}
+			}
+		}
+		if !matched {
+			// Nothing could ever start (or the persona is gone): not offered again
+			// until the event moves.
+			if err := c.Store.MarkEventFired(e.Persona, e.UID, e.Start, ""); err != nil {
+				return nil, err
+			}
+			continue
+		}
+		if len(ready) == 0 {
+			continue // its lead is not reached yet
+		}
+		ctx, err := json.Marshal(store.RunContext{Kind: "calendar", Event: &store.ContextEvent{UID: e.UID,
+			Title: clip(e.Title, MaxContextText), Start: e.Start, Location: clip(e.Location, MaxContextText), URL: e.URL}})
+		if err != nil {
+			return nil, err
+		}
+		fires = append(fires, Fire{Source: c.Name(), Persona: e.Persona, Role: role.Name, Stories: ready,
+			Reason: "Calendar: " + clip(e.Title, 80), Context: ctx})
+	}
+	return fires, nil
+}
+
+// Settle marks the event fired for its current start with the story queued,
+// or "" when it was skipped: it fires again only if the event is rescheduled.
+func (c *Calendar) Settle(f Fire, story string, _ time.Time) error {
+	var rc store.RunContext
+	if err := json.Unmarshal(f.Context, &rc); err != nil {
+		return err
+	}
+	return c.Store.MarkEventFired(f.Persona, rc.Event.UID, rc.Event.Start, story)
+}

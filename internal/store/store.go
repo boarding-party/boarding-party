@@ -72,6 +72,7 @@ type RunContext struct {
 
 // ContextEvent is the calendar entry a calendar-triggered run was started for.
 type ContextEvent struct {
+	UID      string    `json:"uid,omitempty"`
 	Title    string    `json:"title"`
 	Start    time.Time `json:"start"`
 	Location string    `json:"location,omitempty"`
