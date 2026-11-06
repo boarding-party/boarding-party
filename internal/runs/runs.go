@@ -166,6 +166,7 @@ type Service struct {
 	OnFinish func()
 
 	startMu sync.Mutex // makes the one-active-run check and CreateRun atomic
+	usageMu sync.Mutex // makes SaveUsage's read-merge-write atomic
 }
 
 func randHex(n int) (string, error) {

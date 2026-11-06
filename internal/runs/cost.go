@@ -37,8 +37,8 @@ func Cost(u Usage) float64 {
 	}
 	var total, split = 0.0, Counts{}
 	for model, c := range u.ByModel {
-		split = Counts{split.Input + c.Input, split.Output + c.Output,
-			split.CacheRead + c.CacheRead, split.CacheWrite + c.CacheWrite, 0}
+		split = Counts{Input: split.Input + c.Input, Output: split.Output + c.Output,
+			CacheRead: split.CacheRead + c.CacheRead, CacheWrite: split.CacheWrite + c.CacheWrite}
 		p := dearest
 		for _, row := range prices {
 			if strings.HasPrefix(model, row.prefix) {

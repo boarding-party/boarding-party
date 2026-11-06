@@ -71,6 +71,8 @@ func (s *Service) SaveUsage(token string, u Usage, now time.Time) error {
 			return ErrBadUsage
 		}
 	}
+	s.usageMu.Lock()
+	defer s.usageMu.Unlock()
 	old, err := s.Usage(r.ID)
 	if err != nil {
 		return err
