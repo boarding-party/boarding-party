@@ -265,3 +265,68 @@ func TestScheduleActivityRemovedThenRestoredStartsFresh(t *testing.T) {
 		t.Fatalf("due = %v", d.At)
 	}
 }
+
+const triggeredActivityYAML = `name: p
+sites: ["https://x.test"]
+timezone: Europe/London
+roles:
+  - name: patient
+    activity: every 1 h
+    personas: [{name: Ada}]
+    stories:
+      - {name: book, goal: book a slot}
+      - name: confirm
+        goal: confirm the sign-up
+        trigger: {message: {subject: confirm}}
+`
+
+// A story with a trigger runs on its trigger instead of the activity schedule.
+func TestScheduleLeavesOutTriggeredStories(t *testing.T) {
+	f := newSchedFix(t, triggeredActivityYAML)
+	f.fire()
+	for i := 0; i < 3; i++ {
+		f.clk.Add(time.Hour)
+		f.fire()
+		q := f.queue()
+		if len(q) != 1 || q[0].Story != "book" {
+			t.Fatalf("fire %d: queue = %+v", i, q)
+		}
+		if err := f.st.DeleteQueued(q[0].ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if d := f.due("Ada"); d.NextStory != 0 {
+		t.Fatalf("due = %+v", d)
+	}
+	// book is stuck: the triggered story is not offered in its place.
+	f.running("old", "Ada", "patient", "book", "j0")
+	if ok, err := f.st.FinishRun("old", store.RunStuck, "stuck", f.clk.Now()); err != nil || !ok {
+		t.Fatal(ok, err)
+	}
+	f.clk.Add(time.Hour)
+	f.fire()
+	if q := f.queue(); len(q) != 0 {
+		t.Fatalf("stuck: queue = %+v", q)
+	}
+}
+
+func TestScheduleRoleWithOnlyTriggeredStoriesHasNoDue(t *testing.T) {
+	f := newSchedFix(t, triggeredActivityYAML)
+	f.fire()
+	if d, _ := f.st.Dues(); len(d) != 1 {
+		t.Fatalf("dues = %+v", d)
+	}
+	p, _ := f.st.Project()
+	p.Roles[0].Stories = p.Roles[0].Stories[1:]
+	if err := f.st.PutProject(p); err != nil {
+		t.Fatal(err)
+	}
+	f.clk.Add(2 * time.Hour)
+	f.fire()
+	if len(f.queue()) != 0 {
+		t.Fatalf("queue = %+v", f.queue())
+	}
+	if d, _ := f.st.Dues(); len(d) != 0 {
+		t.Fatalf("dues = %+v", d)
+	}
+}

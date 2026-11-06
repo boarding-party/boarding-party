@@ -14,7 +14,8 @@ import (
 
 // Schedule is the trigger source for role activity patterns: each persona of
 // a role with an activity acts when its stored due time passes, one story
-// after another.
+// after another. A story with a trigger runs on that trigger instead, so the
+// schedule only takes the role's untriggered stories.
 type Schedule struct {
 	Store *store.Store
 	Rand  func() float64 // nil = rand.Float64
@@ -37,7 +38,7 @@ func (s *Schedule) rand() float64 {
 func (s *Schedule) Due(_ context.Context, p project.Project, now time.Time) ([]Fire, error) {
 	var names []string
 	for _, r := range p.Roles {
-		if r.Pattern().IsZero() || len(r.Stories) == 0 {
+		if r.Pattern().IsZero() || len(scheduled(r)) == 0 {
 			continue // nothing to run: any stored due is dropped, so a restored one starts fresh
 		}
 		for _, ps := range r.Personas {
@@ -57,8 +58,8 @@ func (s *Schedule) Due(_ context.Context, p project.Project, now time.Time) ([]F
 	loc := p.Location()
 	var fires []Fire
 	for _, r := range p.Roles {
-		pat := r.Pattern()
-		if pat.IsZero() || len(r.Stories) == 0 {
+		pat, stories := r.Pattern(), scheduled(r)
+		if pat.IsZero() || len(stories) == 0 {
 			continue
 		}
 		for _, ps := range r.Personas {
@@ -73,8 +74,8 @@ func (s *Schedule) Due(_ context.Context, p project.Project, now time.Time) ([]F
 				continue
 			}
 			f := Fire{Source: s.Name(), Persona: ps.Name, Role: r.Name, Reason: "Scheduled: " + r.Activity}
-			for i := range r.Stories {
-				f.Stories = append(f.Stories, r.Stories[(d.NextStory+i)%len(r.Stories)].Name)
+			for i := range stories {
+				f.Stories = append(f.Stories, stories[(d.NextStory+i)%len(stories)].Name)
 			}
 			fires = append(fires, f)
 		}
@@ -99,12 +100,25 @@ func (s *Schedule) Settle(f Fire, story string, now time.Time) error {
 	// Daily jitter can fire early; look past the slot that just fired.
 	d.At = pat.Next(now.Add(pat.Slack()), s.proj.Location(), s.rand)
 	if story != "" {
-		for i, st := range role.Stories {
+		stories := scheduled(role)
+		for i, st := range stories {
 			if st.Name == story {
-				d.NextStory = (i + 1) % len(role.Stories)
+				d.NextStory = (i + 1) % len(stories)
 			}
 		}
 	}
 	s.dues[f.Persona] = d
 	return s.Store.SetDue(d)
+}
+
+// scheduled returns the role's stories the activity schedule runs: those
+// without a trigger.
+func scheduled(r project.Role) []project.Story {
+	var out []project.Story
+	for _, st := range r.Stories {
+		if st.Trigger == nil {
+			out = append(out, st)
+		}
+	}
+	return out
 }
