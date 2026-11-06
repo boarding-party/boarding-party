@@ -78,10 +78,14 @@ func (s *Service) SaveUsage(token string, u Usage, now time.Time) error {
 		return err
 	}
 	if old != nil {
-		u = mergeUsage(*old, u)
-		if len(u.ByModel) > maxUsageModels {
-			return ErrBadUsage
+		merged := mergeUsage(*old, u)
+		if len(merged.ByModel) > maxUsageModels {
+			// Too many models in all: keep the old split and fold the new
+			// totals into the top-level counts, which Cost prices dearest
+			// beyond the split. Spend still rises; it can never freeze.
+			merged = Usage{Counts: maxCounts(merged.Counts, splitSum(merged.ByModel)), ByModel: old.ByModel}
 		}
+		u = merged
 	}
 	b, err := json.Marshal(u)
 	if err != nil {
@@ -112,6 +116,16 @@ func maxCounts(a, b Counts) Counts {
 	return Counts{Input: max(a.Input, b.Input), Output: max(a.Output, b.Output),
 		CacheRead: max(a.CacheRead, b.CacheRead), CacheWrite: max(a.CacheWrite, b.CacheWrite),
 		Turns: max(a.Turns, b.Turns)}
+}
+
+// splitSum adds up the per-model counts.
+func splitSum(by map[string]Counts) Counts {
+	var t Counts
+	for _, c := range by {
+		t = Counts{Input: t.Input + c.Input, Output: t.Output + c.Output,
+			CacheRead: t.CacheRead + c.CacheRead, CacheWrite: t.CacheWrite + c.CacheWrite}
+	}
+	return t
 }
 
 // mergeUsage takes the per-counter maximum of a and b, over the union of models.

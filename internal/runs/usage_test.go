@@ -75,12 +75,21 @@ func TestSaveUsageNeverLowers(t *testing.T) {
 	if u == nil || u.Output != 1000 || u.Turns != 3 || u.ByModel["claude-opus-5-5"].Output != 1000 || u.ByModel["claude-haiku-5-5"].Output != 5 {
 		t.Fatalf("usage = %+v", u)
 	}
-	// Merging must not exceed the model cap.
+	// Junk models past the cap must not freeze spend: the split stays, the
+	// new totals still count.
 	many := map[string]Counts{}
 	for _, m := range []string{"a", "b", "c", "d", "e", "f", "g"} {
-		many[m] = Counts{}
+		many[m] = Counts{Output: 1}
 	}
-	if err := svc.SaveUsage(r.Token, Usage{ByModel: many}, time.Now()); !errors.Is(err, ErrBadUsage) {
+	if err := svc.SaveUsage(r.Token, Usage{ByModel: many}, time.Now()); err != nil {
 		t.Fatalf("merged over cap = %v", err)
+	}
+	later := Usage{Counts: Counts{Output: 5000}, ByModel: map[string]Counts{"claude-opus-5-5": {Output: 5000}}}
+	if err := svc.SaveUsage(r.Token, later, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	u, _ = svc.Usage(r.ID)
+	if len(u.ByModel) != 2 || u.Output != 5000 || Cost(*u) < Cost(later) {
+		t.Fatalf("usage after cap = %+v cost %v", u, Cost(*u))
 	}
 }

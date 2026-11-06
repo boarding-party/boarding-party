@@ -35,10 +35,8 @@ func Cost(u Usage) float64 {
 	if len(u.ByModel) == 0 {
 		return dearest.cost(u.Counts)
 	}
-	var total, split = 0.0, Counts{}
+	var total float64
 	for model, c := range u.ByModel {
-		split = Counts{Input: split.Input + c.Input, Output: split.Output + c.Output,
-			CacheRead: split.CacheRead + c.CacheRead, CacheWrite: split.CacheWrite + c.CacheWrite}
 		p := dearest
 		for _, row := range prices {
 			if strings.HasPrefix(model, row.prefix) {
@@ -50,6 +48,7 @@ func Cost(u Usage) float64 {
 	}
 	// Top-level counts beyond what the split accounts for are priced dearest,
 	// so mismatched reports can never under-count.
+	split := splitSum(u.ByModel)
 	excess := Counts{Input: over(u.Input, split.Input), Output: over(u.Output, split.Output),
 		CacheRead: over(u.CacheRead, split.CacheRead), CacheWrite: over(u.CacheWrite, split.CacheWrite)}
 	return total + dearest.cost(excess)
