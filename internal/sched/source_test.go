@@ -2,6 +2,7 @@ package sched
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/boarding-party/boardingparty/internal/project"
 	"github.com/boarding-party/boardingparty/internal/runs"
+	"github.com/boarding-party/boardingparty/internal/store"
 )
 
 // fakeSource returns fixed fires and records what Settle was told.
@@ -31,7 +33,7 @@ func (f *fakeSource) Settle(_ Fire, story string, _ time.Time) error {
 
 func mailFire() Fire {
 	return Fire{Source: "mail", Persona: "Cleo", Role: "clinician", Stories: []string{"approve"},
-		Reason: "Mail from x", Context: "mail body"}
+		Reason: "Mail from x", Context: json.RawMessage(`{"body":"mail body"}`)}
 }
 
 func TestFireQueuesWithContext(t *testing.T) {
@@ -43,7 +45,7 @@ func TestFireQueuesWithContext(t *testing.T) {
 	}
 	q := f.queue()
 	if len(q) != 1 || q[0].Story != "approve" || q[0].Persona != "Cleo" || q[0].Role != "clinician" ||
-		q[0].Reason != "Mail from x" || string(q[0].Context) != "mail body" || !q[0].Created.Equal(now) {
+		q[0].Reason != "Mail from x" || string(q[0].Context) != `{"body":"mail body"}` || !q[0].Created.Equal(now) {
 		t.Fatalf("queue = %+v", q)
 	}
 	if fmt.Sprint(src.settled) != "[approve]" {
@@ -86,5 +88,35 @@ func TestFireSourceErrorDoesNotStopOthers(t *testing.T) {
 	}
 	if calls := f.starter.Calls(); len(calls) != 1 || calls[0].Story != "approve" {
 		t.Fatalf("calls = %+v", calls)
+	}
+}
+
+func TestFireSchedulerErrorLeavesFireUnsettled(t *testing.T) {
+	f := newFix(t, schedYAML)
+	first := &fakeSource{name: "a", fires: []Fire{
+		{Source: "a", Persona: "Ada", Role: "patient", Stories: []string{"lone"}, Reason: "r"},
+	}}
+	second := &fakeSource{name: "b", fires: []Fire{mailFire()}}
+	f.s.Sources = []Source{first, second}
+	// Enqueue fails for Ada's item only: a duplicate id already in the queue.
+	f.s.NewID = func() string { return "dup" }
+	if err := f.st.Enqueue(store.Queued{ID: "dup", Persona: "Zed", Role: "x", Story: "y", Created: now}); err != nil {
+		t.Fatal(err)
+	}
+	err := f.s.fire(context.Background(), now)
+	if err == nil {
+		t.Fatal("want the enqueue error")
+	}
+	if len(first.settled) != 0 {
+		t.Fatalf("failed fire was settled: %q", first.settled)
+	}
+	// The second source's item also uses id "dup", so it fails too; give it a fresh id.
+	f.s.NewID = func() string { return "ok" }
+	first.fires = nil
+	if err := f.s.fire(context.Background(), now); err != nil {
+		t.Fatal(err)
+	}
+	if fmt.Sprint(second.settled) != "[approve]" {
+		t.Fatalf("second settled = %q", second.settled)
 	}
 }

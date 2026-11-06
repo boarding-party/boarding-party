@@ -128,6 +128,16 @@ func TestScheduleSkipsStuckAndWaitingStories(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// A wait on cancel alone leaves book eligible.
+	g := newSchedFix(t, activityYAML)
+	g.fire()
+	g.waiting("w0", "Ada", "patient", "cancel", "j0", timeWait(g.clk.Now().Add(24*time.Hour)))
+	g.clk.Add(time.Hour)
+	g.fire()
+	if q := g.queue(); len(q) != 1 || q[0].Story != "book" {
+		t.Fatalf("queue = %+v", q)
+	}
+
 	// cancel is parked on an open wait of Ada's own: both stories blocked.
 	f.waiting("w1", "Ada", "patient", "cancel", "j1", timeWait(f.clk.Now().Add(24*time.Hour)))
 	f.clk.Add(time.Hour)
@@ -227,5 +237,31 @@ func TestDrainOverBudgetKeepsQueue(t *testing.T) {
 	}
 	if q := f.queue(); len(q) != 1 {
 		t.Fatalf("queue = %+v", q)
+	}
+}
+
+func TestScheduleActivityRemovedThenRestoredStartsFresh(t *testing.T) {
+	f := newSchedFix(t, activityYAML)
+	f.fire()
+	p, _ := f.st.Project()
+	p.Roles[0].Activity = ""
+	if err := f.st.PutProject(p); err != nil {
+		t.Fatal(err)
+	}
+	f.clk.Add(5 * time.Hour) // the old due passes while there is no activity
+	f.fire()
+	if d, _ := f.st.Dues(); len(d) != 0 {
+		t.Fatalf("dues = %+v", d)
+	}
+	p.Roles[0].Activity = "every 1 h"
+	if err := f.st.PutProject(p); err != nil {
+		t.Fatal(err)
+	}
+	f.fire()
+	if len(f.queue()) != 0 {
+		t.Fatalf("restored activity caught up: %+v", f.queue())
+	}
+	if d := f.due("Ada"); !d.At.Equal(f.clk.Now().Add(time.Hour)) {
+		t.Fatalf("due = %v", d.At)
 	}
 }

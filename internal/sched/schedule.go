@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math/rand/v2"
+	"sync"
 	"time"
 
 	"github.com/boarding-party/boardingparty/internal/project"
@@ -17,6 +18,11 @@ import (
 type Schedule struct {
 	Store *store.Store
 	Rand  func() float64 // nil = rand.Float64
+
+	// Per-tick state set by Due and used by Settle, so Settle reads nothing.
+	mu   sync.Mutex
+	proj project.Project
+	dues map[string]store.Due
 }
 
 func (*Schedule) Name() string { return "schedule" }
@@ -31,6 +37,9 @@ func (s *Schedule) rand() float64 {
 func (s *Schedule) Due(_ context.Context, p project.Project, now time.Time) ([]Fire, error) {
 	var names []string
 	for _, r := range p.Roles {
+		if r.Pattern().IsZero() {
+			continue // no activity: any stored due is dropped, so a restored one starts fresh
+		}
 		for _, ps := range r.Personas {
 			names = append(names, ps.Name)
 		}
@@ -42,6 +51,9 @@ func (s *Schedule) Due(_ context.Context, p project.Project, now time.Time) ([]F
 	if err != nil {
 		return nil, err
 	}
+	s.mu.Lock()
+	s.proj, s.dues = p, dues
+	s.mu.Unlock()
 	loc := p.Location()
 	var fires []Fire
 	for _, r := range p.Roles {
@@ -73,25 +85,19 @@ func (s *Schedule) Due(_ context.Context, p project.Project, now time.Time) ([]F
 // Settle moves the persona's due on whatever became of the fire: a due missed
 // while paused, over budget or busy is skipped, never caught up.
 func (s *Schedule) Settle(f Fire, story string, now time.Time) error {
-	p, err := s.Store.Project()
-	if err != nil {
-		return err
-	}
-	role, ok := p.Role(f.Role)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	role, ok := s.proj.Role(f.Role)
 	if !ok {
 		return fmt.Errorf("role %q is gone", f.Role)
 	}
-	dues, err := s.Store.Dues()
-	if err != nil {
-		return err
-	}
-	d, ok := dues[f.Persona]
+	d, ok := s.dues[f.Persona]
 	if !ok {
 		return errors.New("no due for " + f.Persona)
 	}
 	pat := role.Pattern()
 	// Daily jitter can fire early; look past the slot that just fired.
-	d.At = pat.Next(now.Add(pat.Slack()), p.Location(), s.rand)
+	d.At = pat.Next(now.Add(pat.Slack()), s.proj.Location(), s.rand)
 	if story != "" {
 		for i, st := range role.Stories {
 			if st.Name == story {
@@ -99,5 +105,6 @@ func (s *Schedule) Settle(f Fire, story string, now time.Time) error {
 			}
 		}
 	}
+	s.dues[f.Persona] = d
 	return s.Store.SetDue(d)
 }

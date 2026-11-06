@@ -2,6 +2,7 @@ package sched
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -15,9 +16,9 @@ type Fire struct {
 	Source  string // source name, e.g. "schedule"
 	Persona string
 	Role    string
-	Stories []string // candidates, preferred first; the scheduler takes the first eligible
-	Reason  string   // shown on the board, e.g. "Scheduled: every 1 h"
-	Context string   // handed to the run (a message body in 2d); "" for schedule
+	Stories []string        // candidates, preferred first; the scheduler takes the first eligible
+	Reason  string          // shown on the board, e.g. "Scheduled: every 1 h"
+	Context json.RawMessage // handed to the run (a message in 2d); nil for schedule
 }
 
 // Source is anything that can ask for a run: a schedule, a mailbox, a calendar.
@@ -28,6 +29,9 @@ type Source interface {
 	// Settle tells the source what became of a fire: story is the one queued,
 	// or "" when it was skipped (gated, persona busy, no eligible story).
 	// A source advances its own cursor here; a skipped fire is never replayed.
+	// Settle is called exactly once per fire, when the scheduler has decided
+	// its fate. If the scheduler itself fails on a fire (a store error), it
+	// does not settle it, so the source offers the fire again on a later tick.
 	Settle(f Fire, story string, now time.Time) error
 }
 
@@ -50,9 +54,16 @@ func (s *Scheduler) fire(ctx context.Context, now time.Time) error {
 		return fmt.Errorf("load project: %w", err)
 	}
 	gated := s.Runs.Gate(now) != nil
+	var busy, waiting map[string]bool
+	if !gated {
+		if busy, err = s.busyPersonas(); err != nil {
+			return err
+		}
+		if waiting, err = s.waitingStories(); err != nil {
+			return err
+		}
+	}
 	var errs []error
-	var busy map[string]bool
-	var waiting map[string]bool
 	for _, src := range s.sources() {
 		fires, err := src.Due(ctx, p, now)
 		if err != nil {
@@ -60,30 +71,18 @@ func (s *Scheduler) fire(ctx context.Context, now time.Time) error {
 		}
 		for _, f := range fires {
 			story := ""
-			if !gated {
-				if busy == nil {
-					if busy, err = s.busyPersonas(); err != nil {
-						return errors.Join(append(errs, err)...)
-					}
-					if waiting, err = s.waitingStories(); err != nil {
-						return errors.Join(append(errs, err)...)
-					}
-				}
-				if !busy[f.Persona] {
-					if story, err = s.pick(f, waiting); err != nil {
-						errs = append(errs, fmt.Errorf("source %s: %w", src.Name(), err))
-						continue
-					}
+			if !gated && !busy[f.Persona] {
+				if story, err = s.pick(f, waiting); err != nil {
+					errs = append(errs, fmt.Errorf("source %s: %w", src.Name(), err))
+					continue // unsettled: offered again next tick
 				}
 			}
 			if story != "" {
-				q := store.Queued{ID: s.newID(), Persona: f.Persona, Role: f.Role, Story: story, Reason: f.Reason, Created: now}
-				if f.Context != "" {
-					q.Context = []byte(f.Context)
-				}
+				q := store.Queued{ID: s.newID(), Persona: f.Persona, Role: f.Role, Story: story, Reason: f.Reason,
+					Context: f.Context, Created: now}
 				if err := s.Store.Enqueue(q); err != nil {
 					errs = append(errs, fmt.Errorf("source %s: queue %s/%s: %w", src.Name(), f.Persona, story, err))
-					continue
+					continue // unsettled: offered again next tick
 				}
 				busy[f.Persona] = true
 			}
