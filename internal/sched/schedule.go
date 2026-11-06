@@ -37,8 +37,8 @@ func (s *Schedule) rand() float64 {
 func (s *Schedule) Due(_ context.Context, p project.Project, now time.Time) ([]Fire, error) {
 	var names []string
 	for _, r := range p.Roles {
-		if r.Pattern().IsZero() {
-			continue // no activity: any stored due is dropped, so a restored one starts fresh
+		if r.Pattern().IsZero() || len(r.Stories) == 0 {
+			continue // nothing to run: any stored due is dropped, so a restored one starts fresh
 		}
 		for _, ps := range r.Personas {
 			names = append(names, ps.Name)

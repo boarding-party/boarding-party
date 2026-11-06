@@ -259,7 +259,8 @@ const fmtMoney = (n) => '$' + (Number(n) || 0).toFixed(2);
 // fmtCost is a run's cost; a fraction of a cent reads as "< $0.01".
 const fmtCost = (n) => (n > 0 && n < 0.005 ? '< $0.01' : '≈ ' + fmtMoney(n));
 
-// fmtReset is the clock time the daily budget resets, in the project's zone.
+// fmtReset is a clock time in the project's zone: the budget reset, or when
+// a scheduled persona acts next.
 function fmtReset(iso, zone) {
   const d = parseTime(iso);
   if (!d) return 'midnight';
@@ -280,7 +281,7 @@ function RunStrip({ director, active, status, onChange }) {
     act(() => api('/api/pause', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ paused: pausing }) }));
   };
   const stop = async () => {
-    if (!(await confirmDialog('Stop this run now? Its recording so far is kept.', { confirm: 'Stop run', danger: true }))) return;
+    if (!(await confirmDialog('Stop this run now? Its recording so far is kept. The next run in Up next then starts; pause first to keep things quiet.', { confirm: 'Stop run', danger: true }))) return;
     act(() => api(`/api/runs/${encodeURIComponent(active.id)}/stop`, { method: 'POST' }));
   };
   const state = director === 'ok' ? { dot: 'ok', label: 'Director ready' }
@@ -322,7 +323,7 @@ function RunsPage({ project, projectErr, runs, runsErr, queue, status, active, o
         ${runsErr ? html`<div class="note bad">Could not load runs: ${runsErr}</div>` : null}
         ${runs && runs.length === 0 && project !== null
           ? html`<div class="empty"><b>No runs yet.</b>Start one above.</div>` : null}
-        ${queue.length || (status && status.due.length) ? html`<${UpNext} queue=${queue} due=${status ? status.due : []} onChange=${onStarted} />` : null}
+        ${queue.length || (status && status.due.length) ? html`<${UpNext} queue=${queue} due=${status ? status.due : []} zone=${status && status.timezone} onChange=${onStarted} />` : null}
         ${runs && runs.length > 0 ? html`<${RunsTable} runs=${runs} />` : null}
       </div>
     </section>`;
@@ -412,7 +413,7 @@ function StateTag({ state, wait }) {
 }
 
 // UpNext lists the runs the director will start next, oldest first.
-function UpNext({ queue, due, onChange }) {
+function UpNext({ queue, due, zone, onChange }) {
   const [busy, setBusy] = useState('');
   const [err, setErr] = useState('');
   const remove = async (q) => {
@@ -439,7 +440,7 @@ function UpNext({ queue, due, onChange }) {
         </li>`)}</ul>
       ${err ? html`<div class="note bad" role="alert">Could not remove the run: ${err}</div>` : null}
       ${due.length ? html`<h3 class="later">Later</h3>
-        <ul>${due.slice(0, 5).map((d, i) => html`<li key=${i + d.persona}><span class="what">${d.persona} · ${fmtWhen(d.at)}</span></li>`)}
+        <ul>${due.slice(0, 5).map((d, i) => html`<li key=${i + d.persona}><span class="what">${d.persona} · ${fmtReset(d.at, zone)}</span></li>`)}
           ${due.length > 5 ? html`<li class="muted">and ${due.length - 5} more</li>` : null}</ul>` : null}
     </div>`;
 }

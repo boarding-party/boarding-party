@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/boarding-party/boardingparty/internal/project"
+	"github.com/boarding-party/boardingparty/internal/runs"
 	"github.com/boarding-party/boardingparty/internal/store"
 )
 
@@ -53,7 +54,13 @@ func (s *Scheduler) fire(ctx context.Context, now time.Time) error {
 	if err != nil {
 		return fmt.Errorf("load project: %w", err)
 	}
-	gated := s.Runs.Gate(now) != nil
+	// Only pause and budget count as gated; any other gate error is the
+	// scheduler failing, so every fire stays unsettled for a later tick.
+	gerr := s.Runs.Gate(now)
+	gated := errors.Is(gerr, runs.ErrPaused) || errors.Is(gerr, runs.ErrOverBudget)
+	if gerr != nil && !gated {
+		return fmt.Errorf("gate: %w", gerr)
+	}
 	var busy, waiting map[string]bool
 	if !gated {
 		if busy, err = s.busyPersonas(); err != nil {

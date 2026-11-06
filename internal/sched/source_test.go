@@ -73,6 +73,19 @@ func TestFireSkipsAndSettles(t *testing.T) {
 	}
 }
 
+func TestFireGateErrorLeavesFiresUnsettled(t *testing.T) {
+	f := newFix(t, schedYAML)
+	src := &fakeSource{name: "mail", fires: []Fire{mailFire()}}
+	f.s.Sources = []Source{src}
+	f.starter.SetGate(errors.New("usage unreadable"))
+	if err := f.s.Tick(context.Background()); err == nil || !strings.Contains(err.Error(), "usage unreadable") {
+		t.Fatalf("tick = %v", err)
+	}
+	if len(f.queue()) != 0 || len(src.settled) != 0 {
+		t.Fatalf("queue %+v settled %q", f.queue(), src.settled)
+	}
+}
+
 func TestFireSourceErrorDoesNotStopOthers(t *testing.T) {
 	f := newFix(t, schedYAML)
 	bad := &fakeSource{name: "bad", err: errors.New("boom")}
