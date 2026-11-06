@@ -4,7 +4,7 @@
 
 **Goal:** Personas act on their own on each role's activity pattern, spend is capped per day, and a human can pause the cast and stop a run.
 
-**Architecture:** A new `internal/activity` package parses a role's plain activity text ("every 30 min, 09:00–17:30") into a pattern that yields jittered due times. The scheduler gains a phase that queues each due persona's next story. `runs.Service` gains a single start gate (paused, over budget) used by manual starts and the scheduler alike; spend is priced from the usage reports workers already send. The board shows spend vs budget, Pause/Resume and Stop run in the run strip.
+**Architecture:** A new `internal/activity` package parses a role's plain activity text ("every 30 min, 09:00–17:30") into a pattern that yields jittered due times. The scheduler gains a generic trigger-source phase (one interface for schedule now, message and calendar in 2d); the first source queues each due persona's next story. `runs.Service` gains a single start gate (paused, over budget) used by manual starts and the scheduler alike; spend is priced from the usage reports workers already send. The board shows spend vs budget, Pause/Resume and Stop run in the run strip.
 
 **Tech Stack:** Go 1.24 stdlib (`time`, `math/rand/v2`), SQLite via the existing store, Preact + htm board (no build step).
 
@@ -40,7 +40,7 @@
 - Create `internal/runs/cost_test.go`.
 - Modify `internal/runs/runs.go` — gate in `start`, `StopRun`.
 - Modify `internal/store/schema.sql`, create `internal/store/settings.go`, `internal/store/dues.go` (+ tests) — `settings` and `persona_due` tables, `RunsSince`, `LastRun`.
-- Modify `internal/sched/sched.go` — `schedule` phase, gate in `drain`; create `internal/sched/schedule_test.go`.
+- Modify `internal/sched/sched.go` — `fire` phase, gate in `drain`; create `internal/sched/source.go`, `schedule.go` and their tests.
 - Modify `internal/api/api.go` — `GET /api/status`, `PUT /api/pause`, `POST /api/runs/{id}/stop`, `cost` on a run, error mapping.
 - Modify `internal/board/ui/app.js`, `project.js`, `styles.css` — run strip, Up next "Later", cost row, project fields.
 
@@ -248,48 +248,75 @@ Plus store `TestPausedRoundTrip` (default false; set true; set false) and `TestR
 
 ---
 
-### Task 4: Scheduler — due personas and the gate
+### Task 4: Scheduler — trigger sources, the schedule source and the gate
+
+Every way a run can start on its own (§3.2: schedule now; message and calendar in 2d; a webhook later) is a **trigger source** behind one interface. A source only says *who* should act, *which stories* would do, *why*, and *what context* the run gets. The scheduler owns the shared policy once: the start gate, busy personas, stuck and waiting stories, queueing. A source never touches the queue. Hand-offs keep their existing path (`followAll`); they are not a source.
 
 **Files:**
-- Create: `internal/store/dues.go`, `internal/store/dues_test.go`, `internal/sched/schedule_test.go`
-- Modify: `internal/store/schema.sql`, `internal/sched/sched.go`, `internal/sched/sched_test.go` (fake starter gains `Gate`)
+- Create: `internal/sched/source.go` (`Fire`, `Source`, the `fire` phase), `internal/sched/schedule.go` (`Schedule` source), `internal/store/dues.go`, `internal/store/dues_test.go`, `internal/sched/source_test.go`, `internal/sched/schedule_test.go`
+- Modify: `internal/store/schema.sql`, `internal/sched/sched.go`, `internal/sched/sched_test.go` (fake starter gains `Gate`), `cmd/director/main.go` (wire sources)
 
 **Interfaces:**
-- Consumes: `Role.Pattern`, `Project.Location` (Task 2); `ErrPaused`, `ErrOverBudget`, `Service.Gate` (Task 3); existing `Store.Enqueue`, `Store.Queue`, `Store.ActiveRuns`, `Store.OpenWaits`, `Store.RunByID`.
+- Consumes: `Role.Pattern`, `Project.Location` (Task 2); `ErrPaused`, `ErrOverBudget`, `Service.Gate` (Task 3); existing `Store.Enqueue`, `Store.Queue`, `Store.ActiveRuns`, `Store.OpenWaits`, `project` loading used by `sched.go`.
 - Produces:
-  - store: table `persona_due(persona TEXT PRIMARY KEY, activity TEXT NOT NULL, due INTEGER NOT NULL, next_story INTEGER NOT NULL DEFAULT 0)`.
-  - `type Due struct { Persona, Activity string; At time.Time; NextStory int }`
-  - `func (s *Store) Dues() (map[string]Due, error)`, `func (s *Store) SetDue(d Due) error`, `func (s *Store) DeleteDuesExcept(personas []string) error`
-  - `func (s *Store) LastRun(persona, story string) (Run, error)` — newest by started; `ErrNotFound` if none.
-  - `Starter` interface gains `Gate(now time.Time) error`.
+  - ```go
+    // Fire is one source's wish that a persona acts now.
+    type Fire struct {
+        Source  string   // source name, e.g. "schedule"
+        Persona string
+        Role    string
+        Stories []string // candidates, preferred first; the scheduler takes the first eligible
+        Reason  string   // shown on the board, e.g. "Scheduled: every 1 h"
+        Context string   // handed to the run (a message body in 2d); "" for schedule
+    }
+    // Source is anything that can ask for a run: a schedule, a mailbox, a calendar.
+    type Source interface {
+        Name() string
+        // Due returns the fires that are due at now. It makes no model calls.
+        Due(ctx context.Context, p project.Project, now time.Time) ([]Fire, error)
+        // Settle tells the source what became of a fire: story is the one queued,
+        // or "" when it was skipped (gated, persona busy, no eligible story).
+        // A source advances its own cursor here; a skipped fire is never replayed.
+        Settle(f Fire, story string, now time.Time) error
+    }
+    ```
+  - `Scheduler.Sources []Source` — nil = `[]Source{&Schedule{Store: s.Store, Rand: s.Rand}}`.
   - `Scheduler.Rand func() float64` — nil = `rand.Float64`.
-  - `Tick` = `followAll, resolveAll, schedule, drain`.
+  - `Starter` interface gains `Gate(now time.Time) error`.
+  - `Tick` = `followAll, resolveAll, fire, drain`.
+  - `type Schedule struct { Store *store.Store; Rand func() float64 }` with `Name() == "schedule"`.
+  - store: table `persona_due(persona TEXT PRIMARY KEY, activity TEXT NOT NULL, due INTEGER NOT NULL, next_story INTEGER NOT NULL DEFAULT 0)`; `type Due struct { Persona, Activity string; At time.Time; NextStory int }`; `Dues() (map[string]Due, error)`, `SetDue(Due) error`, `DeleteDuesExcept(personas []string) error`; `LastRun(persona, story string) (Run, error)` — newest by started, `ErrNotFound` if none.
 
-`schedule(now)`:
-1. Load project; `DeleteDuesExcept(all persona names)`.
-2. `gated := s.Runs.Gate(now) != nil`.
-3. For each role with non-zero `Pattern()`, each persona:
-   - No row, or `row.Activity != role.Activity`: `SetDue{At: pattern.Next(now, loc, Rand)}` (NextStory 0), continue.
-   - `row.At` after now: continue.
-   - Due. If not gated and the persona has no active run and no queued item: walk stories from `NextStory` (wrapping) and pick the first that has no open wait owned by this persona for that story and whose `LastRun` is not `stuck`. If one is found, `Enqueue(Queued{ID: newID, Persona, Role, Story, Reason: "Scheduled: " + role.Activity, Created: now})` and set NextStory to the index after it.
-   - Always `SetDue{At: pattern.Next(now, …), NextStory}` — a due time missed while paused, over budget or busy is skipped, never caught up (§5.1).
-4. Roles without a pattern are left alone (their personas run only by hand or hand-off).
+`fire(ctx, now)` (generic, in `source.go`):
+1. Load project once; `gated := s.Runs.Gate(now) != nil`.
+2. For each source, `Due(ctx, p, now)`; a source error is joined and the next source still runs.
+3. For each fire: skip (`Settle(f, "", now)`) if gated, or the persona has an active run or a queued item. Otherwise take the first story in `f.Stories` that has no open wait owned by this persona for that story and whose `LastRun` is not `stuck`; none → skip. Found → `Enqueue(Queued{ID: newID, Persona, Role, Story, Reason: f.Reason, Context: f.Context, Created: now})`, then `Settle(f, story, now)`.
+
+`Schedule` source (in `schedule.go`):
+- `Due`: `DeleteDuesExcept(all persona names)`. For each role with non-zero `Pattern()`, each persona: no row or `row.Activity != role.Activity` → `SetDue{At: pattern.Next(now, loc, Rand)}` (NextStory 0), no fire. `row.At` after now → no fire. Otherwise one fire with `Stories` = the role's stories rotated to start at `NextStory`, `Reason: "Scheduled: " + role.Activity`.
+- `Settle`: always `SetDue{At: pattern.Next(now, …)}` — a due time missed while paused, over budget or busy is skipped, never caught up (§5.1); when story ≠ "" set NextStory to the index after it.
+- Roles without a pattern are left alone (their personas run only by hand or hand-off).
 
 `drain`: `ErrPaused` and `ErrOverBudget` from `StartQueued` keep the item and end the tick quietly (no log line per tick).
 
-- [ ] **Step 1: Failing tests** (in `schedule_test.go`, project YAML with role `patient` activity `every 1 h` and two stories `book`, `cancel`; fixed clock; `Rand: func() float64 { return 0.5 }`):
-  - `TestScheduleFirstSightSetsDue` — first tick: no queue item, `Dues()["Ada"].At == now+1h`.
-  - `TestScheduleQueuesRoundRobin` — advance 1 h: queue holds `book` with reason `Scheduled: every 1 h`; start it (fake starter), finish done, advance 1 h: next item is `cancel`.
-  - `TestScheduleOverdueQueuesOnce` — advance 10 h: exactly one item; due = now+1h.
-  - `TestScheduleSkipsBusyPersona` — persona already queued: no second item, due still moves on.
-  - `TestScheduleSkipsStuckAndWaitingStories` — last `book` run stuck: `cancel` is chosen; both blocked: nothing queued.
-  - `TestScheduleGatedSkips` — fake `Gate` returns `runs.ErrPaused`: due passes, nothing queued, due moves on.
-  - `TestScheduleActivityChangeResets` — change role activity to `daily at 09:00`: due recomputed to next 09:00 local.
-  - `TestDrainOverBudgetKeepsQueue` — `StartQueued` returns wrapped `runs.ErrOverBudget`: item stays, `Tick` returns nil.
+- [ ] **Step 1: Failing tests**
+  - `source_test.go`, fake source (fixed story `approve`, `Context: "mail body"`):
+    - `TestFireQueuesWithContext` — one fire: queue holds `approve` with the fire's reason and context; `Settle` got `"approve"`.
+    - `TestFireSkipsAndSettles` — persona busy: nothing queued, `Settle` got `""`; gate returns `runs.ErrPaused`: same.
+    - `TestFireSourceErrorDoesNotStopOthers` — first source errors, second still queues; `Tick` returns the error.
+  - `schedule_test.go` (project YAML with role `patient` activity `every 1 h` and two stories `book`, `cancel`; fixed clock; `Rand: func() float64 { return 0.5 }`):
+    - `TestScheduleFirstSightSetsDue` — first tick: no queue item, `Dues()["Ada"].At == now+1h`.
+    - `TestScheduleQueuesRoundRobin` — advance 1 h: queue holds `book` with reason `Scheduled: every 1 h`; start it (fake starter), finish done, advance 1 h: next item is `cancel`.
+    - `TestScheduleOverdueQueuesOnce` — advance 10 h: exactly one item; due = now+1h.
+    - `TestScheduleSkipsBusyPersona` — persona already queued: no second item, due still moves on.
+    - `TestScheduleSkipsStuckAndWaitingStories` — last `book` run stuck: `cancel` is chosen; both blocked: nothing queued.
+    - `TestScheduleGatedSkips` — fake `Gate` returns `runs.ErrPaused`: due passes, nothing queued, due moves on.
+    - `TestScheduleActivityChangeResets` — change role activity to `daily at 09:00`: due recomputed to next 09:00 local.
+    - `TestDrainOverBudgetKeepsQueue` — `StartQueued` returns wrapped `runs.ErrOverBudget`: item stays, `Tick` returns nil.
 - [ ] **Step 2: Run** `go test ./internal/sched/ ./internal/store/` — FAIL.
-- [ ] **Step 3: Implement.** `runs.Service` already satisfies the widened `Starter` after Task 3.
+- [ ] **Step 3: Implement.** `runs.Service` already satisfies the widened `Starter` after Task 3. Wire `Sources` explicitly in `cmd/director/main.go` (just the schedule source for now).
 - [ ] **Step 4: Run** `go test ./...` — PASS.
-- [ ] **Step 5: Commit** `feat: scheduler queues due personas on their role's activity`
+- [ ] **Step 5: Commit** `feat: trigger sources; the schedule source queues due personas`
 
 ---
 
