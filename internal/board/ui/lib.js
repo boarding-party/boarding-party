@@ -90,3 +90,46 @@ export function DialogHost() {
       </div>
     </dialog>`;
 }
+
+// ---- shared helpers -------------------------------------------------------
+
+export function parseTime(s) {
+  if (!s) return null;
+  const d = new Date(s);
+  // Go's zero time (0001-01-01) means "not set".
+  return isNaN(d) || d.getUTCFullYear() < 2000 ? null : d;
+}
+
+export const sameDay = (a, b) => a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+
+export function fmtWhen(s) {
+  const d = parseTime(s);
+  if (!d) return '';
+  const time = d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+  if (sameDay(d, new Date())) return time;
+  return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) + ' ' + time;
+}
+
+export const artifactURL = (runID, name) => `/api/runs/${encodeURIComponent(runID)}/artifacts/${encodeURIComponent(name)}`;
+export const runHref = (id) => `#/runs/${encodeURIComponent(id)}`;
+
+// usePoll calls fn now, then again after however many ms fn returns, until
+// fn returns null or the component unmounts or deps change. fn gets a
+// stale() check: after each await it must bail out (return null) if stale()
+// is true, so a late response never lands in an unmounted or re-keyed view.
+
+export function usePoll(fn, deps) {
+  useEffect(() => {
+    let stop = false, timer;
+    const stale = () => stop;
+    const tick = async () => {
+      const next = await fn(stale);
+      if (!stop && next != null) timer = setTimeout(tick, next);
+    };
+    tick();
+    return () => { stop = true; clearTimeout(timer); };
+  }, deps);
+}
+
+export const SEVERITY_TAG = new Map([['high', 'bad'], ['critical', 'bad'], ['medium', 'wait'], ['low', 'idle']]);
+export const SHOT_TOKEN = /\bbug-\d+\.(?:png|jpe?g)\b/i;

@@ -5,7 +5,8 @@
 // Never use innerHTML or dangerouslySetInnerHTML here.
 import { render } from './vendor/preact.module.js';
 import { useState, useEffect, useRef, useCallback } from './vendor/hooks.module.js';
-import { html, api, directorDown, confirmDialog, DialogHost } from './lib.js';
+import { html, api, directorDown, confirmDialog, DialogHost, parseTime, fmtWhen, artifactURL, runHref, usePoll, SEVERITY_TAG, SHOT_TOKEN } from './lib.js';
+import { BugsPage, IssuePage, issueHref, openCount } from './bugs.js';
 import { ProjectPage } from './project.js';
 
 const ACTIVE = new Set(['pending', 'running']);
@@ -15,25 +16,9 @@ const MAX_FINISHED_FAILURES = 5;
 const RECONNECT_MS = 14 * 60 * 1000; // under the director's 15-minute stream cap
 const ACTIVE_POLL_MS = 5000;
 const IDLE_POLL_MS = 30000;
+const SIDEBAR_POLL_MS = 30000;
 
 // ---- helpers ------------------------------------------------------------
-
-function parseTime(s) {
-  if (!s) return null;
-  const d = new Date(s);
-  // Go's zero time (0001-01-01) means "not set".
-  return isNaN(d) || d.getUTCFullYear() < 2000 ? null : d;
-}
-
-const sameDay = (a, b) => a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
-
-function fmtWhen(s) {
-  const d = parseTime(s);
-  if (!d) return '';
-  const time = d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
-  if (sameDay(d, new Date())) return time;
-  return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) + ' ' + time;
-}
 
 function fmtFull(s) {
   const d = parseTime(s);
@@ -69,8 +54,6 @@ function fmtStamp(secs) {
   return h ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
 }
 
-const artifactURL = (runID, name) => `/api/runs/${encodeURIComponent(runID)}/artifacts/${encodeURIComponent(name)}`;
-const runHref = (id) => `#/runs/${encodeURIComponent(id)}`;
 
 function allPersonas(project) {
   const out = [];
@@ -96,6 +79,10 @@ function parseRoute(hash) {
     return { page: 'project', section, roleN: section === 'roles' && /^[1-9][0-9]*$/.test(parts[2] || '') ? parts[2] : '' };
   }
   if (parts[0] === 'inbox') return { page: 'inbox' };
+  if (parts[0] === 'bugs' && parts[1]) {
+    try { return { page: 'issue', id: decodeURIComponent(parts[1]) }; } catch (_) { /* fall through */ }
+  }
+  if (parts[0] === 'bugs') return { page: 'bugs' };
   if (parts[0] === 'runs' && parts[1]) {
     try { return { page: 'run', id: decodeURIComponent(parts[1]) }; } catch (_) { /* fall through */ }
   }
@@ -133,23 +120,6 @@ function useRoute(leaveGuard) {
     return () => window.removeEventListener('hashchange', on);
   }, []);
   return route;
-}
-
-// usePoll calls fn now, then again after however many ms fn returns, until
-// fn returns null or the component unmounts or deps change. fn gets a
-// stale() check: after each await it must bail out (return null) if stale()
-// is true, so a late response never lands in an unmounted or re-keyed view.
-function usePoll(fn, deps) {
-  useEffect(() => {
-    let stop = false, timer;
-    const stale = () => stop;
-    const tick = async () => {
-      const next = await fn(stale);
-      if (!stop && next != null) timer = setTimeout(tick, next);
-    };
-    tick();
-    return () => { stop = true; clearTimeout(timer); };
-  }, deps);
 }
 
 // ---- shell --------------------------------------------------------------
@@ -226,6 +196,8 @@ function App() {
         ${route.page === 'run' ? html`<${RunPage} key=${route.id} id=${route.id} onChange=${loadRuns} />`
           : route.page === 'project' ? html`<${ProjectPage} section=${route.section} roleN=${route.roleN} onSaved=${loadProject} onDirty=${onDirty} />`
           : route.page === 'inbox' ? html`<${InboxPage} project=${project} />`
+          : route.page === 'bugs' ? html`<${BugsPage} />`
+          : route.page === 'issue' ? html`<${IssuePage} key=${route.id} id=${route.id} />`
           : html`<${RunsPage} project=${project} projectErr=${projectErr} runs=${runs} runsErr=${runsErr}
                     queue=${queue} status=${status} active=${active} onStarted=${loadRuns} />`}
       </main>
@@ -234,7 +206,16 @@ function App() {
 }
 
 function Sidebar({ route, project, runs }) {
-  const on = (p) => (route.page === p || (p === 'runs' && route.page === 'run') ? 'on' : '');
+  const on = (p) => (route.page === p || (p === 'runs' && route.page === 'run') || (p === 'bugs' && route.page === 'issue') ? 'on' : '');
+  const [open, setOpen] = useState(null);
+  usePoll(async (stale) => {
+    try {
+      const d = await api('/api/issues');
+      if (stale()) return null;
+      setOpen(openCount(d && d.issues));
+    } catch (_) { /* the count is optional */ }
+    return SIDEBAR_POLL_MS;
+  }, [route.page]);
   const site = (project && project.sites && project.sites[0]) || '';
   let host = site;
   try { host = site ? new URL(site).host : ''; } catch (_) { /* show it as written */ }
@@ -246,6 +227,7 @@ function Sidebar({ route, project, runs }) {
         : null}
       <nav aria-label="Main">
         <a href="#/runs" class=${on('runs')}>Runs ${runs ? html`<span class="count">${runs.length}</span>` : null}</a>
+        <a href="#/bugs" class=${on('bugs')}>Bugs ${open ? html`<span class="count" title="Open bugs">${open}</span>` : null}</a>
         <a href="#/inbox" class=${on('inbox')}>Inbox</a>
         <a href="#/project" class=${on('project')}>Project</a>
       </nav>
@@ -925,7 +907,6 @@ function hostOf(site) {
   try { return new URL(site).hostname; } catch (_) { return ''; }
 }
 
-const SEVERITY_TAG = new Map([['high', 'bad'], ['critical', 'bad'], ['medium', 'wait'], ['low', 'idle']]);
 
 // A bug seeks only when its text carries a time that fits inside the
 // recording; that also keeps clock times such as "Wed 16:00" from seeking.
@@ -941,16 +922,17 @@ function Bug({ bug, runId, artifacts, duration, onSeek }) {
     ${bug.step ? html`<span class="meta"><b>Step:</b> ${bug.step}</span>` : null}
     ${bug.evidence ? html`<span class="meta"><b>Evidence:</b> ${bug.evidence}</span>` : null}
     ${bug.note ? html`<span class="meta"><b>Note:</b> ${bug.note}</span>` : null}`;
+  const issue = bug.issue_id ? html`<a class="bug-issue small" href=${issueHref(bug.issue_id)}>Open in Bugs</a>` : null;
   const tok = SHOT_TOKEN.exec(bug.evidence || '');
   const shot = tok && artifacts.includes(tok[0]) ? tok[0] : '';
   return html`${seekable
     ? html`<button type="button" class="bug seek" title=${'Jump to ' + fmtStamp(secs)} onClick=${() => onSeek(secs)}>${body}</button>`
     : html`<div class="bug">${body}</div>`}
+    ${issue}
     ${shot ? html`<a class="bug-shot" href=${artifactURL(runId, shot)} target="_blank" rel="noopener" title="Open the full screenshot">
       <img src=${artifactURL(runId, shot)} alt=${'Screenshot for: ' + bug.summary} loading="lazy" /></a>` : null}`;
 }
 
-const SHOT_TOKEN = /\bbug-\d+\.(?:png|jpe?g)\b/i;
 
 // Clear the static "Loading…" placeholder: render() appends, it doesn't replace.
 const root = document.getElementById('root');
