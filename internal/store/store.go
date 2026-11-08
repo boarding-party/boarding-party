@@ -60,7 +60,7 @@ type Run struct {
 
 // RunContext is what a chained run is told about the run before it.
 type RunContext struct {
-	Kind        string        `json:"kind"` // "continue" | "handoff" | "message" | "calendar"
+	Kind        string        `json:"kind"` // "continue" | "handoff" | "message" | "calendar" | "verify"
 	WaitedFor   string        `json:"waitedFor,omitempty"`
 	Arrived     string        `json:"arrived,omitempty"`
 	MessageID   string        `json:"messageId,omitempty"`
@@ -68,6 +68,16 @@ type RunContext struct {
 	Previous    string        `json:"previous"` // that run's outcome summary
 	From        *ContextFrom  `json:"from,omitempty"`
 	Event       *ContextEvent `json:"event,omitempty"`
+	// Verify is the issue this run checks a fix for. A continuation keeps it.
+	Verify *ContextVerify `json:"verify,omitempty"`
+}
+
+// ContextVerify is the issue a fix check looks for again.
+type ContextVerify struct {
+	IssueID  string `json:"issueId"`
+	Summary  string `json:"summary"`
+	Step     string `json:"step,omitempty"`
+	Evidence string `json:"evidence,omitempty"`
 }
 
 // ContextEvent is the calendar entry a calendar-triggered run was started for.
@@ -411,13 +421,29 @@ func (s *Store) SetRunSession(id, session string) (bool, error) {
 // FinishRun atomically moves a pending or running run to a final state.
 // It returns false if the run was not active (already finished or unknown).
 func (s *Store) FinishRun(id string, state RunState, outcome string, finished time.Time) (bool, error) {
-	res, err := s.db.Exec(`UPDATE runs SET state=?, outcome=?, finished=? WHERE id=? AND state IN ('pending','running')`,
+	return s.FinishRunChecked(id, state, outcome, finished, nil)
+}
+
+// FinishRunChecked is FinishRun with the verdict of a fix check run; a run
+// that checks a fix settles its issue in the same transaction.
+func (s *Store) FinishRunChecked(id string, state RunState, outcome string, finished time.Time, v *Verdict) (bool, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback()
+	res, err := tx.Exec(`UPDATE runs SET state=?, outcome=?, finished=? WHERE id=? AND state IN ('pending','running')`,
 		string(state), outcome, ts(finished), id)
 	if err != nil {
 		return false, err
 	}
-	n, err := res.RowsAffected()
-	return n > 0, err
+	if n, err := res.RowsAffected(); err != nil || n == 0 {
+		return false, err
+	}
+	if err := settleCheck(tx, id, state, v, finished); err != nil {
+		return false, err
+	}
+	return true, tx.Commit()
 }
 
 func (s *Store) queryRuns(q string, args ...any) ([]Run, error) {

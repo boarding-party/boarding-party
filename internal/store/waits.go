@@ -161,6 +161,9 @@ func (s *Store) ResolveWait(runID string, res Resolution) (bool, error) {
 		if _, err := tx.Exec(`UPDATE runs SET state='stuck' WHERE id=? AND state='waiting'`, runID); err != nil {
 			return false, err
 		}
+		if err := settleCheck(tx, runID, RunStuck, nil, res.Ended); err != nil {
+			return false, err
+		}
 	}
 	return true, tx.Commit()
 }

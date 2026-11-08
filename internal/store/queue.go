@@ -63,16 +63,29 @@ func (s *Store) Queue() ([]Queued, error) {
 	return out, rows.Err()
 }
 
-// DeleteQueued removes a queued run; ErrNotFound if it is not there.
+// DeleteQueued removes a queued run; ErrNotFound if it is not there. A fix
+// check taken off the queue leaves its issue fixed and unchecked.
 func (s *Store) DeleteQueued(id string) error {
-	res, err := s.db.Exec(`DELETE FROM queue WHERE id = ?`, id)
+	tx, err := s.db.Begin()
 	if err != nil {
 		return err
 	}
-	if n, _ := res.RowsAffected(); n == 0 {
+	defer tx.Rollback()
+	var ctx, journey string
+	err = tx.QueryRow(`SELECT context, journey FROM queue WHERE id = ?`, id).Scan(&ctx, &journey)
+	if errors.Is(err, sql.ErrNoRows) {
 		return ErrNotFound
 	}
-	return nil
+	if err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM queue WHERE id = ?`, id); err != nil {
+		return err
+	}
+	if err := settle(tx, ctx, journey, IssueFixed, checkOffQueue, false, time.Now().UTC()); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // FollowUp marks a run as acted on and queues its follow-ups, atomically.

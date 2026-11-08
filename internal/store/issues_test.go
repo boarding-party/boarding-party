@@ -2,6 +2,7 @@ package store
 
 import (
 	"database/sql"
+	"encoding/json"
 	"path/filepath"
 	"testing"
 	"time"
@@ -204,5 +205,146 @@ func TestBugsBackfill(t *testing.T) {
 	bugs, _ := s.Bugs("r1")
 	if len(bugs) != 1 || bugs[0].IssueID != "b1" {
 		t.Fatalf("bugs %+v", bugs)
+	}
+}
+
+// verifyRun creates a running fix-check run for issue in journey.
+func verifyRun(t *testing.T, s *Store, id, journey, issue string) {
+	t.Helper()
+	ctx, _ := json.Marshal(RunContext{Kind: "verify", Verify: &ContextVerify{IssueID: issue, Summary: "x"}})
+	if err := s.CreateRun(Run{ID: id, Token: "tok-" + id, Persona: "Ada", Role: "visitor", Story: "todos",
+		State: RunRunning, Started: t0, Journey: journey, Context: ctx}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// checking returns an issue whose fix check (queue item q1, journey q1) is under way.
+func checking(t *testing.T, s *Store) string {
+	t.Helper()
+	withRun(t, s, "r0", "Ada", "todos")
+	addBug(t, s, Bug{ID: "b0", RunID: "r0", Summary: "x", Created: t0})
+	id := onlyIssue(t, s).ID
+	ctx, _ := json.Marshal(RunContext{Kind: "verify", Verify: &ContextVerify{IssueID: id, Summary: "x"}})
+	ok, err := s.StartCheck(id, Queued{ID: "q1", Journey: "q1", Persona: "Ada", Role: "visitor", Story: "todos",
+		Context: ctx, Created: t0}, t0)
+	if err != nil || !ok {
+		t.Fatalf("start check %v %v", ok, err)
+	}
+	return id
+}
+
+func TestCheckVerdicts(t *testing.T) {
+	for _, c := range []struct {
+		name   string
+		state  RunState
+		v      *Verdict
+		status IssueStatus
+		note   string
+		reopen bool
+	}{
+		{"gone", RunDone, &Verdict{Reached: true, StillThere: false, Note: "ok"}, IssueClosed, "Gone: ok", false},
+		{"still", RunDone, &Verdict{Reached: true, StillThere: true, Note: "x"}, IssueOpen, "Still there: x", true},
+		{"unreached", RunDone, &Verdict{Reached: false, Note: "y"}, IssueFixed, "Could not check: y", false},
+		{"stuck", RunStuck, nil, IssueFixed, "Could not check: the run ended stuck.", false},
+		{"failed", RunFailed, nil, IssueFixed, "Could not check: the run ended failed.", false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			s := open(t)
+			id := checking(t, s)
+			verifyRun(t, s, "v1", "q1", id)
+			at := t0.Add(time.Hour)
+			if won, err := s.FinishRunChecked("v1", c.state, "out", at, c.v); err != nil || !won {
+				t.Fatalf("finish %v %v", won, err)
+			}
+			is, _ := s.Issue(id)
+			if is.Status != c.status || is.CheckNote != c.note || is.CheckJourney != "" || is.Reopened.Equal(at) != c.reopen {
+				t.Fatalf("issue %+v", is)
+			}
+		})
+	}
+}
+
+func TestCheckIgnoresOtherJourney(t *testing.T) {
+	s := open(t)
+	id := checking(t, s)
+	verifyRun(t, s, "v1", "q1", id)
+	if err := s.SetIssueStatus(id, IssueConfirmed, "", t0); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := s.StartCheck(id, Queued{ID: "q2", Journey: "q2", Persona: "Ada", Created: t0}, t0); err != nil || !ok {
+		t.Fatalf("second check %v %v", ok, err)
+	}
+	if _, err := s.FinishRunChecked("v1", RunDone, "out", t0, &Verdict{Reached: true}); err != nil {
+		t.Fatal(err)
+	}
+	if is, _ := s.Issue(id); is.Status != IssueVerifying || is.CheckJourney != "q2" {
+		t.Fatalf("issue %+v", is)
+	}
+}
+
+func TestCheckIgnoresHandoffRun(t *testing.T) {
+	s := open(t)
+	id := checking(t, s)
+	if err := s.CreateRun(Run{ID: "h1", Token: "tok-h1", Persona: "Bob", State: RunRunning, Started: t0, Journey: "q1"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.FinishRun("h1", RunFailed, "out", t0); err != nil {
+		t.Fatal(err)
+	}
+	if is, _ := s.Issue(id); is.Status != IssueVerifying {
+		t.Fatalf("issue %+v", is)
+	}
+}
+
+func TestCheckWaitingDoesNotSettle(t *testing.T) {
+	s := open(t)
+	id := checking(t, s)
+	verifyRun(t, s, "v1", "q1", id)
+	if _, err := s.FinishRunWaiting("v1", "waiting", t0, Wait{Kind: "time", At: t0.Add(time.Hour), Deadline: t0.Add(time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	if is, _ := s.Issue(id); is.Status != IssueVerifying {
+		t.Fatalf("after waiting %+v", is)
+	}
+	if _, err := s.ResolveWait("v1", Resolution{Status: WaitStuck, Detail: "late", Ended: t0}); err != nil {
+		t.Fatal(err)
+	}
+	if is, _ := s.Issue(id); is.Status != IssueFixed || is.CheckNote != "Could not check: the run ended stuck." {
+		t.Fatalf("after stuck %+v", is)
+	}
+}
+
+func TestStartCheckOnce(t *testing.T) {
+	s := open(t)
+	id := checking(t, s)
+	if ok, err := s.StartCheck(id, Queued{ID: "q2", Journey: "q2", Created: t0}, t0); err != nil || ok {
+		t.Fatalf("second %v %v", ok, err)
+	}
+	if q, _ := s.Queue(); len(q) != 1 {
+		t.Fatalf("queue %+v", q)
+	}
+}
+
+func TestDeleteQueuedSettles(t *testing.T) {
+	s := open(t)
+	id := checking(t, s)
+	if err := s.DeleteQueued("q1"); err != nil {
+		t.Fatal(err)
+	}
+	if is, _ := s.Issue(id); is.Status != IssueFixed || is.CheckNote != "Could not check: the check was taken off the queue." {
+		t.Fatalf("issue %+v", is)
+	}
+}
+
+func TestNoCheck(t *testing.T) {
+	s := open(t)
+	withRun(t, s, "r0", "Ada", "todos")
+	addBug(t, s, Bug{ID: "b0", RunID: "r0", Summary: "x", Created: t0})
+	id := onlyIssue(t, s).ID
+	if err := s.NoCheck(id, "Could not check: gone.", t0); err != nil {
+		t.Fatal(err)
+	}
+	if is, _ := s.Issue(id); is.Status != IssueFixed || is.CheckNote != "Could not check: gone." {
+		t.Fatalf("issue %+v", is)
 	}
 }

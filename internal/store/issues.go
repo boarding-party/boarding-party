@@ -4,6 +4,8 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
+	"encoding/json"
+	"fmt"
 	"strings"
 	"time"
 )
@@ -202,4 +204,96 @@ func (s *Store) SetIssueStatus(id string, st IssueStatus, reason string, now tim
 		return ErrNotFound
 	}
 	return nil
+}
+
+// Verdict is what a fix check run found.
+type Verdict struct {
+	Reached    bool   // got to the step where the problem was
+	StillThere bool   // the problem is still there (only when Reached)
+	Note       string // what the persona saw
+}
+
+// MaxCheckNote caps the persona's note on a fix check.
+const MaxCheckNote = 500
+
+// NoCheckNobody is the note for an issue marked fixed that nobody can check.
+const NoCheckNobody = "Could not check: the story or persona is gone."
+
+const checkOffQueue = "Could not check: the check was taken off the queue."
+
+// StartCheck queues q, the run that checks issue's fix, and marks the issue
+// verifying. It returns false, doing nothing, if a check is already under way.
+func (s *Store) StartCheck(issueID string, q Queued, now time.Time) (bool, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback()
+	res, err := tx.Exec(`UPDATE issues SET status='verifying', check_journey=?, check_note='', reason='', updated=?
+		WHERE id=? AND status != 'verifying'`, q.Journey, ts(now), issueID)
+	if err != nil {
+		return false, err
+	}
+	if n, err := res.RowsAffected(); err != nil || n == 0 {
+		return false, err
+	}
+	if err := insertQueued(tx, q); err != nil {
+		return false, err
+	}
+	return true, tx.Commit()
+}
+
+// NoCheck marks an issue fixed without a check, saying why in note.
+func (s *Store) NoCheck(issueID, note string, now time.Time) error {
+	res, err := s.db.Exec(`UPDATE issues SET status='fixed', check_note=?, check_journey='', reason='', updated=? WHERE id=?`,
+		note, ts(now), issueID)
+	if err != nil {
+		return err
+	}
+	if n, err := res.RowsAffected(); err != nil {
+		return err
+	} else if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// settleCheck ends the fix check of the run that just ended in state, if it
+// is one and its issue is still waiting for this check. A waiting run settles
+// nothing: its continuation carries the check.
+func settleCheck(tx *sql.Tx, runID string, state RunState, v *Verdict, now time.Time) error {
+	var ctx, journey string
+	if err := tx.QueryRow(`SELECT context, journey FROM runs WHERE id = ?`, runID).Scan(&ctx, &journey); err != nil {
+		return err
+	}
+	st, note, reopen := IssueFixed, fmt.Sprintf("Could not check: the run ended %s.", state), false
+	switch {
+	case state == RunWaiting:
+		return nil
+	case state != RunDone || v == nil:
+	case !v.Reached:
+		note = "Could not check: " + Clip(v.Note, MaxCheckNote)
+	case v.StillThere:
+		st, note, reopen = IssueOpen, "Still there: "+Clip(v.Note, MaxCheckNote), true
+	default:
+		st, note = IssueClosed, "Gone: "+Clip(v.Note, MaxCheckNote)
+	}
+	return settle(tx, ctx, journey, st, note, reopen, now)
+}
+
+// settle moves the issue named by a verify context to st, if that issue is
+// still verifying under journey.
+func settle(tx *sql.Tx, ctxJSON, journey string, st IssueStatus, note string, reopen bool, now time.Time) error {
+	if ctxJSON == "" {
+		return nil
+	}
+	var c RunContext
+	if json.Unmarshal([]byte(ctxJSON), &c) != nil || c.Verify == nil || c.Verify.IssueID == "" || journey == "" {
+		return nil
+	}
+	_, err := tx.Exec(`UPDATE issues SET status=?, check_note=?, check_journey='', updated=?,
+		reopened = CASE WHEN ? THEN ? ELSE reopened END
+		WHERE id=? AND status='verifying' AND check_journey=?`,
+		string(st), note, ts(now), reopen, ts(now), c.Verify.IssueID, journey)
+	return err
 }
