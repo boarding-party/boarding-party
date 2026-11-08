@@ -304,8 +304,11 @@ func (s *Scheduler) resolve(w store.Wait, followed bool, now time.Time) error {
 		_, err := s.Store.ResolveWait(r.ID, s.stuck(r, chainFull, now))
 		return err
 	}
+	var was store.RunContext
+	_ = json.Unmarshal(r.Context, &was) // a run without context has nothing to carry
 	ctxJSON, err := json.Marshal(store.RunContext{Kind: "continue", WaitedFor: Describe(w), Arrived: a.Detail,
-		MessageID: a.MessageID, PreviousRun: r.ID, Previous: store.Clip(r.Outcome, MaxContextText)})
+		MessageID: a.MessageID, PreviousRun: r.ID, Previous: store.Clip(r.Outcome, MaxContextText),
+		Verify: was.Verify}) // a fix check goes on in the continuation
 	if err != nil {
 		return err
 	}

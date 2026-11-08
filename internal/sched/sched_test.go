@@ -745,3 +745,25 @@ func TestDrainLogsNoFence(t *testing.T) {
 		t.Fatalf("log = %q", out)
 	}
 }
+
+func TestContinueKeepsVerify(t *testing.T) {
+	f := newFix(t, schedYAML)
+	ctx, _ := json.Marshal(store.RunContext{Kind: "verify", Verify: &store.ContextVerify{IssueID: "i1", Summary: "total wrong", Step: "basket"}})
+	if err := f.st.CreateRun(store.Run{ID: "p1", Token: "tok-p1", Persona: "Ada", Role: "patient", Story: "lone",
+		State: store.RunRunning, Started: f.clk.Now(), Journey: "j1", Context: ctx}); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := f.st.FinishRunWaiting("p1", "outcome of p1", f.clk.Now(), timeWait(f.clk.Now().Add(time.Minute))); err != nil || !ok {
+		t.Fatal(ok, err)
+	}
+	f.clk.Add(2 * time.Minute)
+	f.tick()
+	calls := f.starter.Calls()
+	if len(calls) != 1 {
+		t.Fatalf("calls = %+v", calls)
+	}
+	c := ctxOf(t, calls[0])
+	if c.Kind != "continue" || c.Verify == nil || c.Verify.IssueID != "i1" || c.Verify.Step != "basket" {
+		t.Fatalf("context = %+v", c)
+	}
+}

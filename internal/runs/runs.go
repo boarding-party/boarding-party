@@ -335,16 +335,7 @@ func (s *Service) Active(token string) (store.Run, error) {
 // caller that actually moves the run out of an active state stops the session.
 // A waiting run needs a condition: see FinishWaiting.
 func (s *Service) Finish(ctx context.Context, token string, state store.RunState, outcome string) error {
-	switch state {
-	case store.RunDone, store.RunStuck, store.RunFailed:
-	default:
-		return fmt.Errorf("%w: got %q", ErrBadState, state)
-	}
-	r, err := s.Active(token)
-	if err != nil {
-		return err
-	}
-	return s.finish(ctx, r, state, outcome)
+	return s.FinishChecked(ctx, token, state, outcome, nil)
 }
 
 // StopRun ends an active run from the board: failed, session stopped,
@@ -360,13 +351,14 @@ func (s *Service) StopRun(ctx context.Context, id string) error {
 	if r.State != store.RunPending && r.State != store.RunRunning {
 		return ErrNotActive
 	}
-	return s.finish(ctx, r, store.RunFailed, "Stopped from the board.")
+	return s.finish(ctx, r, store.RunFailed, "Stopped from the board.", nil)
 }
 
-// finish moves an active run to a final state and runs the shared tail.
-func (s *Service) finish(ctx context.Context, r store.Run, state store.RunState, outcome string) error {
+// finish moves an active run to a final state (with a fix check's verdict,
+// if any) and runs the shared tail.
+func (s *Service) finish(ctx context.Context, r store.Run, state store.RunState, outcome string, v *store.Verdict) error {
 	finished := time.Now().UTC()
-	won, err := s.Store.FinishRun(r.ID, state, outcome, finished)
+	won, err := s.Store.FinishRunChecked(r.ID, state, outcome, finished, v)
 	if err != nil {
 		return err
 	}
