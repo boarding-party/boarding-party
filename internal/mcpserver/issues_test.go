@@ -120,3 +120,15 @@ func TestFinishVerify(t *testing.T) {
 		t.Fatalf("plain run accepted verify: %q", text)
 	}
 }
+
+func TestKnownIssuesClipped(t *testing.T) {
+	_, st, srv, run := setup(t)
+	issueFrom(t, st, run.ID, "b1", strings.Repeat("x", 5000))
+	text, _ := call(t, connect(t, srv, run.Token), "next_assignment", nil)
+	var a struct {
+		KnownIssues []knownIssue `json:"knownIssues"`
+	}
+	if err := json.Unmarshal([]byte(text), &a); err != nil || len(a.KnownIssues) != 1 || len([]rune(a.KnownIssues[0].Summary)) > maxKnownIssueText {
+		t.Fatalf("known %d runes, err %v", len([]rune(a.KnownIssues[0].Summary)), err)
+	}
+}

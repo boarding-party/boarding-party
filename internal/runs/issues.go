@@ -12,6 +12,9 @@ import (
 // maxCheckReason caps the issue summary in a fix check's queue reason.
 const maxCheckReason = 80
 
+// maxVerifyText caps each report field copied into a fix check's context.
+const maxVerifyText = 500
+
 // MaxIssueReason caps the user's "not a bug" reason.
 const MaxIssueReason = 500
 
@@ -51,7 +54,8 @@ func (s *Service) markFixed(id string, now time.Time) error {
 			continue
 		}
 		ctx, err := json.Marshal(store.RunContext{Kind: "verify", Verify: &store.ContextVerify{
-			IssueID: id, Summary: rp.Summary, Step: rp.Step, Evidence: rp.Evidence}})
+			IssueID: id, Summary: store.Clip(rp.Summary, maxVerifyText), Step: store.Clip(rp.Step, maxVerifyText),
+			Evidence: store.Clip(rp.Evidence, maxVerifyText)}})
 		if err != nil {
 			return err
 		}

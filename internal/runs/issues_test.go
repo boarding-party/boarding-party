@@ -95,3 +95,27 @@ func TestSetIssueStatusRejects(t *testing.T) {
 		}
 	}
 }
+
+func TestMarkFixedClipsContext(t *testing.T) {
+	svc, _ := newSvc(t)
+	if err := svc.Store.CreateRun(store.Run{ID: "r1", Token: "tok-r1", Persona: "ann", Role: "buyer", Story: "checkout",
+		State: store.RunDone, Started: at, Journey: "r1"}); err != nil {
+		t.Fatal(err)
+	}
+	long := strings.Repeat("y", 5000)
+	if err := svc.Store.AddBug(store.Bug{ID: "b1", RunID: "r1", Summary: long, Step: long, Evidence: long, Created: at}); err != nil {
+		t.Fatal(err)
+	}
+	bugs, _ := svc.Store.Bugs("r1")
+	if err := svc.SetIssueStatus(bugs[0].IssueID, store.IssueFixed, "", at); err != nil {
+		t.Fatal(err)
+	}
+	q, _ := svc.Store.Queue()
+	var c store.RunContext
+	json.Unmarshal(q[0].Context, &c)
+	for _, f := range []string{c.Verify.Summary, c.Verify.Step, c.Verify.Evidence} {
+		if len([]rune(f)) > maxVerifyText {
+			t.Fatalf("field %d runes", len([]rune(f)))
+		}
+	}
+}
