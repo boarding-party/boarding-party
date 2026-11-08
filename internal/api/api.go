@@ -90,6 +90,9 @@ func admin(svc *runs.Service, maxBytes int64, token string, hub *live.Hub, mail 
 	mux.HandleFunc("GET /api/messages/{id}", s.getMessage)
 	mux.HandleFunc("GET /api/browser-profiles/{persona}", s.getBrowserProfile)
 	mux.HandleFunc("DELETE /api/browser-profiles/{persona}", s.deleteBrowserProfile)
+	mux.HandleFunc("GET /api/issues", s.listIssues)
+	mux.HandleFunc("GET /api/issues/{id}", s.getIssue)
+	mux.HandleFunc("POST /api/issues/{id}/status", s.putIssueStatus)
 	return s, guardAdmin(token, mux)
 }
 
