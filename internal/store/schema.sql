@@ -40,9 +40,24 @@ CREATE TABLE IF NOT EXISTS bugs (
   evidence TEXT NOT NULL DEFAULT '',
   severity TEXT NOT NULL DEFAULT '',
   note     TEXT NOT NULL DEFAULT '',
-  created  INTEGER NOT NULL DEFAULT 0
+  created  INTEGER NOT NULL DEFAULT 0,
+  issue_id TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS bugs_run ON bugs(run_id);
+-- An issue is one problem on the site; each bugs row (a report) belongs to
+-- one. check_journey is the journey of the fix check under way, if any.
+CREATE TABLE IF NOT EXISTS issues (
+  id            TEXT PRIMARY KEY,
+  summary       TEXT NOT NULL DEFAULT '',
+  status        TEXT NOT NULL,
+  reason        TEXT NOT NULL DEFAULT '',
+  created       INTEGER NOT NULL DEFAULT 0,
+  updated       INTEGER NOT NULL DEFAULT 0,
+  reopened      INTEGER NOT NULL DEFAULT 0,
+  check_journey TEXT NOT NULL DEFAULT '',
+  check_note    TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS issues_updated ON issues(updated);
 CREATE TABLE IF NOT EXISTS messages (
   id          TEXT PRIMARY KEY,
   uidvalidity INTEGER NOT NULL DEFAULT 0,

@@ -95,6 +95,9 @@ type Bug struct {
 	Severity string    `json:"severity"`
 	Note     string    `json:"note"`
 	Created  time.Time `json:"created"`
+	// IssueID is the issue this report belongs to. On AddBug it may name an
+	// existing issue to attach to; empty or unknown opens a new one.
+	IssueID string `json:"issue_id"`
 }
 
 type Store struct{ db *sql.DB }
@@ -126,6 +129,11 @@ func Open(path string) (*Store, error) {
 	if _, err := addColumns(db); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("migrate runs: %w", err)
+	}
+	// After addColumns: on an old database bugs.issue_id exists only now.
+	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS bugs_issue ON bugs(issue_id)`); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("index bugs: %w", err)
 	}
 	if legacy {
 		if _, err := db.Exec(`INSERT INTO messages(` + msgCols + `, mailbox) SELECT ` + msgCols + `, '' FROM messages_old; DROP TABLE messages_old`); err != nil {
@@ -171,6 +179,11 @@ var waitsAddedColumns = []addedColumn{
 	{"after_id", "after_id TEXT NOT NULL DEFAULT ''"},
 }
 
+// bugsAddedColumns are the bugs columns added after the table first shipped.
+var bugsAddedColumns = []addedColumn{
+	{"issue_id", "issue_id TEXT NOT NULL DEFAULT ''"},
+}
+
 // addColumns adds any missing runs and waits columns to a database made by an
 // older version. Runs that already exist become their own journey and count
 // as followed, so the scheduler does not act on history.
@@ -195,11 +208,22 @@ func addColumns(db *sql.DB) (added bool, err error) {
 	if err != nil {
 		return false, err
 	}
+	addedBugs, err := addMissing(tx, "bugs", bugsAddedColumns)
+	if err != nil {
+		return false, err
+	}
+	if addedBugs["issue_id"] {
+		// Each existing report becomes its own open issue, under the bug's id.
+		if _, err := tx.Exec(`INSERT INTO issues(id, summary, status, created, updated)
+			SELECT id, summary, 'open', created, created FROM bugs; UPDATE bugs SET issue_id = id`); err != nil {
+			return false, err
+		}
+	}
 	// Created here, not in schema.sql: on an old database the column exists only now.
 	if _, err := tx.Exec(`CREATE INDEX IF NOT EXISTS runs_journey ON runs(journey)`); err != nil {
 		return false, err
 	}
-	return len(addedRuns)+len(addedWaits) > 0, tx.Commit()
+	return len(addedRuns)+len(addedWaits)+len(addedBugs) > 0, tx.Commit()
 }
 
 // addMissing adds the columns table lacks and returns the names it added. A
@@ -434,28 +458,30 @@ func (s *Store) Unfollowed() ([]Run, error) {
 	return s.queryRuns(`SELECT ` + runCols + ` FROM runs WHERE state IN ('done','waiting') AND followed = 0 ORDER BY finished, rowid`)
 }
 
-func insertBug(x execer, b Bug) error {
-	_, err := x.Exec(`INSERT INTO bugs(id, run_id, summary, step, evidence, severity, note, created) VALUES(?,?,?,?,?,?,?,?)`,
-		b.ID, b.RunID, b.Summary, b.Step, b.Evidence, b.Severity, b.Note, ts(b.Created))
-	return err
+func (s *Store) AddBug(b Bug) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := insertBug(tx, b); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
-func (s *Store) AddBug(b Bug) error { return insertBug(s.db, b) }
-
 func (s *Store) Bugs(runID string) ([]Bug, error) {
-	rows, err := s.db.Query(`SELECT id, run_id, summary, step, evidence, severity, note, created FROM bugs WHERE run_id = ? ORDER BY created, rowid`, runID)
+	rows, err := s.db.Query(`SELECT `+bugCols+` FROM bugs WHERE run_id = ? ORDER BY created, rowid`, runID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	var out []Bug
 	for rows.Next() {
-		var b Bug
-		var c int64
-		if err := rows.Scan(&b.ID, &b.RunID, &b.Summary, &b.Step, &b.Evidence, &b.Severity, &b.Note, &c); err != nil {
+		b, err := scanBug(rows)
+		if err != nil {
 			return nil, err
 		}
-		b.Created = fromTS(c)
 		out = append(out, b)
 	}
 	return out, rows.Err()
