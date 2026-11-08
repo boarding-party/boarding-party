@@ -49,7 +49,7 @@ Flag names confirmed with `playwright-mcp --help` (0.0.84):
 | output dir | `--output-dir <path>` |
 | viewport | `--viewport-size 1280x800` (also `--device "<name>"`, `--mobile`) |
 | storage state | `--storage-state <path>` (isolated sessions) |
-| enable video and tracing tools | `--caps=devtools` |
+| enable video, tracing and storage-state tools | `--caps=devtools,storage` |
 | config file | `--config <path>` |
 
 `--save-video` and `--save-trace` DO NOT EXIST in 0.0.84 (the brief's guess was wrong).

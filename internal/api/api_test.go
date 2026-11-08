@@ -1046,3 +1046,68 @@ func TestQueueListAndDelete(t *testing.T) {
 		t.Fatalf("again: %d", r.StatusCode)
 	}
 }
+
+func TestWorkerProfile(t *testing.T) {
+	srv, wsrv, svc := setupBoth(t, 0)
+	run := startRun(t, srv, svc)
+	call := func(method, path, body string) (int, string) {
+		req, _ := http.NewRequest(method, wsrv.URL+path, strings.NewReader(body))
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		b, _ := io.ReadAll(resp.Body)
+		return resp.StatusCode, string(b)
+	}
+	if code, b := call("GET", "/profile/"+run.Token, ""); code != 204 || b != "" {
+		t.Fatalf("no profile: %d %q", code, b)
+	}
+	state := `{"cookies":[{"name":"sid"}],"origins":[]}`
+	if code, b := call("PUT", "/profile/"+run.Token, state); code != 204 {
+		t.Fatalf("save: %d %s", code, b)
+	}
+	if code, b := call("GET", "/profile/"+run.Token, ""); code != 200 || b != state {
+		t.Fatalf("restore: %d %q", code, b)
+	}
+	if code, _ := call("PUT", "/profile/"+run.Token, `{"cookies":[]}`); code != 400 {
+		t.Errorf("bad state: %d", code)
+	}
+	if code, _ := call("PUT", "/profile/"+run.Token, strings.Repeat(" ", runs.MaxProfileBytes+1)); code != 413 {
+		t.Errorf("too large: %d", code)
+	}
+	if code, _ := call("GET", "/profile/deadbeef", ""); code != 404 {
+		t.Errorf("unknown token: %d", code)
+	}
+	for _, name := range []string{"profile.json", "storage-state.json", "storage-state-2026-11-08T10-00-00.json"} {
+		if code, _ := call("PUT", "/artifacts/"+run.Token+"/"+name, state); code != 400 {
+			t.Errorf("artifact %s: %d, want 400", name, code)
+		}
+	}
+}
+
+func TestAdminBrowserProfile(t *testing.T) {
+	srv, _, svc := setupBoth(t, 0)
+	startRun(t, srv, svc)
+	if r := do(t, "GET", srv.URL+"/api/browser-profiles/ann", ""); r.StatusCode != 404 {
+		t.Fatalf("none saved: %d", r.StatusCode)
+	}
+	saved := time.Date(2026, 11, 8, 9, 30, 0, 0, time.UTC)
+	if err := svc.Store.SavePersonaProfile("ann", json.RawMessage(`{"cookies":[{"name":"sid","value":"secret"}],"origins":[]}`), saved); err != nil {
+		t.Fatal(err)
+	}
+	r := do(t, "GET", srv.URL+"/api/browser-profiles/ann", "")
+	b, _ := io.ReadAll(r.Body)
+	if r.StatusCode != 200 || string(b) != `{"saved":"2026-11-08T09:30:00Z"}`+"\n" {
+		t.Fatalf("saved: %d %s", r.StatusCode, b)
+	}
+	if r := do(t, "DELETE", srv.URL+"/api/browser-profiles/ann", ""); r.StatusCode != 204 {
+		t.Fatalf("forget: %d", r.StatusCode)
+	}
+	if p, _, _ := svc.Store.PersonaProfile("ann"); p != nil {
+		t.Fatalf("still saved: %s", p)
+	}
+	if r, _ := http.Get(srv.URL + "/api/browser-profiles/ann"); r.StatusCode != 401 {
+		t.Errorf("no token: %d", r.StatusCode)
+	}
+}

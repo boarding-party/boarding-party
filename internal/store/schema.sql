@@ -6,6 +6,14 @@ CREATE TABLE IF NOT EXISTS persona_state (
   persona TEXT PRIMARY KEY,
   state   TEXT NOT NULL
 );
+-- A persona's browser cookies and site storage (Playwright storage state),
+-- restored at the start of its next run. Kept apart from persona_state: it
+-- holds session cookies and is never shown on the board.
+CREATE TABLE IF NOT EXISTS persona_profile (
+  persona TEXT PRIMARY KEY,
+  state   TEXT NOT NULL,
+  saved   INTEGER NOT NULL
+);
 CREATE TABLE IF NOT EXISTS runs (
   id       TEXT PRIMARY KEY,
   token    TEXT NOT NULL UNIQUE,

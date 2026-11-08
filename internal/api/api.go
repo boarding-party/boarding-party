@@ -88,6 +88,8 @@ func admin(svc *runs.Service, maxBytes int64, token string, hub *live.Hub, mail 
 	mux.HandleFunc("DELETE /api/mailbox", s.deleteMailbox)
 	mux.HandleFunc("GET /api/messages", s.listMessages)
 	mux.HandleFunc("GET /api/messages/{id}", s.getMessage)
+	mux.HandleFunc("GET /api/browser-profiles/{persona}", s.getBrowserProfile)
+	mux.HandleFunc("DELETE /api/browser-profiles/{persona}", s.deleteBrowserProfile)
 	return s, guardAdmin(token, mux)
 }
 
@@ -100,6 +102,8 @@ func Worker(svc *runs.Service, maxBytes int64, hub *live.Hub) http.Handler {
 	mux.HandleFunc("PUT /usage/{token}", s.putUsage)
 	mux.HandleFunc("GET /files/{token}/{$}", s.workerFiles)
 	mux.HandleFunc("GET /files/{token}/{name}", s.workerFile)
+	mux.HandleFunc("GET /profile/{token}", s.getProfile)
+	mux.HandleFunc("PUT /profile/{token}", s.putProfile)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
 	return mux
 }
@@ -114,7 +118,7 @@ func fail(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, store.ErrNotFound), errors.Is(err, artifacts.ErrNotFound), errors.Is(err, runs.ErrNotActive):
 		http.Error(w, "not found", http.StatusNotFound)
-	case errors.Is(err, runs.ErrBadUsage):
+	case errors.Is(err, runs.ErrBadUsage), errors.Is(err, runs.ErrBadProfile):
 		http.Error(w, err.Error(), http.StatusBadRequest)
 	case errors.Is(err, runs.ErrBusy):
 		http.Error(w, runs.ErrBusy.Error(), http.StatusConflict)
@@ -490,6 +494,10 @@ func (s *server) putArtifact(w http.ResponseWriter, r *http.Request) {
 	run, err := s.svc.Active(r.PathValue("token"))
 	if err != nil {
 		fail(w, err)
+		return
+	}
+	if isProfileName(r.PathValue("name")) {
+		http.Error(w, "the browser profile holds session cookies: upload it to profileURL, not as an artifact", http.StatusBadRequest)
 		return
 	}
 	body := http.MaxBytesReader(w, r.Body, s.maxBytes)

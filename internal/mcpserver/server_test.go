@@ -112,9 +112,11 @@ func TestNextAssignmentReturnsPersonaAndStory(t *testing.T) {
 			Name string `json:"name"`
 			Goal string `json:"goal"`
 		} `json:"story"`
-		Sites        []string        `json:"sites"`
-		PersonaState json.RawMessage `json:"personaState"`
-		UploadURL    string          `json:"uploadURL"`
+		Sites          []string        `json:"sites"`
+		PersonaState   json.RawMessage `json:"personaState"`
+		UploadURL      string          `json:"uploadURL"`
+		ProfileURL     string          `json:"profileURL"`
+		BrowserProfile string          `json:"browserProfile"`
 	}
 	if err := json.Unmarshal([]byte(text), &got); err != nil {
 		t.Fatalf("%v: %s", err, text)
@@ -136,6 +138,9 @@ func TestNextAssignmentReturnsPersonaAndStory(t *testing.T) {
 	}
 	if want := director + "/artifacts/" + run.Token + "/"; got.UploadURL != want {
 		t.Errorf("uploadURL %q want %q", got.UploadURL, want)
+	}
+	if want := director + "/profile/" + run.Token; got.ProfileURL != want || got.BrowserProfile != "none" {
+		t.Errorf("profile %q %q want %q none", got.ProfileURL, got.BrowserProfile, want)
 	}
 
 	if text, isErr := call(t, cs, "persona_save", map[string]any{"state": map[string]any{"x": 2}}); isErr || text != "saved" {

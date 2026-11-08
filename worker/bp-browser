@@ -4,6 +4,7 @@
 live=""
 files=""
 usage=""
+profile=""
 device=""
 n=$#
 while [ "$n" -gt 0 ]; do
@@ -12,6 +13,7 @@ while [ "$n" -gt 0 ]; do
     --live-url=*) live="${a#--live-url=}" ;;
     --files-url=*) files="${a#--files-url=}" ;;
     --usage-url=*) usage="${a#--usage-url=}" ;;
+    --profile-url=*) profile="${a#--profile-url=}" ;;
     --bp-device=*) device="${a#--bp-device=}" ;;
     *) set -- "$@" "$a" ;;
   esac
@@ -54,6 +56,23 @@ if [ -n "$files" ]; then
     done
   ' sh "$files" >>/tmp/bp-files.log 2>&1 || echo "bp-files: failed or timed out" >>/tmp/bp-files.log
   rm -f /workspace/files/.*.part 2>/dev/null
+fi
+
+# Restore the persona's browser profile (cookies and site storage saved at
+# the end of its last run). Best effort, 10 s: 204 means start empty, and any
+# failure starts empty too. Kept outside /workspace/out and /workspace/files
+# so it is never uploaded or attached. Playwright reads it when it opens the
+# browser context, so the file stays for the life of the pod.
+if [ -n "$profile" ]; then
+  rm -f /workspace/profile.json /workspace/.profile.part
+  code=$(curl -sS --max-time 10 -o /workspace/.profile.part -w '%{http_code}' "$profile" 2>>/tmp/bp-profile.log)
+  if [ "$code" = "200" ] && [ -s /workspace/.profile.part ]; then
+    mv -f /workspace/.profile.part /workspace/profile.json
+    set -- "$@" "--storage-state=/workspace/profile.json"
+  else
+    rm -f /workspace/.profile.part
+    [ "$code" = "204" ] || echo "bp-profile: no profile restored (HTTP $code)" >>/tmp/bp-profile.log
+  fi
 fi
 
 # tiny's egress proxy, when on, arrives as HTTPS_PROXY/NO_PROXY. Hand it to

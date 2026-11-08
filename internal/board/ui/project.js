@@ -17,7 +17,7 @@ const nid = () => `r${++seq}`;
 const row = (v = '') => ({ id: nid(), v });
 const newPersona = () => ({ id: nid(), name: '', profile: {}, traits: [], identity: [] });
 const newTrigger = (kind = '') => ({ kind, from: '', subject: '', keywords: [], linkHost: '', title: '', lead: '2' });
-const newStory = () => ({ id: nid(), name: '', goal: '', model: '', handoffs: [], trigger: newTrigger() });
+const newStory = () => ({ id: nid(), name: '', goal: '', model: '', handoffs: [], trigger: newTrigger(), freshBrowser: false });
 
 // leadMinutes turns a Go duration such as "5m" or "1h30m" into minutes for
 // the editor; an empty lead is the director's default of 2.
@@ -93,7 +93,7 @@ function fromProject(p) {
         traits: [...(pe.traits || [])],
         identity: Object.entries(pe.identity || {}).map(([k, v]) => ({ id: nid(), k, v: String(v) })),
       })),
-      stories: (r.stories || []).map((s) => ({ id: nid(), name: s.name || '', goal: s.goal || '', model: s.model || '', handoffs: s.handoffs || [], trigger: triggerFromProject(s.trigger) })),
+      stories: (r.stories || []).map((s) => ({ id: nid(), name: s.name || '', goal: s.goal || '', model: s.model || '', handoffs: s.handoffs || [], trigger: triggerFromProject(s.trigger), freshBrowser: !!s.freshBrowser })),
     })),
   };
   const ids = new Map();
@@ -157,7 +157,7 @@ function toJSON(d) {
       stories: r.stories.map((s) => {
         const h = handoffs(s);
         const t = triggerToJSON(s.trigger);
-        return { name: s.name.trim(), goal: s.goal.trim(), ...(s.model ? { model: s.model } : {}), ...(h.length ? { handoffs: h } : {}), ...(t ? { trigger: t } : {}) };
+        return { name: s.name.trim(), goal: s.goal.trim(), ...(s.model ? { model: s.model } : {}), ...(h.length ? { handoffs: h } : {}), ...(t ? { trigger: t } : {}), ...(s.freshBrowser ? { freshBrowser: true } : {}) };
       }),
     })),
   };
@@ -567,6 +567,31 @@ function ProfileGrid({ profile, fields, onChange }) {
     </div>`;
 }
 
+// SavedBrowser shows when the persona's browser (cookies and site storage)
+// was last saved, and forgets it so the next run starts empty. It acts at
+// once on the director, not through the project draft.
+function SavedBrowser({ name }) {
+  const [saved, setSaved] = useState(null);
+  const [err, setErr] = useState('');
+  useEffect(() => {
+    let live = true;
+    setSaved(null);
+    if (name) api('/api/browser-profiles/' + encodeURIComponent(name)).then((r) => { if (live && r) setSaved(r.saved); }).catch(() => {});
+    return () => { live = false; };
+  }, [name]);
+  if (!saved) return null;
+  const forget = async () => {
+    if (!(await confirmDialog(`Forget ${name}'s saved browser? The next run starts signed out, with no cookies or site data.`, { confirm: 'Forget browser', danger: true }))) return;
+    try { await api('/api/browser-profiles/' + encodeURIComponent(name), { method: 'DELETE' }); setSaved(null); setErr(''); } catch (e) { setErr(e.message); }
+  };
+  return html`
+    <div class="row">
+      <span class="small muted">Browser saved ${new Date(saved).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}. Runs pick up its cookies and site data.</span>
+      <button class="btn ghost small" type="button" onClick=${forget}>Forget saved browser</button>
+      ${err ? html`<span class="warn">${err}</span>` : null}
+    </div>`;
+}
+
 function PersonaRow({ persona, fields, onChange, onRemove }) {
   const id = `p-${persona.id}`;
   const warns = identityWarnings(persona.identity);
@@ -579,6 +604,7 @@ function PersonaRow({ persona, fields, onChange, onRemove }) {
           onClick=${onRemove}>×</button>
       </div>
       <${ProfileGrid} profile=${persona.profile} fields=${fields} onChange=${onChange} />
+      <${SavedBrowser} name=${persona.name.trim()} />
       <${Tags} tags=${persona.traits} label="Other traits (optional)" placeholder="Optional. Enter adds"
         onChange=${(fn) => onChange((p) => fn(p.traits))} />
       <span class="hint">Anything the lists don't cover, such as distracted or left-handed.</span>
@@ -614,6 +640,11 @@ function StoryRow({ story, targets, onChange, onRemove }) {
       </label>
       <${HandsOffTo} story=${story} targets=${targets} onChange=${onChange} />
       <${StartsOnItsOwn} story=${story} onChange=${onChange} />
+      <label class="check">
+        <input type="checkbox" checked=${story.freshBrowser}
+          onChange=${(e) => { const v = e.currentTarget.checked; onChange((s) => { s.freshBrowser = v; }); }} />
+        <span>Start with an empty browser <span class="hint">For a first visit. Otherwise the persona keeps its cookies and site data from its last run, like a person coming back.</span></span>
+      </label>
     </div>`;
 }
 

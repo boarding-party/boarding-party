@@ -193,6 +193,9 @@ type Story struct {
 	// Trigger starts the story from a message or calendar event instead of
 	// the role's schedule.
 	Trigger *Trigger `json:"trigger,omitempty"`
+	// FreshBrowser starts every run of this story with an empty browser
+	// instead of the persona's saved cookies and site storage.
+	FreshBrowser bool `json:"freshBrowser,omitempty"`
 }
 
 // Handoff points at a story of another role that this story passes work to.

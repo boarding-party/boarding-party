@@ -281,6 +281,7 @@ func (t *Tiny) browserArgs(r store.Run, p project.Project) []string {
 	args := []string{"--live-url=" + t.DirectorURL + "/live/" + r.Token,
 		"--files-url=" + t.DirectorURL + "/files/" + r.Token + "/",
 		"--usage-url=" + t.DirectorURL + "/usage/" + r.Token,
+		"--profile-url=" + t.DirectorURL + "/profile/" + r.Token,
 		"--headless", "--isolated", "--no-sandbox", "--browser=chromium", "--output-dir=/workspace/out"}
 	device := personaDevice(r, p)
 	if pd, viewport := project.DeviceLaunch(device); pd != "" {
@@ -288,7 +289,7 @@ func (t *Tiny) browserArgs(r store.Run, p project.Project) []string {
 	} else {
 		args = append(args, "--viewport-size="+viewport)
 	}
-	return append(args, "--caps=devtools")
+	return append(args, "--caps=devtools,storage")
 }
 
 func personaDevice(r store.Run, p project.Project) string {

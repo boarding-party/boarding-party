@@ -99,6 +99,12 @@ type assignment struct {
 	Sites        []string        `json:"sites"`
 	PersonaState json.RawMessage `json:"personaState"`
 	UploadURL    string          `json:"uploadURL"`
+	// ProfileURL takes the browser storage state at the end of the run.
+	ProfileURL string `json:"profileURL"`
+	// BrowserProfile says how the browser started: restored (the persona's
+	// saved cookies and site storage), fresh (the story asks for an empty
+	// browser) or none (nothing saved yet).
+	BrowserProfile string `json:"browserProfile"`
 	// Files are the names under /workspace/files the persona may upload in the site.
 	Files []string `json:"files"`
 	// Inbox is true when the persona can receive email: a mailbox is configured and it has identity.email.
@@ -188,6 +194,10 @@ func newServer(svc *runs.Service, st *store.Store, directorURL, token string, ma
 						}
 					}
 				}
+			}
+			a.ProfileURL = directorURL + "/profile/" + token
+			if _, a.BrowserProfile, err = svc.Profile(token); err != nil {
+				return nil, nil, err
 			}
 			a.Inbox = mail != nil && mail.Status().State == "ok" && a.Persona.Identity["email"] != ""
 			state, err := st.PersonaState(r.Persona)
