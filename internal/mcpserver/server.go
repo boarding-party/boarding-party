@@ -109,9 +109,22 @@ type assignment struct {
 	Files []string `json:"files"`
 	// Inbox is true when the persona can receive email: a mailbox is configured and it has identity.email.
 	Inbox bool `json:"inbox"`
+	// KnownIssues are the problems already on the bug list, so the persona
+	// can attach a report to one (same_as) or skip one marked not a bug.
+	KnownIssues []knownIssue `json:"knownIssues"`
 	// Context says why this run exists: it continues an earlier run, picks up a
 	// hand-off, or was started by a message or a calendar event. null for a fresh run.
 	Context json.RawMessage `json:"context"`
+}
+
+// maxKnownIssues caps knownIssues in an assignment.
+const maxKnownIssues = 100
+
+type knownIssue struct {
+	ID      string `json:"id"`
+	Status  string `json:"status"`
+	Summary string `json:"summary"`
+	Reason  string `json:"reason,omitempty"` // the user's, for not_a_bug
 }
 
 type saveArgs struct {
@@ -124,12 +137,54 @@ type bugArgs struct {
 	Evidence      string `json:"evidence" jsonschema:"artifact name or other evidence"`
 	SeverityGuess string `json:"severity_guess" jsonschema:"high, medium or low"`
 	Note          string `json:"note" jsonschema:"anything else worth knowing"`
+	SameAs        string `json:"same_as,omitempty" jsonschema:"id of the known issue this is the same problem as; omit for a new problem"`
 }
 
 type finishArgs struct {
 	Outcome string       `json:"outcome" jsonschema:"done, stuck, failed or waiting"`
 	Summary string       `json:"summary" jsonschema:"what happened"`
 	Until   *sched.Until `json:"until,omitempty" jsonschema:"what to wait for; required for outcome waiting and not allowed otherwise"`
+	Verify  *verifyArgs  `json:"verify,omitempty" jsonschema:"what a fix check found; required with outcome done on a fix check run and not allowed otherwise"`
+}
+
+type verifyArgs struct {
+	Reached    *bool  `json:"reached" jsonschema:"true if you got to the step where the problem was"`
+	StillThere *bool  `json:"still_there,omitempty" jsonschema:"true if the problem is still there; required when reached is true"`
+	Note       string `json:"note,omitempty" jsonschema:"what you saw"`
+}
+
+const errNotCheck = "verify applies only to a fix check run"
+
+// verdict checks finish_run's verify against the run: it returns the verdict
+// to record (nil for none) or a tool error message.
+func verdict(r store.Run, state store.RunState, in *verifyArgs) (*store.Verdict, string) {
+	var c store.RunContext
+	_ = json.Unmarshal(r.Context, &c)
+	if c.Verify == nil {
+		if in != nil {
+			return nil, errNotCheck
+		}
+		return nil, ""
+	}
+	if state != store.RunDone {
+		if in != nil {
+			return nil, "verify goes only with outcome done; a fix check that ends " + string(state) + " counts as not checked"
+		}
+		return nil, ""
+	}
+	switch {
+	case in == nil:
+		return nil, "this run checks a fix: finish done with verify {reached, still_there, note}"
+	case in.Reached == nil:
+		return nil, "verify needs reached: did you get to the step where the problem was?"
+	case *in.Reached && in.StillThere == nil:
+		return nil, "verify needs still_there when reached is true"
+	}
+	v := &store.Verdict{Reached: *in.Reached, Note: in.Note}
+	if v.Reached {
+		v.StillThere = *in.StillThere
+	}
+	return v, ""
 }
 
 func newServer(svc *runs.Service, st *store.Store, directorURL, token string, mail mailbox) *mcp.Server {
@@ -195,6 +250,14 @@ func newServer(svc *runs.Service, st *store.Store, directorURL, token string, ma
 					}
 				}
 			}
+			known, err := st.KnownIssues(time.Now().UTC(), maxKnownIssues)
+			if err != nil {
+				return nil, nil, err
+			}
+			a.KnownIssues = make([]knownIssue, 0, len(known))
+			for _, k := range known {
+				a.KnownIssues = append(a.KnownIssues, knownIssue{ID: k.ID, Status: string(k.Status), Summary: k.Summary, Reason: k.Reason})
+			}
 			a.ProfileURL = directorURL + "/profile/" + token
 			if _, a.BrowserProfile, err = svc.Profile(token); err != nil {
 				return nil, nil, err
@@ -233,7 +296,7 @@ func newServer(svc *runs.Service, st *store.Store, directorURL, token string, ma
 		})
 
 	mcp.AddTool(s, &mcp.Tool{Name: "report_bug",
-		Description: "Report a bug you found. Returns the bug id."},
+		Description: "Report a bug you found. If it is the same problem as one in knownIssues, pass that issue's id as same_as. Returns the bug id."},
 		func(ctx context.Context, _ *mcp.CallToolRequest, in bugArgs) (*mcp.CallToolResult, any, error) {
 			r, bad, err := active()
 			if bad != nil || err != nil {
@@ -252,7 +315,7 @@ func newServer(svc *runs.Service, st *store.Store, directorURL, token string, ma
 				return nil, nil, err
 			}
 			b := store.Bug{ID: hex.EncodeToString(raw), RunID: r.ID, Summary: in.Summary, Step: in.Step,
-				Evidence: in.Evidence, Severity: in.SeverityGuess, Note: in.Note, Created: time.Now().UTC()}
+				Evidence: in.Evidence, Severity: in.SeverityGuess, Note: in.Note, Created: time.Now().UTC(), IssueID: in.SameAs}
 			if err := st.AddBug(b); err != nil {
 				return nil, nil, err
 			}
@@ -260,13 +323,16 @@ func newServer(svc *runs.Service, st *store.Store, directorURL, token string, ma
 		})
 
 	mcp.AddTool(s, &mcp.Tool{Name: "finish_run",
-		Description: "Finish your run. outcome is done, stuck, failed or waiting. For waiting, set until to exactly one of email {from, subject, after_id: the id of the newest message you already saw}, handoff {role, story} or time {at or after}, plus an optional timeout. Call this last."},
+		Description: "Finish your run. outcome is done, stuck, failed or waiting. For waiting, set until to exactly one of email {from, subject, after_id: the id of the newest message you already saw}, handoff {role, story} or time {at or after}, plus an optional timeout. On a fix check run (context verify), finish done with verify {reached, still_there, note}. Call this last."},
 		func(ctx context.Context, _ *mcp.CallToolRequest, in finishArgs) (*mcp.CallToolResult, any, error) {
 			r, bad, err := active()
 			if bad != nil || err != nil {
 				return bad, nil, err
 			}
 			if in.Outcome == "waiting" {
+				if in.Verify != nil {
+					return toolErr("verify goes only with outcome done, not waiting")
+				}
 				return finishWaiting(ctx, svc, st, mail, token, r, in)
 			}
 			if in.Until != nil {
@@ -283,7 +349,11 @@ func newServer(svc *runs.Service, st *store.Store, directorURL, token string, ma
 			default:
 				return toolErr(fmt.Sprintf("outcome must be done, stuck, failed or waiting, got %q", in.Outcome))
 			}
-			err = svc.Finish(ctx, token, state, in.Summary)
+			v, msg := verdict(r, state, in.Verify)
+			if msg != "" {
+				return toolErr(msg)
+			}
+			err = svc.FinishChecked(ctx, token, state, in.Summary, v)
 			if errors.Is(err, runs.ErrNotActive) {
 				return toolErr(errNotActive)
 			}
