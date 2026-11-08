@@ -348,3 +348,17 @@ func TestNoCheck(t *testing.T) {
 		t.Fatalf("issue %+v", is)
 	}
 }
+
+func TestStatusChangeDropsQueuedCheck(t *testing.T) {
+	s := open(t)
+	id := checking(t, s)
+	if err := s.SetIssueStatus(id, IssueNotABug, "dismissed", t0); err != nil {
+		t.Fatal(err)
+	}
+	if q, _ := s.Queue(); len(q) != 0 {
+		t.Fatalf("old check still queued: %+v", q)
+	}
+	if is, _ := s.Issue(id); is.Status != IssueNotABug || is.CheckNote != "" {
+		t.Fatalf("issue %+v", is)
+	}
+}

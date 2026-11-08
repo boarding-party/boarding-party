@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -188,22 +189,35 @@ func (s *Store) KnownIssues(now time.Time, limit int) ([]Issue, error) {
 }
 
 // SetIssueStatus records the user's triage. The reason is kept only for not
-// a bug. Any check under way no longer counts.
+// a bug. Any check under way no longer counts, and one still queued is
+// dropped so it does not spend a run.
 func (s *Store) SetIssueStatus(id string, st IssueStatus, reason string, now time.Time) error {
 	if st != IssueNotABug {
 		reason = ""
 	}
-	res, err := s.db.Exec(`UPDATE issues SET status=?, reason=?, updated=?, check_journey='' WHERE id=?`,
-		string(st), reason, ts(now), id)
+	tx, err := s.db.Begin()
 	if err != nil {
 		return err
 	}
-	if n, err := res.RowsAffected(); err != nil {
-		return err
-	} else if n == 0 {
+	defer tx.Rollback()
+	var journey string
+	err = tx.QueryRow(`SELECT check_journey FROM issues WHERE id=?`, id).Scan(&journey)
+	if errors.Is(err, sql.ErrNoRows) {
 		return ErrNotFound
 	}
-	return nil
+	if err != nil {
+		return err
+	}
+	if journey != "" {
+		if _, err := tx.Exec(`DELETE FROM queue WHERE journey=?`, journey); err != nil {
+			return err
+		}
+	}
+	if _, err := tx.Exec(`UPDATE issues SET status=?, reason=?, updated=?, check_journey='' WHERE id=?`,
+		string(st), reason, ts(now), id); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // Verdict is what a fix check run found.
