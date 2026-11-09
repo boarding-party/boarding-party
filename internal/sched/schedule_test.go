@@ -330,3 +330,26 @@ func TestScheduleRoleWithOnlyTriggeredStoriesHasNoDue(t *testing.T) {
 		t.Fatalf("dues = %+v", d)
 	}
 }
+
+func TestDrainSkipsOverLeadBudget(t *testing.T) {
+	f := newSchedFix(t, activityYAML)
+	for _, q := range []store.Queued{
+		{ID: "q1", Persona: "Ana", Role: "Ana", Story: "pay", Created: now},
+		{ID: "q2", Persona: "Ada", Role: "patient", Story: "book", Created: now.Add(time.Second)},
+	} {
+		if err := f.st.Enqueue(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	f.starter.errs = []error{fmt.Errorf("Kate: %w", runs.ErrLeadOverBudget)}
+	if err := f.s.drain(context.Background()); err != nil {
+		t.Fatalf("drain = %v", err)
+	}
+	calls := f.starter.Calls()
+	if len(calls) != 2 || calls[1].ID != "q2" {
+		t.Fatalf("calls = %+v", calls)
+	}
+	if q := f.queue(); len(q) != 1 || q[0].ID != "q1" {
+		t.Fatalf("queue = %+v", q)
+	}
+}

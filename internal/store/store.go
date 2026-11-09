@@ -60,7 +60,7 @@ type Run struct {
 
 // RunContext is what a chained run is told about the run before it.
 type RunContext struct {
-	Kind        string        `json:"kind"` // "continue" | "handoff" | "message" | "calendar" | "verify"
+	Kind        string        `json:"kind"` // "continue" | "handoff" | "message" | "calendar" | "verify" | "lead"
 	WaitedFor   string        `json:"waitedFor,omitempty"`
 	Arrived     string        `json:"arrived,omitempty"`
 	MessageID   string        `json:"messageId,omitempty"`
@@ -70,6 +70,8 @@ type RunContext struct {
 	Event       *ContextEvent `json:"event,omitempty"`
 	// Verify is the issue this run checks a fix for. A continuation keeps it.
 	Verify *ContextVerify `json:"verify,omitempty"`
+	// Reason is why a lead run woke (kind "lead").
+	Reason string `json:"reason,omitempty"`
 }
 
 // ContextVerify is the issue a fix check looks for again.

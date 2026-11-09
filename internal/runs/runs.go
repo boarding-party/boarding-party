@@ -90,6 +90,13 @@ var ErrAllowList = errors.New("project saved, but the egress allow-list was not 
 
 // SaveProject stores p and puts its hosts on the egress allow-list.
 func (s *Service) SaveProject(ctx context.Context, p project.Project) error {
+	taken, err := s.childNameTaken(p)
+	if err != nil {
+		return err
+	}
+	if taken != "" {
+		return fmt.Errorf("%w: %q is the name of a lead's persona; adopt it or pick another name", ErrInvalid, taken)
+	}
 	if err := s.Store.PutProject(p); err != nil {
 		return err
 	}
@@ -227,6 +234,9 @@ func (s *Service) start(ctx context.Context, persona, story string, q *store.Que
 	if err := s.Gate(time.Now()); err != nil {
 		return store.Run{}, err
 	}
+	if err := s.LeadGate(p, persona, time.Now()); err != nil {
+		return store.Run{}, err
+	}
 	id, err := randHex(16)
 	if err != nil {
 		return store.Run{}, err
@@ -304,6 +314,15 @@ func find(p project.Project, persona, story string) (role, storyName string, err
 		for _, pe := range r.Personas {
 			if pe.Name != persona {
 				continue
+			}
+			if pe.IsLead() != (story == project.LeadStory) {
+				if pe.IsLead() {
+					return "", "", fmt.Errorf("%w: %s is a lead and takes only lead runs", ErrInvalid, persona)
+				}
+				return "", "", fmt.Errorf("%w: %s is not a lead", ErrInvalid, persona)
+			}
+			if pe.IsLead() {
+				return r.Name, story, nil
 			}
 			for _, st := range r.Stories {
 				if st.Name == story {

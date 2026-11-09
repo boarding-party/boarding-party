@@ -394,6 +394,8 @@ func (s *Scheduler) drain(ctx context.Context) error {
 		switch {
 		case err == nil:
 			return nil
+		case errors.Is(err, runs.ErrLeadOverBudget):
+			// Only this lead's work waits for tomorrow; try the next item.
 		case errors.Is(err, runs.ErrPaused), errors.Is(err, runs.ErrOverBudget):
 			return nil // the item stays until the gate opens
 		case errors.Is(err, runs.ErrBusy):
