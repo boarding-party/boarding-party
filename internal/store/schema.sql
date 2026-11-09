@@ -138,3 +138,24 @@ CREATE TABLE IF NOT EXISTS events (
   PRIMARY KEY(persona, uid)
 );
 CREATE INDEX IF NOT EXISTS events_start ON events(start);
+-- A child is a persona a lead made: body is {persona, stories}. Children are
+-- merged into the project the director runs, never into the user's file.
+CREATE TABLE IF NOT EXISTS children (
+  name    TEXT PRIMARY KEY,
+  lead    TEXT NOT NULL,
+  body    TEXT NOT NULL,
+  reason  TEXT NOT NULL DEFAULT '',
+  created INTEGER NOT NULL,
+  stopped INTEGER NOT NULL DEFAULT 0
+);
+-- A lead's decision log: one row per write a lead made, with its reason.
+CREATE TABLE IF NOT EXISTS lead_log (
+  id      INTEGER PRIMARY KEY AUTOINCREMENT,
+  lead    TEXT NOT NULL,
+  run_id  TEXT NOT NULL DEFAULT '',
+  action  TEXT NOT NULL,
+  subject TEXT NOT NULL DEFAULT '',
+  reason  TEXT NOT NULL DEFAULT '',
+  created INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS lead_log_lead ON lead_log(lead, created);

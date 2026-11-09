@@ -285,20 +285,6 @@ func (s *Store) PutProject(p project.Project) error {
 	return err
 }
 
-func (s *Store) Project() (project.Project, error) {
-	var body string
-	err := s.db.QueryRow(`SELECT body FROM project WHERE id = 1`).Scan(&body)
-	if errors.Is(err, sql.ErrNoRows) {
-		return project.Project{}, ErrNotFound
-	}
-	if err != nil {
-		return project.Project{}, err
-	}
-	var p project.Project
-	err = json.Unmarshal([]byte(body), &p)
-	return p, err
-}
-
 // PersonaState returns nil if the persona has no saved state.
 func (s *Store) PersonaState(persona string) (json.RawMessage, error) {
 	var st string
