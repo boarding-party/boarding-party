@@ -148,3 +148,6 @@ func DeviceLaunch(device string) (playwrightDevice, viewport string) {
 	}
 	return "", defaultViewport
 }
+
+// Validate checks every set value against its field's options.
+func (p Profile) Validate() error { return p.validate() }
