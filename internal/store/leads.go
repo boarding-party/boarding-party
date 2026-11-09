@@ -266,3 +266,12 @@ func (s *Store) JoinReport(bugID, issueID string, now time.Time) error {
 	}
 	return tx.Commit()
 }
+
+// Report returns one bug report, or ErrNotFound.
+func (s *Store) Report(id string) (Bug, error) {
+	b, err := scanBug(s.db.QueryRow(`SELECT `+bugCols+` FROM bugs WHERE id = ?`, id))
+	if errors.Is(err, sql.ErrNoRows) {
+		return Bug{}, ErrNotFound
+	}
+	return b, err
+}

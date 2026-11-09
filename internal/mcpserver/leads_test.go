@@ -315,3 +315,50 @@ func TestLeadFinishNoWaiting(t *testing.T) {
 		t.Fatalf("state %s", r.State)
 	}
 }
+
+func TestChildCreateNoAddressClash(t *testing.T) {
+	f := newLeadFix(t, allPowers())
+	// Tom's address is what a child named "Tom" or "TOM" would get.
+	p, _ := f.st.RawProject()
+	p.Roles[0].Personas[1].Identity = map[string]string{"email": "megan+zed@x.io"}
+	if err := f.st.PutProject(p); err != nil {
+		t.Fatal(err)
+	}
+	f.run(t, "l1", "Kate", "owner", project.LeadStory, store.RunRunning)
+	cs := connect(t, f.srv, "tok-l1")
+	for _, name := range []string{"TOM", "ANA", "Zed"} {
+		text, isErr := call(t, cs, "child_create", map[string]any{"name": name,
+			"stories": []map[string]any{{"name": "pay", "goal": "pay"}}, "reason": "r"})
+		if !isErr || !strings.Contains(text, "taken") {
+			t.Fatalf("%s: %q %v", name, text, isErr)
+		}
+	}
+}
+
+func TestReportJoinRespectsTriage(t *testing.T) {
+	f := newLeadFix(t, allPowers())
+	f.run(t, "c1", "Ana", "Ana", "pay", store.RunDone)
+	f.run(t, "t1", "Tom", "owner", "invoice", store.RunDone)
+	nab := issueFrom(t, f.st, "c1", "b1", "invoice number prefilled")
+	if err := f.st.SetIssueStatus(nab, store.IssueNotABug, "site default", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	open := issueFrom(t, f.st, "c1", "b2", "footer tiny")
+	other := issueFrom(t, f.st, "c1", "b3", "footer small")
+	f.run(t, "l1", "Kate", "owner", project.LeadStory, store.RunRunning)
+	cs := connect(t, f.srv, "tok-l1")
+	for _, tc := range []struct{ report, issue, why string }{
+		{"b1", open, "out of a triaged issue"},
+		{"b2", nab, "into a not-a-bug issue"},
+	} {
+		if text, isErr := call(t, cs, "report_join", map[string]any{"report_id": tc.report, "issue_id": tc.issue, "reason": "r"}); !isErr {
+			t.Fatalf("%s: %s", tc.why, text)
+		}
+	}
+	if is, err := f.st.Issue(nab); err != nil || is.Reason != "site default" {
+		t.Fatalf("triaged issue changed: %+v %v", is, err)
+	}
+	if text, isErr := call(t, cs, "report_join", map[string]any{"report_id": "b2", "issue_id": other, "reason": "same footer"}); isErr {
+		t.Fatal(text)
+	}
+}

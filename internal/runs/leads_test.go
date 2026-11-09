@@ -146,3 +146,16 @@ func TestWakeLead(t *testing.T) {
 		t.Fatalf("wake a non-lead: %v", err)
 	}
 }
+
+func TestLeadUsageCountsStoppedChildren(t *testing.T) {
+	svc := leadSvc(t, 2)
+	pastRun(t, svc, "r1", "Ana", "Ana", "pay")
+	if err := svc.Store.StopChild("Ana", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	p, _ := svc.Store.Project()
+	u, err := svc.LeadUsage(p, "Kate", time.Now())
+	if err != nil || u.Runs != 1 {
+		t.Fatalf("stopping a child dropped its runs from the budget: %+v %v", u, err)
+	}
+}

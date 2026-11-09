@@ -433,6 +433,73 @@ func (s *leadTools) ownChild(c leadCtx, name string) (store.Child, string, error
 	return ch, "", nil
 }
 
+// nameTaken reports whether a new child's name, or its email address, is
+// already used by any persona, role or stored child (stopped ones too),
+// compared without case, so mail can never reach two personas.
+func (s *leadTools) nameTaken(p project.Project, name, email string) (bool, error) {
+	names, emails := map[string]bool{}, map[string]bool{}
+	addEmail := func(e string) {
+		if a, err := mail.ParseAddress(e); err == nil {
+			emails[strings.ToLower(a.Address)] = true
+		}
+	}
+	for _, r := range p.Roles {
+		names[strings.ToLower(r.Name)] = true
+		for _, pe := range r.Personas {
+			names[strings.ToLower(pe.Name)] = true
+			addEmail(pe.Identity["email"])
+		}
+	}
+	cs, err := s.st.AllChildren()
+	if err != nil {
+		return false, err
+	}
+	for _, c := range cs {
+		names[strings.ToLower(c.Name)] = true
+		addEmail(c.Persona.Identity["email"])
+	}
+	return names[strings.ToLower(name)] || (email != "" && emails[strings.ToLower(email)]), nil
+}
+
+// canJoin says why a lead may not move a report, or "". A lead tidies only
+// untriaged reports: the report's issue must be open, the target open or
+// confirmed, and the report from a run the lead may read. Anything the owner
+// decided (not a bug, fixed, closed) or a check under way stays as it is.
+func (s *leadTools) canJoin(c leadCtx, reportID, issueID string) (string, error) {
+	b, err := s.st.Report(reportID)
+	if errors.Is(err, store.ErrNotFound) {
+		return "report or issue not found", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	r, err := s.st.RunByID(b.RunID)
+	if errors.Is(err, store.ErrNotFound) || (err == nil && !visible(c, r.Persona)) {
+		return errNotAllowed, nil
+	}
+	if err != nil {
+		return "", err
+	}
+	from, err := s.st.Issue(b.IssueID)
+	if err != nil && !errors.Is(err, store.ErrNotFound) {
+		return "", err
+	}
+	if err == nil && from.Status != store.IssueOpen {
+		return "this report's issue is already triaged by the owner; leave it", nil
+	}
+	to, err := s.st.Issue(issueID)
+	if errors.Is(err, store.ErrNotFound) {
+		return "report or issue not found", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	if to.Status != store.IssueOpen && to.Status != store.IssueConfirmed {
+		return "a report can join only an open or confirmed issue", nil
+	}
+	return "", nil
+}
+
 func addLeadTools(s *mcp.Server, lt *leadTools) {
 	seeRuns := func(l project.Lead) bool { return l.SeeRuns }
 	create := func(l project.Lead) bool { return l.CreatePersonas }
@@ -541,10 +608,12 @@ func addLeadTools(s *mcp.Server, lt *leadTools) {
 			if !childName.MatchString(name) {
 				return toolErr("name must start with a capital letter and use only letters, digits, spaces, ' and -, at most 40 characters")
 			}
-			if _, _, taken := c.p.Persona(name); taken {
-				return toolErr(fmt.Sprintf("the name %q is taken", name))
+			email := childEmail(c.lead.Identity["email"], name)
+			taken, err := lt.nameTaken(c.p, name, email)
+			if err != nil {
+				return nil, nil, err
 			}
-			if _, taken := c.p.Role(name); taken {
+			if taken {
 				return toolErr(fmt.Sprintf("the name %q is taken", name))
 			}
 			if msg := checkTraits(in.Traits); msg != "" {
@@ -576,8 +645,8 @@ func addLeadTools(s *mcp.Server, lt *leadTools) {
 				return nil, nil, err
 			}
 			id := map[string]string{"name": name, "password": pw}
-			if e := childEmail(c.lead.Identity["email"], name); e != "" {
-				id["email"] = e
+			if email != "" {
+				id["email"] = email
 			}
 			ch := store.Child{Name: name, Lead: c.lead.Name, Reason: strings.TrimSpace(in.Reason),
 				Persona: project.Persona{Name: name, Traits: in.Traits, Identity: id, Profile: prof}, Stories: sts, Created: time.Now().UTC()}
@@ -720,6 +789,11 @@ func addLeadTools(s *mcp.Server, lt *leadTools) {
 				return bad, nil, err
 			}
 			if msg := checkReason(in.Reason); msg != "" {
+				return toolErr(msg)
+			}
+			if msg, err := lt.canJoin(c, in.ReportID, in.IssueID); err != nil {
+				return nil, nil, err
+			} else if msg != "" {
 				return toolErr(msg)
 			}
 			err = lt.st.JoinReport(in.ReportID, in.IssueID, time.Now().UTC())

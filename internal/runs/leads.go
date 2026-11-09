@@ -28,6 +28,15 @@ func (s *Service) LeadUsage(p project.Project, lead string, now time.Time) (Lead
 	for _, c := range p.ChildrenOf(lead) {
 		who[c] = true
 	}
+	// Stopped children are left out of p, but their runs today still count:
+	// stopping a child must not free its budget.
+	cs, err := s.Store.Children(lead)
+	if err != nil {
+		return LeadUsage{}, err
+	}
+	for _, c := range cs {
+		who[c.Name] = true
+	}
 	rs, err := s.Store.RunsSince(DayStart(now, p.Location()))
 	if err != nil {
 		return LeadUsage{}, err
