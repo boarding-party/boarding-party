@@ -82,3 +82,16 @@ func TestRouteTrustedAuthServ(t *testing.T) {
 		})
 	}
 }
+
+func TestRouteSkipsLead(t *testing.T) {
+	p := project.Project{
+		Roles: []project.Role{{Name: "r", Personas: []project.Persona{
+			{Name: "Kate", Identity: map[string]string{"email": "cast+kate@ex.test"}, Lead: &project.Lead{SeeRuns: true}},
+		}}},
+		Inbox: &project.Inbox{AllowFrom: []string{"ex.test"}},
+	}
+	persona, filtered := Route(Message{From: "a@ex.test", Verified: true, AuthServ: "mx.google.com", To: []string{"cast+kate@ex.test"}}, p)
+	if persona != "" || filtered != FilteredNoPersona {
+		t.Fatalf("got (%q, %q)", persona, filtered)
+	}
+}

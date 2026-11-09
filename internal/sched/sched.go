@@ -32,6 +32,8 @@ type Starter interface {
 	StartQueued(ctx context.Context, q store.Queued) (store.Run, error)
 	// Gate returns runs.ErrPaused or runs.ErrOverBudget when no run may start.
 	Gate(now time.Time) error
+	// LeadGate returns runs.ErrLeadOverBudget when the budget of persona's lead is spent.
+	LeadGate(p project.Project, persona string, now time.Time) error
 }
 
 // Scheduler hands stories off, resolves waits and starts queued runs, one at
@@ -102,13 +104,13 @@ func (s *Scheduler) Run(ctx context.Context) {
 }
 
 // Tick hands off finished runs' stories, resolves waits, asks the trigger
-// sources what is due, then starts at most
+// sources what is due, wakes leads, then starts at most
 // one queued run. A failure in one phase does not skip the others.
 func (s *Scheduler) Tick(ctx context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	now := s.now()
-	return errors.Join(s.followAll(now), s.resolveAll(now), s.fire(ctx, now), s.drain(ctx))
+	return errors.Join(s.followAll(now), s.resolveAll(now), s.fire(ctx, now), s.wakeLeads(now), s.drain(ctx))
 }
 
 // followAll acts once on every done or waiting run not yet acted on.
@@ -180,7 +182,8 @@ func (s *Scheduler) handoffs(p project.Project, r store.Run, targets []project.H
 			continue
 		}
 		role, _ := p.Role(h.Role)
-		if len(role.Personas) == 0 {
+		to := firstNonLead(role)
+		if to == "" {
 			msg := fmt.Sprintf("nobody in role %q to hand off to", h.Role)
 			if waiting {
 				return nil, msg, nil
@@ -195,11 +198,21 @@ func (s *Scheduler) handoffs(p project.Project, r store.Run, targets []project.H
 			log.Printf("run %s: %s; not handing off to %s/%s", r.ID, chainFull, h.Role, h.Story)
 			break
 		}
-		items = append(items, store.Queued{ID: s.newID(), Persona: role.Personas[0].Name, Role: h.Role, Story: h.Story,
+		items = append(items, store.Queued{ID: s.newID(), Persona: to, Role: h.Role, Story: h.Story,
 			Journey: r.Journey, Follows: r.ID, Via: "handoff", Context: ctxJSON,
 			Reason: fmt.Sprintf("Handed off by %s (%s)", r.Persona, r.Story), Created: now})
 	}
 	return items, "", nil
+}
+
+// firstNonLead returns the role's first persona that takes browser runs, or "".
+func firstNonLead(r project.Role) string {
+	for _, pe := range r.Personas {
+		if !pe.IsLead() {
+			return pe.Name
+		}
+	}
+	return ""
 }
 
 // handedOff reports whether h was already handed off in this chain.

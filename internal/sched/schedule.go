@@ -42,7 +42,9 @@ func (s *Schedule) Due(_ context.Context, p project.Project, now time.Time) ([]F
 			continue // nothing to run: any stored due is dropped, so a restored one starts fresh
 		}
 		for _, ps := range r.Personas {
-			names = append(names, ps.Name)
+			if !ps.IsLead() { // a lead only leads
+				names = append(names, ps.Name)
+			}
 		}
 	}
 	if err := s.Store.DeleteDuesExcept(names); err != nil {
@@ -63,6 +65,9 @@ func (s *Schedule) Due(_ context.Context, p project.Project, now time.Time) ([]F
 			continue
 		}
 		for _, ps := range r.Personas {
+			if ps.IsLead() {
+				continue
+			}
 			d, ok := dues[ps.Name]
 			if !ok || d.Activity != r.Activity {
 				if err := s.Store.SetDue(store.Due{Persona: ps.Name, Activity: r.Activity, At: pat.Next(now, loc, s.rand)}); err != nil {

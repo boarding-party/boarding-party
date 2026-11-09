@@ -81,10 +81,12 @@ func (m *Messages) Settle(f Fire, story string, now time.Time) error {
 	return m.Store.MarkMessageFired(c.MessageID, story, now)
 }
 
+// roleOf returns the role of a persona that takes browser runs; a lead is
+// treated as gone, since a lead only leads.
 func roleOf(p project.Project, persona string) (project.Role, bool) {
 	for _, r := range p.Roles {
 		for _, ps := range r.Personas {
-			if ps.Name == persona {
+			if ps.Name == persona && !ps.IsLead() {
 				return r, true
 			}
 		}

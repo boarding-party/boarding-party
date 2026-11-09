@@ -75,15 +75,16 @@ func (c *clock) Add(d time.Duration) {
 // fakeStarter records calls. On success it creates the run from the item, as
 // runs.Service does, so the queue row is consumed.
 type fakeStarter struct {
-	mu     sync.Mutex
-	st     *store.Store
-	now    func() time.Time
-	errs   []error // returned in turn; nil entries succeed
-	err    error   // returned once errs is used up
-	calls  []store.Queued
-	n      int
-	called chan struct{}
-	gate   error // returned by Gate
+	mu       sync.Mutex
+	st       *store.Store
+	now      func() time.Time
+	errs     []error // returned in turn; nil entries succeed
+	err      error   // returned once errs is used up
+	calls    []store.Queued
+	leadGate error
+	n        int
+	called   chan struct{}
+	gate     error // returned by Gate
 }
 
 func (f *fakeStarter) StartQueued(ctx context.Context, q store.Queued) (store.Run, error) {
@@ -119,6 +120,12 @@ func (f *fakeStarter) Gate(time.Time) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.gate
+}
+
+func (f *fakeStarter) LeadGate(project.Project, string, time.Time) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.leadGate
 }
 
 func (f *fakeStarter) SetGate(err error) {
