@@ -166,6 +166,9 @@ type Role struct {
 	// Activity is when the role's personas are active, such as
 	// "every 30 min, 09:00–17:30". Stored in canonical form. Optional.
 	Activity string `json:"activity,omitempty"`
+	// MadeBy is the lead that made this role's child persona. The director
+	// sets it on merged child roles; a project file may not.
+	MadeBy string `json:"madeBy,omitempty"`
 }
 
 // Pattern returns the parsed Activity; validation guarantees it parses.
@@ -180,6 +183,8 @@ type Persona struct {
 	Identity map[string]string `json:"identity"` // synthetic: email, password, address...
 	// Profile is the persona's structured background (device, age, ...).
 	Profile Profile `json:"profile,omitzero"`
+	// Lead, with any power ticked, makes the persona a lead.
+	Lead *Lead `json:"lead,omitempty"`
 }
 
 type Story struct {
@@ -305,6 +310,9 @@ func (p Project) validate() error {
 			return fmt.Errorf("duplicate role %q", r.Name)
 		}
 		seen[r.Name] = true
+		if r.MadeBy != "" {
+			return fmt.Errorf("role %q: madeBy is set by the director", r.Name)
+		}
 		pat, err := activity.Parse(r.Activity)
 		if err != nil {
 			return fmt.Errorf("role %q: %w", r.Name, err)
@@ -314,6 +322,9 @@ func (p Project) validate() error {
 			if pe.Name == "" {
 				return fmt.Errorf("role %q: persona needs a name", r.Name)
 			}
+			if pe.Name == LeadStory {
+				return fmt.Errorf("role %q: persona name %s is reserved", r.Name, LeadStory)
+			}
 			if personas[pe.Name] {
 				return fmt.Errorf("duplicate persona %q", pe.Name)
 			}
@@ -321,8 +332,16 @@ func (p Project) validate() error {
 			if err := pe.Profile.validate(); err != nil {
 				return fmt.Errorf("persona %q: %w", pe.Name, err)
 			}
+			if pe.Lead != nil {
+				if err := pe.Lead.normalise(); err != nil {
+					return fmt.Errorf("persona %q: %w", pe.Name, err)
+				}
+			}
 		}
 		for _, st := range r.Stories {
+			if st.Name == LeadStory {
+				return fmt.Errorf("role %q: story name %s is reserved", r.Name, LeadStory)
+			}
 			if st.Goal == "" {
 				return fmt.Errorf("role %q: story %q needs a goal", r.Name, st.Name)
 			}
