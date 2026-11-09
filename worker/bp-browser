@@ -6,6 +6,7 @@ files=""
 usage=""
 profile=""
 device=""
+usageonly=""
 n=$#
 while [ "$n" -gt 0 ]; do
   a="$1"; shift; n=$((n - 1))
@@ -15,6 +16,7 @@ while [ "$n" -gt 0 ]; do
     --usage-url=*) usage="${a#--usage-url=}" ;;
     --profile-url=*) profile="${a#--profile-url=}" ;;
     --bp-device=*) device="${a#--bp-device=}" ;;
+    --usage-only) usageonly=1 ;;
     *) set -- "$@" "$a" ;;
   esac
 done
@@ -36,6 +38,11 @@ if [ -n "$usage" ]; then
     node /opt/bp/bp-usage.mjs "--usage-url=$usage" >>/tmp/bp-usage.log 2>&1 &
     echo $! >/tmp/bp-usage.pid
   fi
+fi
+
+# A lead run has no browser: report usage, then serve an MCP server with no tools.
+if [ -n "$usageonly" ]; then
+  exec node /opt/bp/bp-null-mcp.mjs
 fi
 
 # Fetch the persona's test files into /workspace/files before the browser

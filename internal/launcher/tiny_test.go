@@ -613,3 +613,24 @@ func TestStage(t *testing.T) {
 		})
 	}
 }
+
+func TestLeadRunHasNoBrowser(t *testing.T) {
+	tn := newTiny()
+	r := store.Run{ID: "0123456789abcdef0123456789abcdef", Token: "tok123", Persona: "Kate", Story: project.LeadStory}
+	name, err := tn.Start(context.Background(), r, project.Project{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec := getSession(t, tn, name).Spec
+	if !strings.Contains(spec.Task, "lead assignment") || spec.Task != LeadPrompt(r) {
+		t.Errorf("task is not the lead prompt")
+	}
+	if len(spec.MCPServers) != 2 || spec.MCPServers[0].Name != "bp" {
+		t.Fatalf("servers = %v", spec.MCPServers)
+	}
+	u := spec.MCPServers[1]
+	if u.Name != "usage" || u.Command != "bp-browser" ||
+		strings.Join(u.Args, " ") != "--usage-url=http://bp-director.bp.svc:8080/usage/tok123 --usage-only" {
+		t.Errorf("usage server = %v", u)
+	}
+}

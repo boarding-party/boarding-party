@@ -108,6 +108,12 @@ func (t *Tiny) Start(ctx context.Context, r store.Run, p project.Project) (strin
 		s.Spec.NodeSelector = map[string]string{k: v}
 		s.Spec.Tolerations = []corev1.Toleration{{Key: k, Operator: corev1.TolerationOpEqual, Value: v, Effect: corev1.TaintEffectNoSchedule}}
 	}
+	if r.Story == project.LeadStory {
+		// A lead run has no browser; bp-browser only reports usage.
+		s.Spec.Task = LeadPrompt(r)
+		s.Spec.MCPServers = []agentsv1.MCPServer{s.Spec.MCPServers[0],
+			{Name: "usage", Command: "bp-browser", Args: []string{"--usage-url=" + t.DirectorURL + "/usage/" + r.Token, "--usage-only"}}}
+	}
 	if t.Owner != nil {
 		s.OwnerReferences = []metav1.OwnerReference{*t.Owner}
 	}
