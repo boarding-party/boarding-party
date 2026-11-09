@@ -15,7 +15,32 @@ let seq = 0;
 const nid = () => `r${++seq}`;
 
 const row = (v = '') => ({ id: nid(), v });
-const newPersona = () => ({ id: nid(), name: '', profile: {}, traits: [], identity: [] });
+const newLead = () => ({ brief: '', seeRuns: false, createPersonas: false, startRuns: false, tidyBugs: false, dailyBudget: '', dailyRuns: '', maxChildren: '', wakeAt: '' });
+const newPersona = () => ({ id: nid(), name: '', profile: {}, traits: [], identity: [], lead: newLead() });
+
+// A lead is a persona with any power ticked.
+const isLead = (l) => !!(l && (l.seeRuns || l.createPersonas || l.startRuns || l.tidyBugs));
+
+function leadFromProject(l) {
+  if (!l) return newLead();
+  const s = (v) => (v != null && v !== 0 ? String(v) : '');
+  return { brief: l.brief || '', seeRuns: !!l.seeRuns, createPersonas: !!l.createPersonas, startRuns: !!l.startRuns || !!l.createPersonas,
+    tidyBugs: !!l.tidyBugs, dailyBudget: s(l.dailyBudget), dailyRuns: s(l.dailyRuns), maxChildren: s(l.maxChildren), wakeAt: l.wakeAt || '' };
+}
+
+// leadToJSON keeps the brief even with no power ticked, so unticking
+// everything for a while does not lose it.
+function leadToJSON(l) {
+  if (!isLead(l) && !l.brief.trim()) return null;
+  const num = (v) => (v.trim() !== '' && isFinite(Number(v)) ? Number(v) : undefined);
+  const out = { brief: l.brief.trim() };
+  for (const k of ['seeRuns', 'createPersonas', 'startRuns', 'tidyBugs']) if (l[k]) out[k] = true;
+  if (num(l.dailyBudget) !== undefined) out.dailyBudget = num(l.dailyBudget);
+  if (num(l.dailyRuns) !== undefined) out.dailyRuns = num(l.dailyRuns);
+  if (num(l.maxChildren) !== undefined) out.maxChildren = num(l.maxChildren);
+  if (l.wakeAt.trim()) out.wakeAt = l.wakeAt.trim();
+  return out;
+}
 const newTrigger = (kind = '') => ({ kind, from: '', subject: '', keywords: [], linkHost: '', title: '', lead: '2' });
 const newStory = () => ({ id: nid(), name: '', goal: '', model: '', handoffs: [], trigger: newTrigger(), freshBrowser: false });
 
@@ -92,6 +117,7 @@ function fromProject(p) {
         profile: { ...(pe.profile || {}) },
         traits: [...(pe.traits || [])],
         identity: Object.entries(pe.identity || {}).map(([k, v]) => ({ id: nid(), k, v: String(v) })),
+        lead: leadFromProject(pe.lead),
       })),
       stories: (r.stories || []).map((s) => ({ id: nid(), name: s.name || '', goal: s.goal || '', model: s.model || '', handoffs: s.handoffs || [], trigger: triggerFromProject(s.trigger), freshBrowser: !!s.freshBrowser })),
     })),
@@ -153,6 +179,7 @@ function toJSON(d) {
         ...(Object.values(pe.profile).some(Boolean) ? { profile: Object.fromEntries(Object.entries(pe.profile).filter(([, v]) => v)) } : {}),
         traits: pe.traits,
         identity: Object.fromEntries(pe.identity.filter((x) => x.k.trim()).map((x) => [x.k.trim(), x.v])),
+        ...(leadToJSON(pe.lead) ? { lead: leadToJSON(pe.lead) } : {}),
       })),
       stories: r.stories.map((s) => {
         const h = handoffs(s);
@@ -621,7 +648,52 @@ function PersonaRow({ persona, fields, onChange, onRemove }) {
         </div>${warns[i] ? html`<div class="warn">${warns[i]}</div>` : null}</div>`)}
         <div><button class="btn ghost small" type="button" onClick=${() => onChange((p) => { p.identity.push({ id: nid(), k: '', v: '' }); })}>Add identity field</button></div>
       </div>
+      <${LeadFields} id=${id} name=${persona.name.trim()} lead=${persona.lead} onChange=${(fn) => onChange((p) => fn(p.lead))} />
     </div>`;
+}
+
+const POWERS = [
+  ['seeRuns', 'See other runs'],
+  ['createPersonas', 'Create personas'],
+  ['startRuns', 'Start runs'],
+  ['tidyBugs', 'Tidy bugs'],
+];
+
+// LeadFields are the tickboxes that make a persona a lead, its brief and
+// its budget. Ticking "Create personas" ticks "Start runs": a lead's
+// personas run only when it queues them.
+function LeadFields({ id, name, lead, onChange }) {
+  const on = isLead(lead);
+  const field = (k, label, attrs, hint) => html`<label class="field">
+    <span>${label}</span>
+    <input id=${`${id}-${k}`} value=${lead[k]} ...${attrs} onInput=${(e) => { const v = e.currentTarget.value; onChange((l) => { l[k] = v; }); }} />
+    ${hint ? html`<span class="hint">${hint}</span>` : null}
+  </label>`;
+  return html`
+    <fieldset class="lead">
+      <legend class="sublabel">Lead</legend>
+      <div class="powers">
+        ${POWERS.map(([k, label]) => html`<label key=${k} class="check">
+          <input type="checkbox" checked=${lead[k]} disabled=${k === 'startRuns' && lead.createPersonas}
+            onChange=${(e) => { const v = e.currentTarget.checked; onChange((l) => { l[k] = v; if (k === 'createPersonas' && v) l.startRuns = true; }); }} />
+          <span>${label}</span></label>`)}
+      </div>
+      <span class="hint">A lead writes and runs its own personas within the budget below. It never closes bugs.</span>
+      ${on && name ? html`<a class="small" href=${'#/leads/' + encodeURIComponent(name)}>Open the lead page</a>` : null}
+      ${on ? html`
+        <label class="field">
+          <span>Brief</span>
+          <textarea id=${`${id}-brief`} rows="3" maxlength="2000" value=${lead.brief}
+            placeholder="What should this lead find out? For example: small UK businesses making their first invoice"
+            onInput=${(e) => { const v = e.currentTarget.value; onChange((l) => { l.brief = v; }); }}></textarea>
+        </label>
+        <div class="grid4">
+          ${field('dailyBudget', 'Money per day (US$)', { inputmode: 'decimal', placeholder: '5' })}
+          ${field('dailyRuns', 'Runs per day', { inputmode: 'numeric', placeholder: '10' })}
+          ${field('maxChildren', 'Personas at most', { inputmode: 'numeric', placeholder: '6' })}
+          ${field('wakeAt', 'Wakes daily at', { placeholder: '09:00' })}
+        </div>` : null}
+    </fieldset>`;
 }
 
 function StoryRow({ story, targets, onChange, onRemove }) {

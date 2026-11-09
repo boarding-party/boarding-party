@@ -8,6 +8,7 @@ import { useState, useEffect, useRef, useCallback } from './vendor/hooks.module.
 import { html, api, directorDown, confirmDialog, DialogHost, parseTime, fmtWhen, artifactURL, runHref, usePoll, SEVERITY_TAG, SHOT_TOKEN } from './lib.js';
 import { BugsPage, IssuePage, issueHref, openCount } from './bugs.js';
 import { ProjectPage } from './project.js';
+import { LeadPage, leadHref } from './leads.js';
 
 const ACTIVE = new Set(['pending', 'running']);
 const STATE_TAG = new Map([['pending', 'idle'], ['running', 'run'], ['done', 'ok'], ['stuck', 'wait'], ['failed', 'bad'], ['waiting', 'hold'], ['continued', 'idle']]);
@@ -83,6 +84,9 @@ function parseRoute(hash) {
     try { return { page: 'issue', id: decodeURIComponent(parts[1]) }; } catch (_) { /* fall through */ }
   }
   if (parts[0] === 'bugs') return { page: 'bugs' };
+  if (parts[0] === 'leads' && parts[1]) {
+    try { return { page: 'lead', id: decodeURIComponent(parts[1]) }; } catch (_) { /* fall through */ }
+  }
   if (parts[0] === 'runs' && parts[1]) {
     try { return { page: 'run', id: decodeURIComponent(parts[1]) }; } catch (_) { /* fall through */ }
   }
@@ -198,6 +202,7 @@ function App() {
           : route.page === 'inbox' ? html`<${InboxPage} project=${project} />`
           : route.page === 'bugs' ? html`<${BugsPage} />`
           : route.page === 'issue' ? html`<${IssuePage} key=${route.id} id=${route.id} />`
+          : route.page === 'lead' ? html`<${LeadPage} key=${route.id} name=${route.id} />`
           : html`<${RunsPage} project=${project} projectErr=${projectErr} runs=${runs} runsErr=${runsErr}
                     queue=${queue} status=${status} active=${active} onStarted=${loadRuns} />`}
       </main>
@@ -208,14 +213,26 @@ function App() {
 function Sidebar({ route, project, runs }) {
   const on = (p) => (route.page === p || (p === 'runs' && route.page === 'run') || (p === 'bugs' && route.page === 'issue') ? 'on' : '');
   const [open, setOpen] = useState(null);
+  const [kids, setKids] = useState({}); // lead name -> children count
+  const leads = ((project && project.roles) || []).flatMap((r) => (r.personas || [])
+    .filter((p) => p.lead && (p.lead.seeRuns || p.lead.createPersonas || p.lead.startRuns || p.lead.tidyBugs)).map((p) => p.name));
   usePoll(async (stale) => {
     try {
       const d = await api('/api/issues');
       if (stale()) return null;
       setOpen(openCount(d && d.issues));
     } catch (_) { /* the count is optional */ }
+    const counts = {};
+    for (const n of leads) {
+      try {
+        const d = await api(`/api/leads/${encodeURIComponent(n)}`);
+        counts[n] = (d.children || []).filter((c) => !c.stopped).length;
+      } catch (_) { /* the count is optional */ }
+    }
+    if (stale()) return null;
+    setKids(counts);
     return SIDEBAR_POLL_MS;
-  }, [route.page]);
+  }, [route.page, leads.join('\n')]);
   const site = (project && project.sites && project.sites[0]) || '';
   let host = site;
   try { host = site ? new URL(site).host : ''; } catch (_) { /* show it as written */ }
@@ -231,6 +248,11 @@ function Sidebar({ route, project, runs }) {
         <a href="#/inbox" class=${on('inbox')}>Inbox</a>
         <a href="#/project" class=${on('project')}>Project</a>
       </nav>
+      ${leads.length ? html`<nav aria-label="Leads" class="leads">
+        <span class="sublabel">Leads</span>
+        ${leads.map((n) => html`<a key=${n} href=${leadHref(n)} class=${route.page === 'lead' && route.id === n ? 'on' : ''}>${n}
+          ${kids[n] != null ? html`<span class="count" title="Personas it made">${kids[n]}</span>` : null}</a>`)}
+      </nav>` : null}
       <div class="foot">Local board. Close the terminal to stop it.</div>
     </aside>`;
 }
