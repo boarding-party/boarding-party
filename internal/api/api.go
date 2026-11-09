@@ -93,6 +93,10 @@ func admin(svc *runs.Service, maxBytes int64, token string, hub *live.Hub, mail 
 	mux.HandleFunc("GET /api/issues", s.listIssues)
 	mux.HandleFunc("GET /api/issues/{id}", s.getIssue)
 	mux.HandleFunc("POST /api/issues/{id}/status", s.putIssueStatus)
+	mux.HandleFunc("GET /api/leads/{persona}", s.getLead)
+	mux.HandleFunc("POST /api/leads/{persona}/wake", s.wakeLead)
+	mux.HandleFunc("PUT /api/children/{name}", s.adoptChild)
+	mux.HandleFunc("DELETE /api/children/{name}", s.deleteChild)
 	return s, guardAdmin(token, mux)
 }
 
@@ -121,7 +125,7 @@ func fail(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, store.ErrNotFound), errors.Is(err, artifacts.ErrNotFound), errors.Is(err, runs.ErrNotActive):
 		http.Error(w, "not found", http.StatusNotFound)
-	case errors.Is(err, runs.ErrBadUsage), errors.Is(err, runs.ErrBadProfile):
+	case errors.Is(err, runs.ErrBadUsage), errors.Is(err, runs.ErrBadProfile), errors.Is(err, runs.ErrInvalid):
 		http.Error(w, err.Error(), http.StatusBadRequest)
 	case errors.Is(err, runs.ErrBusy):
 		http.Error(w, runs.ErrBusy.Error(), http.StatusConflict)
@@ -186,8 +190,10 @@ func (s *server) putProjectJSON(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// getProject returns the user's project file, without the leads' children:
+// the board edits only what the user wrote.
 func (s *server) getProject(w http.ResponseWriter, r *http.Request) {
-	p, err := s.svc.Store.Project()
+	p, err := s.svc.Store.RawProject()
 	if errors.Is(err, store.ErrNotFound) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no project yet"})
 		return
