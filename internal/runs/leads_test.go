@@ -159,3 +159,37 @@ func TestLeadUsageCountsStoppedChildren(t *testing.T) {
 		t.Fatalf("stopping a child dropped its runs from the budget: %+v %v", u, err)
 	}
 }
+
+func TestSaveProjectKeepsLeadWithChildren(t *testing.T) {
+	svc := leadSvc(t, 0)
+	p, _ := svc.Store.RawProject()
+	p.Roles[0].Personas[1].Name = "Kate B"
+	err := svc.SaveProject(context.Background(), p)
+	if !errors.Is(err, ErrInvalid) || !strings.Contains(err.Error(), "Kate") {
+		t.Fatalf("renamed a lead with children: %v", err)
+	}
+	p, _ = svc.Store.RawProject()
+	p.Roles[0].Personas[1].Lead = &project.Lead{} // unticking pauses children; allowed
+	if err := svc.SaveProject(context.Background(), p); err != nil {
+		t.Fatalf("untick powers: %v", err)
+	}
+}
+
+func TestSaveProjectChildNameOrEmailAnyCase(t *testing.T) {
+	svc := leadSvc(t, 0)
+	c, _ := svc.Store.Child("Ana")
+	c.Persona.Identity = map[string]string{"email": "megan+ana@x.io"}
+	if err := svc.Store.UpdateChild(c); err != nil {
+		t.Fatal(err)
+	}
+	p, _ := svc.Store.RawProject()
+	p.Roles[0].Personas = append(p.Roles[0].Personas, project.Persona{Name: "ana"})
+	if err := svc.SaveProject(context.Background(), p); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("name in other case: %v", err)
+	}
+	p, _ = svc.Store.RawProject()
+	p.Roles[0].Personas[0].Identity = map[string]string{"email": "Megan+Ana@x.io"}
+	if err := svc.SaveProject(context.Background(), p); !errors.Is(err, ErrInvalid) || !strings.Contains(err.Error(), "address") {
+		t.Fatalf("child's address: %v", err)
+	}
+}

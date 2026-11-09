@@ -90,12 +90,12 @@ var ErrAllowList = errors.New("project saved, but the egress allow-list was not 
 
 // SaveProject stores p and puts its hosts on the egress allow-list.
 func (s *Service) SaveProject(ctx context.Context, p project.Project) error {
-	taken, err := s.childNameTaken(p)
+	clash, err := s.childClash(p)
 	if err != nil {
 		return err
 	}
-	if taken != "" {
-		return fmt.Errorf("%w: %q is the name of a lead's persona; adopt it or pick another name", ErrInvalid, taken)
+	if clash != "" {
+		return fmt.Errorf("%w: %s", ErrInvalid, clash)
 	}
 	if err := s.Store.PutProject(p); err != nil {
 		return err

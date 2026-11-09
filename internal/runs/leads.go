@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/mail"
+	"strings"
 	"time"
 
 	"github.com/boarding-party/boardingparty/internal/project"
@@ -145,23 +147,35 @@ func (s *Service) personaBusy(persona string) (bool, error) {
 	return false, nil
 }
 
-// childNameTaken returns a stored child whose name a persona or role of the
-// user's project p uses, or "".
-func (s *Service) childNameTaken(p project.Project) (string, error) {
+// childClash says why the user's project p can't be saved beside the stored
+// children, or "": a persona or role named like a child, or a persona with a
+// child's email address (both compared without case, so mail never reaches
+// two personas), or a lead with children that is no longer in p (renaming
+// or removing it would cut its children loose from their lead and budget).
+func (s *Service) childClash(p project.Project) (string, error) {
 	cs, err := s.Store.AllChildren()
 	if err != nil {
 		return "", err
 	}
-	names := map[string]bool{}
+	names, emails := map[string]bool{}, map[string]bool{}
 	for _, r := range p.Roles {
-		names[r.Name] = true
+		names[strings.ToLower(r.Name)] = true
 		for _, pe := range r.Personas {
-			names[pe.Name] = true
+			names[strings.ToLower(pe.Name)] = true
+			if a, err := mail.ParseAddress(pe.Identity["email"]); err == nil {
+				emails[strings.ToLower(a.Address)] = true
+			}
 		}
 	}
 	for _, c := range cs {
-		if names[c.Name] {
-			return c.Name, nil
+		if names[strings.ToLower(c.Name)] {
+			return fmt.Sprintf("%q is the name of a lead's persona; adopt it or pick another name", c.Name), nil
+		}
+		if a, err := mail.ParseAddress(c.Persona.Identity["email"]); err == nil && emails[strings.ToLower(a.Address)] {
+			return fmt.Sprintf("the address %s belongs to %s, a lead's persona", a.Address, c.Name), nil
+		}
+		if _, _, ok := p.Persona(c.Lead); !ok {
+			return fmt.Sprintf("%s has personas it made; delete or adopt them on its lead page before renaming or removing %s", c.Lead, c.Lead), nil
 		}
 	}
 	return "", nil

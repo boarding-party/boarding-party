@@ -28,16 +28,17 @@ function leadFromProject(l) {
     tidyBugs: !!l.tidyBugs, dailyBudget: s(l.dailyBudget), dailyRuns: s(l.dailyRuns), maxChildren: s(l.maxChildren), wakeAt: l.wakeAt || '' };
 }
 
-// leadToJSON keeps the brief even with no power ticked, so unticking
-// everything for a while does not lose it.
+// leadToJSON keeps every lead setting while any is set, so unticking all
+// powers for a while loses neither the brief nor the budget. A number field
+// that isn't a number goes as typed, so the director refuses it with a
+// message instead of the default quietly taking its place.
 function leadToJSON(l) {
-  if (!isLead(l) && !l.brief.trim()) return null;
-  const num = (v) => (v.trim() !== '' && isFinite(Number(v)) ? Number(v) : undefined);
+  const fields = ['brief', 'dailyBudget', 'dailyRuns', 'maxChildren', 'wakeAt'];
+  if (!isLead(l) && !fields.some((k) => l[k].trim())) return null;
+  const num = (v) => (isFinite(Number(v)) ? Number(v) : v);
   const out = { brief: l.brief.trim() };
   for (const k of ['seeRuns', 'createPersonas', 'startRuns', 'tidyBugs']) if (l[k]) out[k] = true;
-  if (num(l.dailyBudget) !== undefined) out.dailyBudget = num(l.dailyBudget);
-  if (num(l.dailyRuns) !== undefined) out.dailyRuns = num(l.dailyRuns);
-  if (num(l.maxChildren) !== undefined) out.maxChildren = num(l.maxChildren);
+  for (const k of ['dailyBudget', 'dailyRuns', 'maxChildren']) if (l[k].trim() !== '') out[k] = num(l[k].trim());
   if (l.wakeAt.trim()) out.wakeAt = l.wakeAt.trim();
   return out;
 }

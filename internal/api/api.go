@@ -129,7 +129,7 @@ func fail(w http.ResponseWriter, err error) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 	case errors.Is(err, runs.ErrBusy):
 		http.Error(w, runs.ErrBusy.Error(), http.StatusConflict)
-	case errors.Is(err, runs.ErrPaused), errors.Is(err, runs.ErrOverBudget):
+	case errors.Is(err, runs.ErrPaused), errors.Is(err, runs.ErrOverBudget), errors.Is(err, runs.ErrLeadOverBudget):
 		http.Error(w, err.Error(), http.StatusConflict)
 	case errors.Is(err, runs.ErrAllowList):
 		log.Printf("api: %v", err)

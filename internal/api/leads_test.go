@@ -129,3 +129,17 @@ func TestSaveProjectChildNameIs400(t *testing.T) {
 		t.Fatalf("code %d", code)
 	}
 }
+
+func TestStartRunOverLeadBudgetIs409(t *testing.T) {
+	srv, _, svc := setupBoth(t, 1024)
+	withLead(t, svc)
+	p, _ := svc.Store.RawProject()
+	p.Roles[0].Personas[1].Lead.DailyRuns = 1 // Ana's run today uses it
+	if err := svc.Store.PutProject(p); err != nil {
+		t.Fatal(err)
+	}
+	resp := do(t, "POST", srv.URL+"/api/runs", `{"persona":"Ana","story":"pay"}`)
+	if resp.StatusCode != 409 {
+		t.Fatalf("code %d", resp.StatusCode)
+	}
+}
