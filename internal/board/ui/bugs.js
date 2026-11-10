@@ -45,7 +45,7 @@ export function BugsPage() {
 
   usePoll(async (stale) => {
     try {
-      const d = await api('/api/issues');
+      const d = await api('api/issues');
       if (stale()) return null;
       setIssues((d && d.issues) || []); setErr('');
     } catch (e) {
@@ -118,7 +118,7 @@ export function IssuePage({ id }) {
 
   usePoll(async (stale) => {
     try {
-      const d = await api(`/api/issues/${encodeURIComponent(id)}`);
+      const d = await api(`api/issues/${encodeURIComponent(id)}`);
       if (stale()) return null;
       setData(d); setErr('');
       return d.issue.status === 'verifying' ? CHECK_POLL_MS : POLL_MS;
@@ -133,7 +133,7 @@ export function IssuePage({ id }) {
   const set = async (status, why = '') => {
     setBusy(true); setActErr('');
     try {
-      await api(`/api/issues/${encodeURIComponent(id)}/status`, {
+      await api(`api/issues/${encodeURIComponent(id)}/status`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status, reason: why }) });
       setAsking(false); setReason('');
       setTick((t) => t + 1);

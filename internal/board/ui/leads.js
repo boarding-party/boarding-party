@@ -22,7 +22,7 @@ export function LeadPage({ name }) {
 
   usePoll(async (stale) => {
     try {
-      const d = await api(`/api/leads/${encodeURIComponent(name)}`);
+      const d = await api(`api/leads/${encodeURIComponent(name)}`);
       if (stale()) return null;
       setData(d); setErr('');
     } catch (e) {
@@ -36,7 +36,7 @@ export function LeadPage({ name }) {
   const runNow = async () => {
     setBusy(true); setNote('');
     try {
-      await api(`/api/leads/${encodeURIComponent(name)}/wake`, { method: 'POST' });
+      await api(`api/leads/${encodeURIComponent(name)}/wake`, { method: 'POST' });
       setNote('Queued. The lead runs when nothing else is running.');
     } catch (e) {
       setNote(e.status === 409 ? 'The lead is already queued or running.' : e.message);
@@ -103,7 +103,7 @@ function Child({ c, lead, onChange }) {
     const persona = { ...c.persona, traits: traits.split(',').map((t) => t.trim()).filter(Boolean) };
     const stories = (c.stories || []).map((s, i) => ({ ...s, goal: (goals[i] || '').trim() }));
     try {
-      await api(`/api/children/${encodeURIComponent(c.name)}`, {
+      await api(`api/children/${encodeURIComponent(c.name)}`, {
         method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ persona, stories }) });
       onChange();
     } catch (e2) {
@@ -116,7 +116,7 @@ function Child({ c, lead, onChange }) {
     if (!(await confirmDialog(`Delete ${c.name}? Its runs stay on the Runs page.`, { confirm: 'Delete persona', danger: true }))) return;
     setBusy(true); setErr('');
     try {
-      await api(`/api/children/${encodeURIComponent(c.name)}`, { method: 'DELETE' });
+      await api(`api/children/${encodeURIComponent(c.name)}`, { method: 'DELETE' });
       onChange();
     } catch (e) {
       setErr(e.message);

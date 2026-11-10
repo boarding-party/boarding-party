@@ -110,7 +110,7 @@ export function fmtWhen(s) {
   return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) + ' ' + time;
 }
 
-export const artifactURL = (runID, name) => `/api/runs/${encodeURIComponent(runID)}/artifacts/${encodeURIComponent(name)}`;
+export const artifactURL = (runID, name) => `api/runs/${encodeURIComponent(runID)}/artifacts/${encodeURIComponent(name)}`;
 export const runHref = (id) => `#/runs/${encodeURIComponent(id)}`;
 
 // usePoll calls fn now, then again after however many ms fn returns, until

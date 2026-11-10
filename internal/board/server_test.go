@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -720,5 +721,29 @@ func TestProxyStreamsWithoutBuffering(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("first part not delivered within 1s: proxy is buffering the stream")
+	}
+}
+
+func TestUIUsesRelativeURLs(t *testing.T) {
+	ui, err := UI()
+	if err != nil {
+		t.Fatal(err)
+	}
+	abs := regexp.MustCompile("['\"`(]/(api|styles\\.css|app\\.js|[a-z]+\\.js)\\b")
+	err = fs.WalkDir(ui, ".", func(p string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() || !(strings.HasSuffix(p, ".js") || strings.HasSuffix(p, ".html")) || strings.HasPrefix(p, "vendor/") {
+			return err
+		}
+		b, err := fs.ReadFile(ui, p)
+		if err != nil {
+			return err
+		}
+		for _, m := range abs.FindAllString(string(b), -1) {
+			t.Errorf("%s: absolute URL %s; the UI must work at any path", p, m)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 }

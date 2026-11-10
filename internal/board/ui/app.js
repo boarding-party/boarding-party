@@ -143,7 +143,7 @@ function App() {
 
   const loadProject = useCallback(async () => {
     try {
-      setProject(await api('/api/project'));
+      setProject(await api('api/project'));
       setProjectErr('');
     } catch (e) {
       if (e.status === 404) { setProject(null); setProjectErr(''); return; }
@@ -155,7 +155,7 @@ function App() {
   // known queue stays and the runs still show.
   const loadQueue = useCallback(async () => {
     try {
-      const q = (await api('/api/queue')) || [];
+      const q = (await api('api/queue')) || [];
       setQueue(q);
       return q;
     } catch (_) { return null; }
@@ -163,12 +163,12 @@ function App() {
 
   // Like the queue, the status rides along; the last known one stays on error.
   const loadStatus = useCallback(async () => {
-    try { setStatus(await api('/api/status')); } catch (_) { /* keep the last status */ }
+    try { setStatus(await api('api/status')); } catch (_) { /* keep the last status */ }
   }, []);
 
   const loadRuns = useCallback(async () => {
     try {
-      const [rs] = await Promise.all([api('/api/runs').then((x) => x || []), loadQueue(), loadStatus()]);
+      const [rs] = await Promise.all([api('api/runs').then((x) => x || []), loadQueue(), loadStatus()]);
       setRuns(rs);
       setRunsErr('');
       setDirector('ok');
@@ -219,14 +219,14 @@ function Sidebar({ route, project, runs }) {
     .filter((p) => p.lead && (p.lead.seeRuns || p.lead.createPersonas || p.lead.startRuns || p.lead.tidyBugs)).map((p) => p.name));
   usePoll(async (stale) => {
     try {
-      const d = await api('/api/issues');
+      const d = await api('api/issues');
       if (stale()) return null;
       setOpen(openCount(d && d.issues));
     } catch (_) { /* the count is optional */ }
     const counts = {};
     for (const n of leads) {
       try {
-        const d = await api(`/api/leads/${encodeURIComponent(n)}`);
+        const d = await api(`api/leads/${encodeURIComponent(n)}`);
         counts[n] = (d.children || []).filter((c) => !c.stopped).length;
       } catch (_) { /* the count is optional */ }
     }
@@ -283,11 +283,11 @@ function RunStrip({ director, active, status, onChange }) {
   const togglePause = async () => {
     const pausing = !status.paused;
     if (pausing && !(await confirmDialog('Pause the cast? Running runs finish; nothing new starts until you resume.', { confirm: 'Pause' }))) return;
-    act(() => api('/api/pause', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ paused: pausing }) }));
+    act(() => api('api/pause', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ paused: pausing }) }));
   };
   const stop = async () => {
     if (!(await confirmDialog('Stop this run now? Its recording so far is kept. The next run in Up next then starts; pause first to keep things quiet.', { confirm: 'Stop run', danger: true }))) return;
-    act(() => api(`/api/runs/${encodeURIComponent(active.id)}/stop`, { method: 'POST' }));
+    act(() => api(`api/runs/${encodeURIComponent(active.id)}/stop`, { method: 'POST' }));
   };
   const state = director === 'ok' ? { dot: 'ok', label: 'Director ready' }
     : director === 'down' ? { dot: 'bad', label: 'Director unreachable' }
@@ -359,7 +359,7 @@ function StartRun({ project, active, status, onStarted }) {
     if (disabled) return;
     setBusy(true); setErr('');
     try {
-      const run = await api('/api/runs', {
+      const run = await api('api/runs', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ persona: p, story: s }),
@@ -425,7 +425,7 @@ function UpNext({ queue, due, zone, onChange }) {
     if (!(await confirmDialog('Remove this run from the queue?', { confirm: 'Remove', danger: true }))) return;
     setBusy(q.id); setErr('');
     try {
-      await api(`/api/queue/${encodeURIComponent(q.id)}`, { method: 'DELETE' });
+      await api(`api/queue/${encodeURIComponent(q.id)}`, { method: 'DELETE' });
     } catch (e) {
       if (e.status !== 404) setErr(e.message); // already started or gone: nothing to say
     } finally {
@@ -479,7 +479,7 @@ function Thumb({ id, stage, live }) {
   }, [id, live]);
   return html`
     <a class="thumb" href=${runHref(id)} onClick=${(e) => e.stopPropagation()} title="Watch this run">
-      ${live && tick ? html`<img src=${`/api/runs/${encodeURIComponent(id)}/live.jpg?t=${tick}`} alt="Live view of the run"
+      ${live && tick ? html`<img src=${`api/runs/${encodeURIComponent(id)}/live.jpg?t=${tick}`} alt="Live view of the run"
           style=${ok ? '' : 'display:none'}
           onLoad=${() => { setOk(true); schedule(); }} onError=${() => { setOk(false); schedule(); }} />` : null}
       ${live && ok ? null : html`<span>${STAGE_SHORT[stage] || 'Waiting'}</span>`}
@@ -543,7 +543,7 @@ function InboxPage({ project }) {
     if (document.hidden && loaded.current) return INBOX_POLL_MS;
     try {
       const q = `limit=${INBOX_LIMIT}` + (persona ? `&persona=${encodeURIComponent(persona)}` : '') + (tab === 'kept' ? '&filtered=1' : '');
-      const list = (await api(`/api/messages?${q}`)) || [];
+      const list = (await api(`api/messages?${q}`)) || [];
       if (stale()) return null;
       setMsgs(list); setErr(''); loaded.current = true;
     } catch (e) {
@@ -604,7 +604,7 @@ function MessageBody({ id }) {
   const [err, setErr] = useState('');
   useEffect(() => {
     let live = true;
-    api(`/api/messages/${encodeURIComponent(id)}`).then((x) => { if (live) setM(x); }).catch((e) => { if (live) setErr(e.message); });
+    api(`api/messages/${encodeURIComponent(id)}`).then((x) => { if (live) setM(x); }).catch((e) => { if (live) setErr(e.message); });
     return () => { live = false; };
   }, [id]);
   if (err) return html`<div class="note bad">Could not load the message: ${err}</div>`;
@@ -655,7 +655,7 @@ function LiveView({ id, stage, reason, started }) {
   }, []);
   const stillActive = async () => {
     try {
-      const d = await api(`/api/runs/${encodeURIComponent(id)}`);
+      const d = await api(`api/runs/${encodeURIComponent(id)}`);
       return !!(d && d.run && ACTIVE.has(d.run.state));
     } catch (e) { return true; /* director unreachable: keep trying while mounted */ }
   };
@@ -673,7 +673,7 @@ function LiveView({ id, stage, reason, started }) {
     }, RECONNECT_MS);
     return () => clearInterval(t);
   }, [id]);
-  const src = `/api/runs/${encodeURIComponent(id)}/live` + (nonce ? `?t=${nonce}` : '');
+  const src = `api/runs/${encodeURIComponent(id)}/live` + (nonce ? `?t=${nonce}` : '');
   return html`
     <img class="livefeed" src=${src} alt="Live view of the run" onLoad=${() => setShown(true)} onError=${lost}
       style=${shown ? '' : 'visibility:hidden'} />
@@ -693,7 +693,7 @@ function RunPage({ id, onChange }) {
 
   usePoll(async (stale) => {
     try {
-      const d = await api(`/api/runs/${encodeURIComponent(id)}`);
+      const d = await api(`api/runs/${encodeURIComponent(id)}`);
       if (stale()) return null;
       failures.current = 0;
       setData(d); setErr(''); setMissing(false); setGaveUp(false);
@@ -880,7 +880,7 @@ function BlockedHosts({ hosts }) {
   const [err, setErr] = useState('');
   useEffect(() => {
     let live = true;
-    api('/api/project').then((p) => {
+    api('api/project').then((p) => {
       if (live) setAllowed(new Set([...(p.extraHosts || []), ...(p.sites || []).map(hostOf)].map((h) => h.toLowerCase())));
     }).catch(() => {});
     return () => { live = false; };
@@ -889,10 +889,10 @@ function BlockedHosts({ hosts }) {
   const allow = async (host) => {
     setBusy(host); setErr('');
     try {
-      const p = await api('/api/project');
+      const p = await api('api/project');
       const extra = p.extraHosts || [];
       if (!extra.map((h) => h.toLowerCase()).includes(host)) {
-        await api('/api/project', { method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        await api('api/project', { method: 'PUT', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ ...p, extraHosts: [...extra, host] }) });
       }
       setAllowed((a) => new Set(a).add(host));

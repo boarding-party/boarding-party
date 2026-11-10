@@ -236,7 +236,7 @@ export function ProjectPage({ section = 'general', roleN = '', onSaved, onDirty 
 
   const load = async () => {
     try {
-      adopt(await api('/api/project'));
+      adopt(await api('api/project'));
       setState('ready');
     } catch (e) {
       if (e.status === 404) { adopt(null); setState('ready'); return; }
@@ -272,7 +272,7 @@ export function ProjectPage({ section = 'general', roleN = '', onSaved, onDirty 
     if (saving) return;
     setSaving(true); setSaveErr('');
     try {
-      await api('/api/project', {
+      await api('api/project', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(toJSON(draft)),
@@ -280,7 +280,7 @@ export function ProjectPage({ section = 'general', roleN = '', onSaved, onDirty 
       // The server canonicalises each role's activity; show what it kept.
       let next = draft;
       try {
-        const saved = await api('/api/project');
+        const saved = await api('api/project');
         const roles = (saved && saved.roles) || [];
         if (roles.length === draft.roles.length) {
           next = structuredClone(draft);
@@ -567,7 +567,7 @@ function useProfileFields() {
   const [fields, setFields] = useState([]);
   useEffect(() => {
     let live = true;
-    api('/api/profile-fields').then((f) => { if (live && Array.isArray(f)) setFields(f); }).catch(() => {});
+    api('api/profile-fields').then((f) => { if (live && Array.isArray(f)) setFields(f); }).catch(() => {});
     return () => { live = false; };
   }, []);
   return fields;
@@ -604,13 +604,13 @@ function SavedBrowser({ name }) {
   useEffect(() => {
     let live = true;
     setSaved(null);
-    if (name) api('/api/browser-profiles/' + encodeURIComponent(name)).then((r) => { if (live && r) setSaved(r.saved); }).catch(() => {});
+    if (name) api('api/browser-profiles/' + encodeURIComponent(name)).then((r) => { if (live && r) setSaved(r.saved); }).catch(() => {});
     return () => { live = false; };
   }, [name]);
   if (!saved) return null;
   const forget = async () => {
     if (!(await confirmDialog(`Forget ${name}'s saved browser? The next run starts signed out, with no cookies or site data.`, { confirm: 'Forget browser', danger: true }))) return;
-    try { await api('/api/browser-profiles/' + encodeURIComponent(name), { method: 'DELETE' }); setSaved(null); setErr(''); } catch (e) { setErr(e.message); }
+    try { await api('api/browser-profiles/' + encodeURIComponent(name), { method: 'DELETE' }); setSaved(null); setErr(''); } catch (e) { setErr(e.message); }
   };
   return html`
     <div class="row">
@@ -861,7 +861,7 @@ function ImportYAML({ dirty, onDone, onCancel }) {
     if (dirty && !(await confirmDialog('Importing replaces the project and drops your unsaved changes. Continue?', { confirm: 'Import and replace', danger: true }))) return;
     setBusy(true); setErr('');
     try {
-      await api('/api/project', { method: 'POST', headers: { 'Content-Type': 'application/yaml' }, body: text });
+      await api('api/project', { method: 'POST', headers: { 'Content-Type': 'application/yaml' }, body: text });
       await onDone();
     } catch (e) {
       setErr(e.message);
@@ -921,7 +921,7 @@ function FilesCard({ personas }) {
   const input = useRef(null);
 
   const load = async () => {
-    try { setList(await api('/api/files')); setLoadErr(''); } catch (e) { setLoadErr(e.message); }
+    try { setList(await api('api/files')); setLoadErr(''); } catch (e) { setLoadErr(e.message); }
   };
   useEffect(() => { load(); }, []);
   // A persona removed from the project can no longer be chosen.
@@ -941,7 +941,7 @@ function FilesCard({ personas }) {
     if (list && used + file.size > MAX_TOTAL) { setErr('Adding this file would exceed the 200 MiB total; delete some files first.'); return; }
     setBusy(true); setErr('');
     try {
-      await api(`/api/files/${encodeURIComponent(name)}?scope=${encodeURIComponent(scope)}`, {
+      await api(`api/files/${encodeURIComponent(name)}?scope=${encodeURIComponent(scope)}`, {
         method: 'PUT', headers: { 'Content-Type': file.type || 'application/octet-stream' }, body: file,
       });
       setFile(null); setName('');
@@ -954,7 +954,7 @@ function FilesCard({ personas }) {
     if (!(await confirmDialog(`Delete ${f.name} (${who(f.scope)})? Personas lose access to it straight away.`, { confirm: 'Delete file', danger: true }))) return;
     setErr('');
     try {
-      await api(`/api/files/${encodeURIComponent(f.name)}?scope=${encodeURIComponent(f.scope)}`, { method: 'DELETE' });
+      await api(`api/files/${encodeURIComponent(f.name)}?scope=${encodeURIComponent(f.scope)}`, { method: 'DELETE' });
       await load();
     } catch (e) { setErr(e.message); }
   };
@@ -1029,14 +1029,14 @@ function InboxCard({ allowFrom, authServId, onChange }) {
     setHost(m.host || ''); setPort(String(m.port || 993)); setUser(m.username || ''); setPass('');
   };
   const load = async () => {
-    try { adopt(await api('/api/mailbox')); setLoadErr(''); } catch (e) { setLoadErr(e.message); }
+    try { adopt(await api('api/mailbox')); setLoadErr(''); } catch (e) { setLoadErr(e.message); }
   };
   useEffect(() => { load(); }, []);
   // The status line follows the poller, so refresh it while the page is open.
   useEffect(() => {
     const t = setInterval(async () => {
       if (document.hidden || busy) return;
-      try { const m = await api('/api/mailbox'); setMb((cur) => (cur ? { ...cur, status: m.status } : cur)); } catch (_) { /* keep the last status */ }
+      try { const m = await api('api/mailbox'); setMb((cur) => (cur ? { ...cur, status: m.status } : cur)); } catch (_) { /* keep the last status */ }
     }, 10000);
     return () => clearInterval(t);
   }, [busy]);
@@ -1049,7 +1049,7 @@ function InboxCard({ allowFrom, authServId, onChange }) {
     if (!Number.isInteger(n) || n < 1 || n > 65535) { setErr('The port must be a number from 1 to 65535.'); return; }
     setBusy(true); setErr(''); setDone('');
     try {
-      adopt(await api('/api/mailbox', {
+      adopt(await api('api/mailbox', {
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ host: host.trim(), port: n, username: user.trim(), password: pass.replace(/\s+/g, '') }),
       }));
@@ -1059,7 +1059,7 @@ function InboxCard({ allowFrom, authServId, onChange }) {
   const remove = async () => {
     if (!(await confirmDialog('Remove the mailbox? Personas stop receiving mail. Mail already received stays on the Inbox page.', { confirm: 'Remove mailbox', danger: true }))) return;
     setBusy(true); setErr(''); setDone('');
-    try { await api('/api/mailbox', { method: 'DELETE' }); await load(); } catch (e) { setErr(e.message); } finally { setBusy(false); }
+    try { await api('api/mailbox', { method: 'DELETE' }); await load(); } catch (e) { setErr(e.message); } finally { setBusy(false); }
   };
 
   const st = mb && mb.status;
