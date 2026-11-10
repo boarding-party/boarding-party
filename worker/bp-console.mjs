@@ -45,11 +45,20 @@ function cleanText(s) {
   // Match to the next space, quote or angle bracket (never stop at characters a
   // URL may hold), then cut at the first ? or #. No URL parsing: what is cut
   // must not depend on how a parser reads a malformed URL.
-  // Credentials (anything between :// and the last @ before the next /) go
-  // first, for every URL in the text, even ones nested in another.
-  return String(s || '')
-    .replace(/((?:https?|wss?):\/\/)[^/\s"<>]*@/gi, '$1')
-    .replace(/(?:https?|wss?):\/\/[^\s"<>]+/gi, (u) => u.split(/[?#]/)[0]);
+  return String(s || '').replace(/(?:https?|wss?):\/\/[^\s"<>]+/gi, cleanToken);
+}
+
+// cleanToken cuts one URL-like token at its first ? or #, then strips
+// credentials from it and from any URL nested in what is left. When an @ and
+// a ? or # share the part before the first /, it cannot tell credentials from
+// query, so it keeps only the scheme.
+function cleanToken(u) {
+  const start = u.indexOf('://') + 3;
+  const slash = u.indexOf('/', start);
+  const authority = u.slice(start, slash < 0 ? u.length : slash);
+  const q = u.search(/[?#]/);
+  if (authority.includes('@') && q >= 0 && q < start + authority.length) return u.slice(0, start) + '[redacted]';
+  return (q < 0 ? u : u.slice(0, q)).replace(/((?:https?|wss?):\/\/)[^/]*@/gi, '$1');
 }
 
 function argText(a) {
