@@ -69,24 +69,21 @@ func (s *server) withActor(mux *http.ServeMux) http.Handler {
 		if rec.code < 200 || rec.code > 299 {
 			return
 		}
-		if err := s.svc.Store.Audit(actor, action, subjectOf(pattern, r.URL.Path), time.Now()); err != nil {
+		if err := s.svc.Store.Audit(actor, action, subjectOf(pattern, r), time.Now()); err != nil {
 			log.Printf("api: audit %s: %v", action, err)
 		}
 	})
 }
 
-// subjectOf returns the path segment that matches the pattern's wildcard.
-func subjectOf(pattern, path string) string {
-	if i := strings.IndexByte(pattern, ' '); i >= 0 {
-		pattern = pattern[i+1:]
+// subjectOf returns the value the mux bound to the pattern's wildcard, the
+// same value the handler read; ServeMux sets it on r while serving.
+func subjectOf(pattern string, r *http.Request) string {
+	i := strings.IndexByte(pattern, '{')
+	j := strings.IndexByte(pattern, '}')
+	if i < 0 || j < i {
+		return ""
 	}
-	ps, xs := strings.Split(pattern, "/"), strings.Split(path, "/")
-	for i, p := range ps {
-		if strings.HasPrefix(p, "{") && i < len(xs) {
-			return xs[i]
-		}
-	}
-	return ""
+	return r.PathValue(strings.TrimSuffix(pattern[i+1:j], "..."))
 }
 
 type statusWriter struct {

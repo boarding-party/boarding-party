@@ -73,3 +73,17 @@ func TestAgentKeySaveAuditedWithoutKey(t *testing.T) {
 		t.Fatalf("audit %s", b)
 	}
 }
+
+func TestAuditSubjectIsWhatTheHandlerSaw(t *testing.T) {
+	_, _, svc := setupBoth(t, 1<<20)
+	s := newServer(svc, 1<<20, nil)
+	mux := http.NewServeMux()
+	mux.HandleFunc("DELETE /api/children/{name}", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(204) })
+	req := httptest.NewRequest("DELETE", "/api/children/a%2Fb", nil)
+	w := httptest.NewRecorder()
+	s.withActor(mux).ServeHTTP(w, req)
+	got, err := svc.Store.AuditLog(1)
+	if err != nil || w.Code != 204 || len(got) != 1 || got[0].Subject != "a/b" {
+		t.Fatalf("code %d audit %+v %v", w.Code, got, err)
+	}
+}
