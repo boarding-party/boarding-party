@@ -39,6 +39,12 @@ function cleanUrl(u) {
   }
 }
 
+// cleanText drops the query and fragment of every URL in a message: stack
+// traces and messages quote page URLs, which can carry tokens from emails.
+function cleanText(s) {
+  return String(s || '').replace(/https?:\/\/[^\s"'`<>()\[\]{}]+/g, (u) => cleanUrl(u) || '[url]');
+}
+
 function argText(a) {
   if (a.value !== undefined) return typeof a.value === 'string' ? a.value : JSON.stringify(a.value);
   return a.description || a.unserializableValue || a.type || '';
@@ -87,8 +93,8 @@ function toEvent(m) {
 }
 
 function record(ev) {
-  const text = String(ev.text || '').slice(0, MAX_TEXT);
-  const url = cleanUrl(ev.url);
+  const text = cleanText(ev.text).slice(0, MAX_TEXT);
+  const url = cleanUrl(ev.url).slice(0, 2048);
   const key = ev.level + ev.kind + text + url;
   const n = (repeats.get(key) || 0) + 1;
   if (repeats.size > 5000) repeats.clear();

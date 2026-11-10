@@ -10,7 +10,17 @@ const (
 	MaxConsoleEvents = 2000
 	// MaxConsoleText caps one event's text, in bytes.
 	MaxConsoleText = 2000
+	// MaxConsoleURL caps one event's URL, in bytes.
+	MaxConsoleURL = 2048
 )
+
+// cut shortens s to at most n bytes without splitting a character.
+func cut(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return strings.ToValidUTF8(s[:n], "")
+}
 
 // ConsoleEvent is one thing a run's browser logged. Level is error, warning
 // or info; Kind is console, exception, log or network.
@@ -37,9 +47,7 @@ func (s *Store) AddConsole(runID string, evs []ConsoleEvent) error {
 		if n >= MaxConsoleEvents {
 			break
 		}
-		if len(e.Text) > MaxConsoleText {
-			e.Text = strings.ToValidUTF8(e.Text[:MaxConsoleText], "")
-		}
+		e.Text, e.URL = cut(e.Text, MaxConsoleText), cut(e.URL, MaxConsoleURL)
 		if _, err := tx.Exec(`INSERT INTO console(run_id, at, level, kind, text, url) VALUES(?, ?, ?, ?, ?, ?)`,
 			runID, ts(e.At), e.Level, e.Kind, e.Text, e.URL); err != nil {
 			return err

@@ -15,6 +15,7 @@ const PAGE = `<script>
 console.log('quiet');
 console.error('boom', 42);
 console.warn('careful');
+console.error('at ' + location.href + ' and https://x.test/a?code=secret-token#f');
 fetch('/missing');
 setTimeout(() => { throw new Error('kaput'); }, 10);
 </script>`;
@@ -51,7 +52,8 @@ has((e) => e.kind === 'console' && e.level === 'warning' && e.text === 'careful'
 has((e) => e.kind === 'exception' && e.text.includes('kaput'), 'uncaught exception');
 has((e) => e.kind === 'network' && e.text === `GET 404 ${base}/missing`, '404 response');
 if (got.some((e) => e.text.includes('quiet'))) fail('console.log recorded');
-if (JSON.stringify(got).includes('secret-token')) fail('query string leaked');
+if (JSON.stringify(got).includes('secret-token')) fail('query string leaked: ' + JSON.stringify(got));
+has((e) => e.kind === 'console' && e.text === `at ${base}/page and https://x.test/a`, 'URLs in text without their queries');
 if (got.some((e) => !e.at || Number.isNaN(Date.parse(e.at)))) fail('bad timestamps');
 console.log(`ok ${got.length} console events`);
 process.exit(0);
