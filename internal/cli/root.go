@@ -8,6 +8,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/boarding-party/boardingparty/pkg/install"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 	apiextclient "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
@@ -106,21 +107,21 @@ func quietClientGo() {
 // ensure installs or upgrades the director on first use and remembers the
 // admin token it read, so token() needs no second lookup. Progress goes to stderr.
 func (g *globals) ensure(ctx context.Context, cfg *rest.Config, ns string) error {
-	d := setupDeps{}
+	d := install.Deps{}
 	var err error
-	if d.kube, err = kubernetes.NewForConfig(cfg); err != nil {
+	if d.Kube, err = kubernetes.NewForConfig(cfg); err != nil {
 		return err
 	}
-	if d.ext, err = apiextclient.NewForConfig(cfg); err != nil {
+	if d.Ext, err = apiextclient.NewForConfig(cfg); err != nil {
 		return err
 	}
-	if d.apply, err = serverSideApplier(cfg, false); err != nil {
+	if d.Apply, err = install.ServerSideApplier(cfg, false); err != nil {
 		return err
 	}
-	d.verify = verifyDirector(cfg, ns)
-	d.imageExists = ghcrImageExists
+	d.Verify = install.VerifyDirector(cfg, ns)
+	d.ImageExists = install.GHCRImageExists
 	tag, note := resolveTag()
-	token, err := ensureDirector(ctx, d, setupOpts{ns: ns, tag: tag, note: note, timeout: 3 * time.Minute, built: buildTime(), noDowngrade: true}, os.Stderr)
+	token, err := install.EnsureDirector(ctx, d, install.Options{Ns: ns, Tag: tag, Note: note, Timeout: 3 * time.Minute, Built: buildTime(), NoDowngrade: true}, os.Stderr)
 	if err != nil {
 		return err
 	}

@@ -1,4 +1,4 @@
-package cli
+package install
 
 import (
 	"context"
@@ -71,8 +71,8 @@ func adminTokenOf(s *corev1.Secret, ns string) (string, error) {
 // they pick up the new key.
 const adminSecretAnnotation = "boardingparty.io/admin-secret-uid"
 
-// readAdminToken reads the admin bearer secret.
-func readAdminToken(ctx context.Context, kube kubernetes.Interface, ns string) (string, error) {
+// ReadAdminToken reads the admin bearer secret.
+func ReadAdminToken(ctx context.Context, kube kubernetes.Interface, ns string) (string, error) {
 	s, err := kube.CoreV1().Secrets(ns).Get(ctx, adminSecret, metav1.GetOptions{})
 	if apierrors.IsNotFound(err) {
 		return "", fmt.Errorf("secret %s is missing in %s: run `boardingparty setup -n %s`", adminSecret, ns, ns)

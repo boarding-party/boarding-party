@@ -1,4 +1,4 @@
-package cli
+package install
 
 import (
 	"bufio"
@@ -9,13 +9,10 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"regexp"
-	"runtime/debug"
 	"strings"
 	"time"
 
 	"github.com/boarding-party/boardingparty/deploy"
-	"github.com/spf13/cobra"
 	appsv1 "k8s.io/api/apps/v1"
 	apiextclient "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -76,9 +73,9 @@ func (c *checker) fail(format string, a ...any) {
 	fmt.Fprintf(c.out, "✗ %s\n", clean(fmt.Sprintf(format, a...)))
 }
 
-// preflight runs the read-only checks and reports whether any failed.
+// Preflight runs the read-only checks and reports whether any failed.
 // It never prints Secret values, only key names.
-func preflight(ctx context.Context, kube kubernetes.Interface, ext apiextclient.Interface, ns string, out io.Writer) (failed bool) {
+func Preflight(ctx context.Context, kube kubernetes.Interface, ext apiextclient.Interface, ns string, out io.Writer) (failed bool) {
 	return preflightCheck(ctx, kube, ext, ns, out).failed
 }
 
@@ -261,51 +258,51 @@ func printManifest(out io.Writer, objs []*unstructured.Unstructured) error {
 	return nil
 }
 
-type setupOpts struct {
-	ns, tag string
-	note    string // printed before an install or upgrade
-	dryRun  bool
-	force   bool
-	timeout time.Duration
-	built   time.Time // this CLI's build time; zero when unknown
-	// noDowngrade refuses to replace a director that a newer CLI deployed:
+type Options struct {
+	Ns, Tag string
+	Note    string // printed before an install or upgrade
+	DryRun  bool
+	Force   bool
+	Timeout time.Duration
+	Built   time.Time // this CLI's build time; zero when unknown
+	// NoDowngrade refuses to replace a director that a newer CLI deployed:
 	// the board's UI comes from this CLI, and an older one drops fields the
 	// newer director keeps.
-	noDowngrade bool
+	NoDowngrade bool
 }
 
-// setupDeps are the cluster-facing pieces, replaceable in tests.
-type setupDeps struct {
-	kube  kubernetes.Interface
-	ext   apiextclient.Interface
-	apply func(ctx context.Context, obj *unstructured.Unstructured) error
-	// verify checks the director answers GET /api/runs.
-	verify func(ctx context.Context) error
-	// imageExists reports whether repo:tag is published; nil skips the check.
-	imageExists func(ctx context.Context, repo, tag string) (bool, error)
+// Deps are the cluster-facing pieces, replaceable in tests.
+type Deps struct {
+	Kube  kubernetes.Interface
+	Ext   apiextclient.Interface
+	Apply func(ctx context.Context, obj *unstructured.Unstructured) error
+	// Verify checks the director answers GET /api/runs.
+	Verify func(ctx context.Context) error
+	// ImageExists reports whether repo:tag is published; nil skips the check.
+	ImageExists func(ctx context.Context, repo, tag string) (bool, error)
 }
 
 var waitPoll = 2 * time.Second
 
-func runSetup(ctx context.Context, d setupDeps, o setupOpts, out io.Writer) error {
-	if preflight(ctx, d.kube, d.ext, o.ns, out) {
-		return ExitError{Code: 1}
+func Setup(ctx context.Context, d Deps, o Options, out io.Writer) error {
+	if Preflight(ctx, d.Kube, d.Ext, o.Ns, out) {
+		return ErrPreflight
 	}
-	objs, err := renderManifest(deploy.Director, o.ns, o.tag)
+	objs, err := renderManifest(deploy.Director, o.Ns, o.Tag)
 	if err != nil {
 		return err
 	}
-	if o.dryRun {
+	if o.DryRun {
 		fmt.Fprintln(out, "---")
 		return printManifest(out, objs)
 	}
-	if err := checkImages(ctx, d, o.tag); err != nil {
+	if err := checkImages(ctx, d, o.Tag); err != nil {
 		return err
 	}
-	if o.note != "" {
-		fmt.Fprintln(out, o.note)
+	if o.Note != "" {
+		fmt.Fprintln(out, o.Note)
 	}
-	wctx, cancel := context.WithTimeout(ctx, o.timeout)
+	wctx, cancel := context.WithTimeout(ctx, o.Timeout)
 	defer cancel()
 	if _, err := installDirector(wctx, d, o, objs, out); err != nil {
 		return err
@@ -313,19 +310,19 @@ func runSetup(ctx context.Context, d setupDeps, o setupOpts, out io.Writer) erro
 	if err := waitVerify(wctx, d); err != nil {
 		return err
 	}
-	fmt.Fprintf(out, "✓ director ready\n\nNext:\n  boardingparty board -n %s\n", o.ns)
+	fmt.Fprintf(out, "✓ director ready\n\nNext:\n  boardingparty board -n %s\n", o.Ns)
 	return nil
 }
 
 // installDirector applies the objects one by one and waits for the rollout.
 // It returns the admin API token.
-func installDirector(ctx context.Context, d setupDeps, o setupOpts, objs []*unstructured.Unstructured, out io.Writer) (string, error) {
+func installDirector(ctx context.Context, d Deps, o Options, objs []*unstructured.Unstructured, out io.Writer) (string, error) {
 	// The Deployment reads the admin secret, so it has to exist first.
-	sec, created, err := ensureAdminSecret(ctx, d.kube, o.ns)
+	sec, created, err := ensureAdminSecret(ctx, d.Kube, o.Ns)
 	if err != nil {
 		return "", err
 	}
-	token, err := adminTokenOf(sec, o.ns)
+	token, err := adminTokenOf(sec, o.Ns)
 	if err != nil {
 		return "", err
 	}
@@ -343,8 +340,8 @@ func installDirector(ctx context.Context, d setupDeps, o setupOpts, objs []*unst
 				ann = map[string]string{}
 			}
 			ann[manifestHashAnnotation] = hash
-			if !o.built.IsZero() {
-				ann[cliBuiltAnnotation] = o.built.UTC().Format(time.RFC3339)
+			if !o.Built.IsZero() {
+				ann[cliBuiltAnnotation] = o.Built.UTC().Format(time.RFC3339)
 			}
 			obj.SetAnnotations(ann)
 		}
@@ -355,8 +352,8 @@ func installDirector(ctx context.Context, d setupDeps, o setupOpts, objs []*unst
 		}
 	}
 	for _, obj := range objs {
-		if err := d.apply(ctx, obj); err != nil {
-			if apierrors.IsConflict(err) && !o.force {
+		if err := d.Apply(ctx, obj); err != nil {
+			if apierrors.IsConflict(err) && !o.Force {
 				return "", fmt.Errorf("apply %s/%s: %w\nthe director was previously applied by another tool; run `boardingparty setup --force-conflicts` once", obj.GetKind(), obj.GetName(), err)
 			}
 			return "", fmt.Errorf("apply %s/%s: %w", obj.GetKind(), obj.GetName(), err)
@@ -365,7 +362,7 @@ func installDirector(ctx context.Context, d setupDeps, o setupOpts, objs []*unst
 	}
 	var lastErr error
 	err = wait.PollUntilContextCancel(ctx, waitPoll, true, func(ctx context.Context) (bool, error) {
-		dep, err := d.kube.AppsV1().Deployments(o.ns).Get(ctx, directorDeploy, metav1.GetOptions{})
+		dep, err := d.Kube.AppsV1().Deployments(o.Ns).Get(ctx, directorDeploy, metav1.GetOptions{})
 		if err != nil {
 			lastErr = err
 			return false, nil
@@ -374,17 +371,17 @@ func installDirector(ctx context.Context, d setupDeps, o setupOpts, objs []*unst
 		return rolloutComplete(dep), nil
 	})
 	if err != nil {
-		return "", fmt.Errorf("deployment %s not rolled out within %s: %v (last error: %v)", directorDeploy, o.timeout, err, lastErr)
+		return "", fmt.Errorf("deployment %s not rolled out within %s: %v (last error: %v)", directorDeploy, o.Timeout, err, lastErr)
 	}
 	fmt.Fprintf(out, "✓ deployment/%s rolled out\n", directorDeploy)
 	return token, nil
 }
 
 // waitVerify retries the admin-API check until it passes or ctx ends.
-func waitVerify(ctx context.Context, d setupDeps) error {
+func waitVerify(ctx context.Context, d Deps) error {
 	var verr error
 	err := wait.PollUntilContextCancel(ctx, waitPoll, true, func(ctx context.Context) (bool, error) {
-		verr = d.verify(ctx)
+		verr = d.Verify(ctx)
 		return verr == nil, nil
 	})
 	if err != nil {
@@ -393,21 +390,21 @@ func waitVerify(ctx context.Context, d setupDeps) error {
 	return nil
 }
 
-// ensureDirector is what every command that needs the director runs first.
+// EnsureDirector is what every command that needs the director runs first.
 // Fast path: a Deployment GET and a Secret GET; if the director is there with
 // the wanted manifest fingerprint (which covers the image tag) and its admin Secret exists, nothing else happens and the
 // admin token is returned. Otherwise (including a missing Secret, which the
 // running director can't work without) tiny's prerequisites are checked (read-only,
 // failing with a pointer to `tiny init`), the warnings are printed once, and
 // the director is installed or upgraded in place.
-func ensureDirector(ctx context.Context, d setupDeps, o setupOpts, out io.Writer) (string, error) {
-	dep, err := d.kube.AppsV1().Deployments(o.ns).Get(ctx, directorDeploy, metav1.GetOptions{})
+func EnsureDirector(ctx context.Context, d Deps, o Options, out io.Writer) (string, error) {
+	dep, err := d.Kube.AppsV1().Deployments(o.Ns).Get(ctx, directorDeploy, metav1.GetOptions{})
 	if err != nil && !apierrors.IsNotFound(err) {
 		return "", fmt.Errorf("get deployment %s: %w", directorDeploy, err)
 	}
 	upgrade := err == nil
 	keyMissing := false
-	objs, err := renderManifest(deploy.Director, o.ns, o.tag)
+	objs, err := renderManifest(deploy.Director, o.Ns, o.Tag)
 	if err != nil {
 		return "", err
 	}
@@ -416,23 +413,23 @@ func ensureDirector(ctx context.Context, d setupDeps, o setupOpts, out io.Writer
 		return "", err
 	}
 	if upgrade && dep.Annotations[manifestHashAnnotation] == want {
-		sec, serr := d.kube.CoreV1().Secrets(o.ns).Get(ctx, adminSecret, metav1.GetOptions{})
+		sec, serr := d.Kube.CoreV1().Secrets(o.Ns).Get(ctx, adminSecret, metav1.GetOptions{})
 		switch {
 		case serr == nil:
-			return adminTokenOf(sec, o.ns)
+			return adminTokenOf(sec, o.Ns)
 		case !apierrors.IsNotFound(serr):
 			return "", fmt.Errorf("read secret %s (the director's admin key): %w", adminSecret, serr)
 		}
 		keyMissing = true
 	}
-	if upgrade && o.noDowngrade && !o.built.IsZero() {
-		if theirs, err := time.Parse(time.RFC3339, dep.Annotations[cliBuiltAnnotation]); err == nil && theirs.After(o.built) {
+	if upgrade && o.NoDowngrade && !o.Built.IsZero() {
+		if theirs, err := time.Parse(time.RFC3339, dep.Annotations[cliBuiltAnnotation]); err == nil && theirs.After(o.Built) {
 			return "", fmt.Errorf("the director in %s (%s) was deployed by a newer boardingparty CLI (built %s) than this one (built %s); update this CLI and run again",
-				o.ns, imageTag(dep), theirs.Format(time.DateTime), o.built.UTC().Format(time.DateTime))
+				o.Ns, ImageTag(dep), theirs.Format(time.DateTime), o.Built.UTC().Format(time.DateTime))
 		}
 	}
 	var buf strings.Builder
-	if pc := preflightCheck(ctx, d.kube, d.ext, o.ns, &buf); pc.failed {
+	if pc := preflightCheck(ctx, d.Kube, d.Ext, o.Ns, &buf); pc.failed {
 		var failed []string
 		for _, l := range strings.Split(buf.String(), "\n") {
 			if strings.HasPrefix(l, "✗") {
@@ -441,31 +438,31 @@ func ensureDirector(ctx context.Context, d setupDeps, o setupOpts, out io.Writer
 		}
 		if !pc.notSetUp {
 			return "", fmt.Errorf("couldn't check tiny's setup in namespace %s: your credentials lack a permission\n%s",
-				o.ns, strings.Join(failed, "\n"))
+				o.Ns, strings.Join(failed, "\n"))
 		}
 		return "", fmt.Errorf("tiny isn't set up in namespace %s: run `tiny init -n %s` (and `tiny setup` for the agent key)\n%s",
-			o.ns, o.ns, strings.Join(failed, "\n"))
+			o.Ns, o.Ns, strings.Join(failed, "\n"))
 	}
 	for _, l := range strings.Split(buf.String(), "\n") {
 		if strings.HasPrefix(l, "!") {
 			fmt.Fprintln(out, l)
 		}
 	}
-	if err := checkImages(ctx, d, o.tag); err != nil {
+	if err := checkImages(ctx, d, o.Tag); err != nil {
 		return "", err
 	}
-	if o.note != "" {
-		fmt.Fprintln(out, o.note)
+	if o.Note != "" {
+		fmt.Fprintln(out, o.Note)
 	}
 	switch {
 	case keyMissing:
-		fmt.Fprintf(out, "reinstalling the director in %s (its admin key is missing)\n", o.ns)
+		fmt.Fprintf(out, "reinstalling the director in %s (its admin key is missing)\n", o.Ns)
 	case !upgrade:
-		fmt.Fprintf(out, "installing the director in %s (image tag %s)\n", o.ns, o.tag)
+		fmt.Fprintf(out, "installing the director in %s (image tag %s)\n", o.Ns, o.Tag)
 	default:
-		fmt.Fprintf(out, "upgrading the director in %s (%s -> %s)\n", o.ns, imageTag(dep), o.tag)
+		fmt.Fprintf(out, "upgrading the director in %s (%s -> %s)\n", o.Ns, ImageTag(dep), o.Tag)
 	}
-	wctx, cancel := context.WithTimeout(ctx, o.timeout)
+	wctx, cancel := context.WithTimeout(ctx, o.Timeout)
 	defer cancel()
 	token, err := installDirector(wctx, d, o, objs, out)
 	if err != nil {
@@ -477,9 +474,9 @@ func ensureDirector(ctx context.Context, d setupDeps, o setupOpts, out io.Writer
 	return token, nil
 }
 
-// imageTag returns the tag of the director container image, or "" when the
+// ImageTag returns the tag of the director container image, or "" when the
 // image has none (untagged or digest-only).
-func imageTag(dep *appsv1.Deployment) string {
+func ImageTag(dep *appsv1.Deployment) string {
 	for _, c := range dep.Spec.Template.Spec.Containers {
 		if c.Name == "director" {
 			return tagOf(c.Image)
@@ -499,74 +496,14 @@ func tagOf(image string) string {
 	return ""
 }
 
-var releaseSemver = regexp.MustCompile(`^v\d+\.\d+\.\d+$`)
-
-// buildTime is when this binary's commit was made (vcs.time), or zero.
-func buildTime() time.Time {
-	bi, ok := debug.ReadBuildInfo()
-	if !ok {
-		return time.Time{}
-	}
-	for _, s := range bi.Settings {
-		if s.Key == "vcs.time" {
-			t, _ := time.Parse(time.RFC3339, s.Value)
-			return t
-		}
-	}
-	return time.Time{}
-}
-
-// wantedTag is the image tag this CLI wants; see resolveTag.
-func wantedTag() string {
-	tag, _ := resolveTag()
-	return tag
-}
-
-// resolveTag picks the image tag for this binary. A release build wants its
-// own version. A clean dev build wants the image CI built from the same commit
-// (sha-<7 chars>); a dirty or unstamped one falls back to main and returns a
-// note saying so.
-func resolveTag() (tag, note string) {
-	bi, ok := debug.ReadBuildInfo()
-	if !ok {
-		return tagFromBuild("", "", false)
-	}
-	var rev string
-	var modified bool
-	for _, s := range bi.Settings {
-		switch s.Key {
-		case "vcs.revision":
-			rev = s.Value
-		case "vcs.modified":
-			modified = s.Value == "true"
-		}
-	}
-	return tagFromBuild(bi.Main.Version, rev, modified)
-}
-
-const devBuildNote = "dev build: using image tag main, which may not match this CLI"
-
-func tagFromBuild(version, rev string, modified bool) (tag, note string) {
-	if releaseSemver.MatchString(version) {
-		return strings.TrimPrefix(version, "v"), ""
-	}
-	if rev != "" && !modified {
-		if len(rev) > 7 {
-			rev = rev[:7]
-		}
-		return "sha-" + rev, ""
-	}
-	return defaultImageTag, devBuildNote
-}
-
 // checkImages fails when a sha-… tag has no published images yet. Other tags
 // are not checked, and a nil check (tests) skips it.
-func checkImages(ctx context.Context, d setupDeps, tag string) error {
-	if d.imageExists == nil || !strings.HasPrefix(tag, "sha-") {
+func checkImages(ctx context.Context, d Deps, tag string) error {
+	if d.ImageExists == nil || !strings.HasPrefix(tag, "sha-") {
 		return nil
 	}
 	for _, repo := range []string{"boarding-party/director", "boarding-party/worker"} {
-		ok, err := d.imageExists(ctx, repo, tag)
+		ok, err := d.ImageExists(ctx, repo, tag)
 		if err != nil {
 			return fmt.Errorf("check image %s:%s on ghcr.io: %w", repo, tag, err)
 		}
@@ -577,8 +514,8 @@ func checkImages(ctx context.Context, d setupDeps, tag string) error {
 	return nil
 }
 
-// ghcrImageExists asks ghcr.io anonymously whether repo:tag has a manifest.
-func ghcrImageExists(ctx context.Context, repo, tag string) (bool, error) {
+// GHCRImageExists asks ghcr.io anonymously whether repo:tag has a manifest.
+func GHCRImageExists(ctx context.Context, repo, tag string) (bool, error) {
 	c := &http.Client{Timeout: 15 * time.Second}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://ghcr.io/token?scope=repository:"+repo+":pull", nil)
 	if err != nil {
@@ -636,8 +573,8 @@ func rolloutComplete(dep *appsv1.Deployment) bool {
 		st.AvailableReplicas == want && st.UnavailableReplicas == 0
 }
 
-// serverSideApplier applies objects with server-side apply, conflicts forced only when asked.
-func serverSideApplier(cfg *rest.Config, force bool) (func(context.Context, *unstructured.Unstructured) error, error) {
+// ServerSideApplier applies objects with server-side apply, conflicts forced only when asked.
+func ServerSideApplier(cfg *rest.Config, force bool) (func(context.Context, *unstructured.Unstructured) error, error) {
 	dc, err := dynamic.NewForConfig(cfg)
 	if err != nil {
 		return nil, err
@@ -663,18 +600,18 @@ func serverSideApplier(cfg *rest.Config, force bool) (func(context.Context, *uns
 	}, nil
 }
 
-// verifyDirector port-forwards to the director and expects GET /api/runs = 200.
-func verifyDirector(cfg *rest.Config, ns string) func(context.Context) error {
+// VerifyDirector port-forwards to the director and expects GET /api/runs = 200.
+func VerifyDirector(cfg *rest.Config, ns string) func(context.Context) error {
 	return func(ctx context.Context) error {
 		kube, err := kubernetes.NewForConfig(cfg)
 		if err != nil {
 			return err
 		}
-		token, err := readAdminToken(ctx, kube, ns)
+		token, err := ReadAdminToken(ctx, kube, ns)
 		if err != nil {
 			return err
 		}
-		base, stop, err := forward(ctx, cfg, ns, directorSelector, adminPort)
+		base, stop, err := Forward(ctx, cfg, ns, directorSelector, adminPort)
 		if err != nil {
 			return err
 		}
@@ -694,48 +631,4 @@ func verifyDirector(cfg *rest.Config, ns string) func(context.Context) error {
 		}
 		return nil
 	}
-}
-
-func newSetup(g *globals) *cobra.Command {
-	o := setupOpts{built: buildTime()}
-	defTag, defNote := resolveTag()
-	cmd := &cobra.Command{
-		Use:   "setup",
-		Short: "Check the cluster and install the director",
-		Long: "Checks that tiny is ready in the namespace, then installs (or upgrades in place)\n" +
-			"the boardingparty director with server-side apply and waits until it answers.\n" +
-			"Prerequisite: `tiny init -n <namespace>` and tiny's agent secret.",
-		Args: cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			if err := g.chooseTarget(cmd.Context()); err != nil {
-				return err
-			}
-			o.ns = g.namespace
-			if !cmd.Flags().Changed("image-tag") {
-				o.note = defNote
-			}
-			cfg, _, err := g.kubeConfig()
-			if err != nil {
-				return err
-			}
-			d := setupDeps{}
-			if d.kube, err = kubernetes.NewForConfig(cfg); err != nil {
-				return err
-			}
-			if d.ext, err = apiextclient.NewForConfig(cfg); err != nil {
-				return err
-			}
-			if d.apply, err = serverSideApplier(cfg, o.force); err != nil {
-				return err
-			}
-			d.verify = verifyDirector(cfg, o.ns)
-			d.imageExists = ghcrImageExists
-			return runSetup(cmd.Context(), d, o, cmd.OutOrStdout())
-		},
-	}
-	cmd.Flags().StringVar(&o.tag, "image-tag", defTag, "director and worker image tag")
-	cmd.Flags().BoolVar(&o.dryRun, "dry-run", false, "run the checks and print the rendered manifest; apply nothing")
-	cmd.Flags().BoolVar(&o.force, "force-conflicts", false, "take over fields owned by another tool (use once after a kubectl apply)")
-	cmd.Flags().DurationVar(&o.timeout, "timeout", 3*time.Minute, "how long to wait for the director")
-	return cmd
 }

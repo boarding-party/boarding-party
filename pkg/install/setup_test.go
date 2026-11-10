@@ -1,4 +1,4 @@
-package cli
+package install
 
 import (
 	"context"
@@ -97,7 +97,7 @@ func TestPreflight(t *testing.T) {
 				ext = extfake.NewSimpleClientset()
 			}
 			var out strings.Builder
-			failed := preflight(context.Background(), kubefake.NewSimpleClientset(tc.kube...), ext, testNS, &out)
+			failed := Preflight(context.Background(), kubefake.NewSimpleClientset(tc.kube...), ext, testNS, &out)
 			if failed != tc.failed {
 				t.Errorf("failed = %v, want %v\n%s", failed, tc.failed, out.String())
 			}
@@ -170,24 +170,24 @@ func TestRenderManifest(t *testing.T) {
 	}
 }
 
-func goodDeps(applied *[]string, verifyErr error) setupDeps {
+func goodDeps(applied *[]string, verifyErr error) Deps {
 	dep := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: directorDeploy, Namespace: testNS, Generation: 1},
 		Status: appsv1.DeploymentStatus{ObservedGeneration: 1, UpdatedReplicas: 1, AvailableReplicas: 1, Conditions: []appsv1.DeploymentCondition{{Type: appsv1.DeploymentAvailable, Status: corev1.ConditionTrue}}}}
-	return setupDeps{
-		kube: kubefake.NewSimpleClientset(nsObj, saObj, dep, secret(map[string]string{"ANTHROPIC_API_KEY": "x"})),
-		ext:  extfake.NewSimpleClientset(crdWith(true)),
-		apply: func(_ context.Context, o *unstructured.Unstructured) error {
+	return Deps{
+		Kube: kubefake.NewSimpleClientset(nsObj, saObj, dep, secret(map[string]string{"ANTHROPIC_API_KEY": "x"})),
+		Ext:  extfake.NewSimpleClientset(crdWith(true)),
+		Apply: func(_ context.Context, o *unstructured.Unstructured) error {
 			*applied = append(*applied, o.GetKind()+"/"+o.GetName())
 			return nil
 		},
-		verify: func(context.Context) error { return verifyErr },
+		Verify: func(context.Context) error { return verifyErr },
 	}
 }
 
 func TestSetupDryRunAppliesNothing(t *testing.T) {
 	var applied []string
 	var out strings.Builder
-	err := runSetup(context.Background(), goodDeps(&applied, nil), setupOpts{ns: testNS, tag: "main", dryRun: true, timeout: time.Second}, &out)
+	err := Setup(context.Background(), goodDeps(&applied, nil), Options{Ns: testNS, Tag: "main", DryRun: true, Timeout: time.Second}, &out)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -202,10 +202,9 @@ func TestSetupDryRunAppliesNothing(t *testing.T) {
 func TestSetupFailedPreflightAppliesNothing(t *testing.T) {
 	var applied []string
 	d := goodDeps(&applied, nil)
-	d.ext = extfake.NewSimpleClientset()
-	err := runSetup(context.Background(), d, setupOpts{ns: testNS, tag: "main", timeout: time.Second}, &strings.Builder{})
-	var ee ExitError
-	if !errors.As(err, &ee) || ee.Code != 1 || len(applied) != 0 {
+	d.Ext = extfake.NewSimpleClientset()
+	err := Setup(context.Background(), d, Options{Ns: testNS, Tag: "main", Timeout: time.Second}, &strings.Builder{})
+	if !errors.Is(err, ErrPreflight) || len(applied) != 0 {
 		t.Errorf("err = %v, applied = %v", err, applied)
 	}
 }
@@ -214,7 +213,7 @@ func TestSetupApplies(t *testing.T) {
 	waitPoll = time.Millisecond
 	var applied []string
 	var out strings.Builder
-	if err := runSetup(context.Background(), goodDeps(&applied, nil), setupOpts{ns: testNS, tag: "main", timeout: time.Second}, &out); err != nil {
+	if err := Setup(context.Background(), goodDeps(&applied, nil), Options{Ns: testNS, Tag: "main", Timeout: time.Second}, &out); err != nil {
 		t.Fatal(err)
 	}
 	if len(applied) != 8 || applied[0] != "LimitRange/bp-defaults" || applied[1] != "ResourceQuota/bp-quota" {
@@ -230,7 +229,7 @@ func TestSetupApplies(t *testing.T) {
 func TestSetupVerifyTimeout(t *testing.T) {
 	waitPoll = time.Millisecond
 	var applied []string
-	err := runSetup(context.Background(), goodDeps(&applied, errors.New("boom")), setupOpts{ns: testNS, tag: "main", timeout: 50 * time.Millisecond}, &strings.Builder{})
+	err := Setup(context.Background(), goodDeps(&applied, errors.New("boom")), Options{Ns: testNS, Tag: "main", Timeout: 50 * time.Millisecond}, &strings.Builder{})
 	if err == nil || !strings.Contains(err.Error(), "boom") {
 		t.Errorf("err = %v", err)
 	}
@@ -266,14 +265,14 @@ func directorAt0(tag string) *appsv1.Deployment {
 		Status: appsv1.DeploymentStatus{ObservedGeneration: 1, UpdatedReplicas: 1, AvailableReplicas: 1, Conditions: []appsv1.DeploymentCondition{{Type: appsv1.DeploymentAvailable, Status: corev1.ConditionTrue}}}}
 }
 
-func ensureDeps(applied *[]string, withTiny bool, objs ...runtime.Object) setupDeps {
+func ensureDeps(applied *[]string, withTiny bool, objs ...runtime.Object) Deps {
 	if withTiny {
 		objs = append(objs, nsObj, saObj, secret(map[string]string{"ANTHROPIC_API_KEY": "x"}))
 	}
 	d := goodDeps(applied, nil)
-	d.kube = kubefake.NewSimpleClientset(objs...)
+	d.Kube = kubefake.NewSimpleClientset(objs...)
 	if !withTiny {
-		d.ext = extfake.NewSimpleClientset()
+		d.Ext = extfake.NewSimpleClientset()
 	}
 	return d
 }
@@ -283,16 +282,16 @@ func TestEnsureDirectorMissingInstalls(t *testing.T) {
 	var applied []string
 	d := ensureDeps(&applied, true)
 	// The fake never creates the Deployment on apply, so add it once applied.
-	d.apply = func(_ context.Context, o *unstructured.Unstructured) error {
+	d.Apply = func(_ context.Context, o *unstructured.Unstructured) error {
 		applied = append(applied, o.GetKind())
 		if o.GetKind() == "Deployment" {
-			_, err := d.kube.AppsV1().Deployments(testNS).Create(context.Background(), directorAt("1.0.0"), metav1.CreateOptions{})
+			_, err := d.Kube.AppsV1().Deployments(testNS).Create(context.Background(), directorAt("1.0.0"), metav1.CreateOptions{})
 			return err
 		}
 		return nil
 	}
 	var out strings.Builder
-	if _, err := ensureDirector(context.Background(), d, setupOpts{ns: testNS, tag: "1.0.0", timeout: time.Second}, &out); err != nil {
+	if _, err := EnsureDirector(context.Background(), d, Options{Ns: testNS, Tag: "1.0.0", Timeout: time.Second}, &out); err != nil {
 		t.Fatal(err)
 	}
 	if len(applied) != 8 || !strings.Contains(out.String(), "installing the director") || !strings.Contains(out.String(), "! network policies") {
@@ -302,7 +301,7 @@ func TestEnsureDirectorMissingInstalls(t *testing.T) {
 
 func TestEnsureDirectorTinyMissing(t *testing.T) {
 	var applied []string
-	_, err := ensureDirector(context.Background(), ensureDeps(&applied, false), setupOpts{ns: testNS, tag: "main", timeout: time.Second}, &strings.Builder{})
+	_, err := EnsureDirector(context.Background(), ensureDeps(&applied, false), Options{Ns: testNS, Tag: "main", Timeout: time.Second}, &strings.Builder{})
 	if err == nil || !strings.Contains(err.Error(), "run `tiny init -n "+testNS+"`") || !strings.Contains(err.Error(), "✗ CRD") {
 		t.Errorf("err = %v", err)
 	}
@@ -316,7 +315,7 @@ func TestEnsureDirectorUpgrade(t *testing.T) {
 	var applied []string
 	var out strings.Builder
 	d := ensureDeps(&applied, true, directorAt("0.9.0"))
-	if _, err := ensureDirector(context.Background(), d, setupOpts{ns: testNS, tag: "1.0.0", timeout: time.Second}, &out); err != nil {
+	if _, err := EnsureDirector(context.Background(), d, Options{Ns: testNS, Tag: "1.0.0", Timeout: time.Second}, &out); err != nil {
 		t.Fatal(err)
 	}
 	if len(applied) != 8 || !strings.Contains(out.String(), "upgrading the director in "+testNS+" (0.9.0 -> 1.0.0)") {
@@ -330,8 +329,8 @@ func TestEnsureDirectorCurrentIsSilent(t *testing.T) {
 	// tiny is missing too: the fast path must not even look.
 	d := ensureDeps(&applied, false, directorAt("1.0.0"), adminSecretObj("tok-1"))
 	verified := 0
-	d.verify = func(context.Context) error { verified++; return nil }
-	tok, err := ensureDirector(context.Background(), d, setupOpts{ns: testNS, tag: "1.0.0", timeout: time.Second}, &out)
+	d.Verify = func(context.Context) error { verified++; return nil }
+	tok, err := EnsureDirector(context.Background(), d, Options{Ns: testNS, Tag: "1.0.0", Timeout: time.Second}, &out)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -347,7 +346,7 @@ func ensureOnce(t *testing.T, dep *appsv1.Deployment) (applied []string, out str
 	t.Helper()
 	waitPoll = time.Millisecond
 	d := ensureDeps(&applied, true, dep, adminSecretObj("tok-1"))
-	d.apply = func(_ context.Context, o *unstructured.Unstructured) error {
+	d.Apply = func(_ context.Context, o *unstructured.Unstructured) error {
 		applied = append(applied, o.GetKind())
 		if o.GetKind() == "Deployment" {
 			stamped = o.GetAnnotations()[manifestHashAnnotation]
@@ -358,7 +357,7 @@ func ensureOnce(t *testing.T, dep *appsv1.Deployment) (applied []string, out str
 		return nil
 	}
 	var b strings.Builder
-	if _, err := ensureDirector(context.Background(), d, setupOpts{ns: testNS, tag: "main", timeout: time.Second}, &b); err != nil {
+	if _, err := EnsureDirector(context.Background(), d, Options{Ns: testNS, Tag: "main", Timeout: time.Second}, &b); err != nil {
 		t.Fatal(err)
 	}
 	return applied, b.String(), stamped
@@ -440,20 +439,20 @@ func TestEnsureDirectorCurrentButAdminSecretMissingReinstalls(t *testing.T) {
 	var out strings.Builder
 	d := ensureDeps(&applied, true, directorAt("1.0.0"))
 	var order []string
-	apply := d.apply
-	d.apply = func(ctx context.Context, o *unstructured.Unstructured) error {
-		if _, ok := adminSecretValue(t, d.kube); !ok {
+	apply := d.Apply
+	d.Apply = func(ctx context.Context, o *unstructured.Unstructured) error {
+		if _, ok := adminSecretValue(t, d.Kube); !ok {
 			t.Errorf("%s applied before the secret existed", o.GetKind())
 		}
 		order = append(order, "apply")
 		return apply(ctx, o)
 	}
-	d.verify = func(context.Context) error { order = append(order, "verify"); return nil }
-	tok, err := ensureDirector(context.Background(), d, setupOpts{ns: testNS, tag: "1.0.0", timeout: time.Second}, &out)
+	d.Verify = func(context.Context) error { order = append(order, "verify"); return nil }
+	tok, err := EnsureDirector(context.Background(), d, Options{Ns: testNS, Tag: "1.0.0", Timeout: time.Second}, &out)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want, ok := adminSecretValue(t, d.kube)
+	want, ok := adminSecretValue(t, d.Kube)
 	if !ok || len(want) != 64 || tok != want {
 		t.Errorf("secret %q ok=%v, token %q", want, ok, tok)
 	}
@@ -476,20 +475,20 @@ func TestInstallStampsSecretUIDOnPodTemplate(t *testing.T) {
 	var applied []string
 	d := ensureDeps(&applied, true, directorAt("0.9.0"), adminSecretObj("tok-1"))
 	var uid string
-	d.apply = func(_ context.Context, o *unstructured.Unstructured) error {
+	d.Apply = func(_ context.Context, o *unstructured.Unstructured) error {
 		if o.GetKind() == "Deployment" {
 			uid, _, _ = unstructured.NestedString(o.Object, "spec", "template", "metadata", "annotations", adminSecretAnnotation)
 		}
 		return nil
 	}
-	tok, err := ensureDirector(context.Background(), d, setupOpts{ns: testNS, tag: "1.0.0", timeout: time.Second}, &strings.Builder{})
+	tok, err := EnsureDirector(context.Background(), d, Options{Ns: testNS, Tag: "1.0.0", Timeout: time.Second}, &strings.Builder{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if uid != "uid-1" || tok != "tok-1" {
 		t.Errorf("annotation = %q, token = %q", uid, tok)
 	}
-	if v, _ := adminSecretValue(t, d.kube); v != "tok-1" {
+	if v, _ := adminSecretValue(t, d.Kube); v != "tok-1" {
 		t.Errorf("existing secret changed: %q", v)
 	}
 }
@@ -536,10 +535,10 @@ func TestEnsureWaitsForRollout(t *testing.T) {
 		time.Sleep(30 * time.Millisecond)
 		fresh := directorAt("1.0.0")
 		fresh.Generation, fresh.Status.ObservedGeneration = 2, 2
-		d.kube.AppsV1().Deployments(testNS).Update(context.Background(), fresh, metav1.UpdateOptions{})
+		d.Kube.AppsV1().Deployments(testNS).Update(context.Background(), fresh, metav1.UpdateOptions{})
 	}()
 	start := time.Now()
-	if _, err := ensureDirector(context.Background(), d, setupOpts{ns: testNS, tag: "1.0.0", timeout: 2 * time.Second}, &strings.Builder{}); err != nil {
+	if _, err := EnsureDirector(context.Background(), d, Options{Ns: testNS, Tag: "1.0.0", Timeout: 2 * time.Second}, &strings.Builder{}); err != nil {
 		t.Fatal(err)
 	}
 	if time.Since(start) < 25*time.Millisecond {
@@ -551,8 +550,8 @@ func TestEnsureVerifies(t *testing.T) {
 	waitPoll = time.Millisecond
 	var applied []string
 	d := ensureDeps(&applied, true, directorAt("0.9.0"))
-	d.verify = func(context.Context) error { return errors.New("not yet") }
-	_, err := ensureDirector(context.Background(), d, setupOpts{ns: testNS, tag: "1.0.0", timeout: 50 * time.Millisecond}, &strings.Builder{})
+	d.Verify = func(context.Context) error { return errors.New("not yet") }
+	_, err := EnsureDirector(context.Background(), d, Options{Ns: testNS, Tag: "1.0.0", Timeout: 50 * time.Millisecond}, &strings.Builder{})
 	if err == nil || !strings.Contains(err.Error(), "not yet") {
 		t.Errorf("err = %v", err)
 	}
@@ -562,13 +561,13 @@ func TestWaitErrorIsReported(t *testing.T) {
 	waitPoll = time.Millisecond
 	var applied []string
 	d := ensureDeps(&applied, true)
-	d.kube.(*kubefake.Clientset).PrependReactor("get", "deployments", func(ktesting.Action) (bool, runtime.Object, error) {
+	d.Kube.(*kubefake.Clientset).PrependReactor("get", "deployments", func(ktesting.Action) (bool, runtime.Object, error) {
 		if len(applied) > 0 {
 			return true, nil, errors.New("apiserver on fire")
 		}
 		return false, nil, nil
 	})
-	_, err := ensureDirector(context.Background(), d, setupOpts{ns: testNS, tag: "1.0.0", timeout: 50 * time.Millisecond}, &strings.Builder{})
+	_, err := EnsureDirector(context.Background(), d, Options{Ns: testNS, Tag: "1.0.0", Timeout: 50 * time.Millisecond}, &strings.Builder{})
 	if err == nil || !strings.Contains(err.Error(), "apiserver on fire") {
 		t.Errorf("err = %v", err)
 	}
@@ -586,7 +585,7 @@ func TestPreflightForbiddenClusterReadsWarn(t *testing.T) {
 		return true, nil, forbidden("customresourcedefinitions")
 	})
 	var out strings.Builder
-	if preflight(context.Background(), kube, ext, testNS, &out) {
+	if Preflight(context.Background(), kube, ext, testNS, &out) {
 		t.Errorf("should continue:\n%s", out.String())
 	}
 	for _, w := range []string{"! CRD", "no permission (get customresourcedefinitions)", "! namespace", "✓ service account"} {
@@ -599,10 +598,10 @@ func TestPreflightForbiddenClusterReadsWarn(t *testing.T) {
 func TestEnsureForbiddenNamespacedIsNotTinyMissing(t *testing.T) {
 	var applied []string
 	d := ensureDeps(&applied, true)
-	d.kube.(*kubefake.Clientset).PrependReactor("get", "secrets", func(ktesting.Action) (bool, runtime.Object, error) {
+	d.Kube.(*kubefake.Clientset).PrependReactor("get", "secrets", func(ktesting.Action) (bool, runtime.Object, error) {
 		return true, nil, forbidden("secrets")
 	})
-	_, err := ensureDirector(context.Background(), d, setupOpts{ns: testNS, tag: "1.0.0", timeout: time.Second}, &strings.Builder{})
+	_, err := EnsureDirector(context.Background(), d, Options{Ns: testNS, Tag: "1.0.0", Timeout: time.Second}, &strings.Builder{})
 	if err == nil || strings.Contains(err.Error(), "tiny init") || !strings.Contains(err.Error(), "no permission (get secrets)") {
 		t.Errorf("err = %v", err)
 	}
@@ -614,40 +613,20 @@ func TestEnsureForbiddenNamespacedIsNotTinyMissing(t *testing.T) {
 func TestConflictHint(t *testing.T) {
 	var applied []string
 	d := ensureDeps(&applied, true)
-	d.apply = func(context.Context, *unstructured.Unstructured) error {
+	d.Apply = func(context.Context, *unstructured.Unstructured) error {
 		return apierrors.NewConflict(schema.GroupResource{Resource: "deployments"}, "bp-director", fmt.Errorf("conflict"))
 	}
-	_, err := ensureDirector(context.Background(), d, setupOpts{ns: testNS, tag: "1.0.0", timeout: time.Second}, &strings.Builder{})
+	_, err := EnsureDirector(context.Background(), d, Options{Ns: testNS, Tag: "1.0.0", Timeout: time.Second}, &strings.Builder{})
 	if err == nil || !strings.Contains(err.Error(), "boardingparty setup --force-conflicts") {
 		t.Errorf("err = %v", err)
-	}
-}
-
-func TestTagFromBuild(t *testing.T) {
-	cases := []struct {
-		name, version, rev string
-		modified           bool
-		tag, note          string
-	}{
-		{"release", "v1.2.3", "abcdef1234567", false, "1.2.3", ""},
-		{"release ignores dirty", "v1.2.3", "abcdef1234567", true, "1.2.3", ""},
-		{"clean dev", "(devel)", "abcdef1234567890", false, "sha-abcdef1", ""},
-		{"modified dev", "(devel)", "abcdef1234567890", true, "main", devBuildNote},
-		{"no revision", "(devel)", "", false, "main", devBuildNote},
-	}
-	for _, c := range cases {
-		tag, note := tagFromBuild(c.version, c.rev, c.modified)
-		if tag != c.tag || note != c.note {
-			t.Errorf("%s: got %q %q, want %q %q", c.name, tag, note, c.tag, c.note)
-		}
 	}
 }
 
 func TestEnsureDirectorUnpublishedImageAppliesNothing(t *testing.T) {
 	var applied []string
 	d := ensureDeps(&applied, true)
-	d.imageExists = func(context.Context, string, string) (bool, error) { return false, nil }
-	_, err := ensureDirector(context.Background(), d, setupOpts{ns: testNS, tag: "sha-abcdef1", timeout: time.Second}, &strings.Builder{})
+	d.ImageExists = func(context.Context, string, string) (bool, error) { return false, nil }
+	_, err := EnsureDirector(context.Background(), d, Options{Ns: testNS, Tag: "sha-abcdef1", Timeout: time.Second}, &strings.Builder{})
 	if err == nil || !strings.Contains(err.Error(), "images for abcdef1 aren't published yet") {
 		t.Fatalf("err = %v", err)
 	}
@@ -657,7 +636,7 @@ func TestEnsureDirectorUnpublishedImageAppliesNothing(t *testing.T) {
 }
 
 func TestCheckImagesSkipsNonSha(t *testing.T) {
-	d := setupDeps{imageExists: func(context.Context, string, string) (bool, error) { return false, nil }}
+	d := Deps{ImageExists: func(context.Context, string, string) (bool, error) { return false, nil }}
 	if err := checkImages(context.Background(), d, "main"); err != nil {
 		t.Error(err)
 	}
@@ -672,14 +651,14 @@ func TestEnsureDirectorRefusesDowngradeFromOlderCLI(t *testing.T) {
 	newer.Annotations[cliBuiltAnnotation] = "2026-11-10T08:00:00Z"
 	var applied []string
 	old := time.Date(2026, 11, 4, 23, 0, 0, 0, time.UTC)
-	_, err := ensureDirector(context.Background(), ensureDeps(&applied, true, newer),
-		setupOpts{ns: testNS, tag: "sha-aaaaaaa", built: old, noDowngrade: true, timeout: time.Second}, &strings.Builder{})
+	_, err := EnsureDirector(context.Background(), ensureDeps(&applied, true, newer),
+		Options{Ns: testNS, Tag: "sha-aaaaaaa", Built: old, NoDowngrade: true, Timeout: time.Second}, &strings.Builder{})
 	if err == nil || !strings.Contains(err.Error(), "newer") || len(applied) != 0 {
 		t.Fatalf("old CLI replaced a newer director: err=%v applied=%v", err, applied)
 	}
 	// setup with an explicit tag may still go back.
-	if _, err := ensureDirector(context.Background(), ensureDeps(&applied, true, newer),
-		setupOpts{ns: testNS, tag: "sha-aaaaaaa", built: old, timeout: time.Second}, &strings.Builder{}); err != nil {
+	if _, err := EnsureDirector(context.Background(), ensureDeps(&applied, true, newer),
+		Options{Ns: testNS, Tag: "sha-aaaaaaa", Built: old, Timeout: time.Second}, &strings.Builder{}); err != nil {
 		t.Fatalf("explicit setup: %v", err)
 	}
 }
@@ -688,15 +667,15 @@ func TestInstallStampsCLIBuildTime(t *testing.T) {
 	waitPoll = time.Millisecond
 	var stamped string
 	d := ensureDeps(&[]string{}, true, directorAt("0.9.0"))
-	inner := d.apply
-	d.apply = func(ctx context.Context, o *unstructured.Unstructured) error {
+	inner := d.Apply
+	d.Apply = func(ctx context.Context, o *unstructured.Unstructured) error {
 		if o.GetKind() == "Deployment" {
 			stamped = o.GetAnnotations()[cliBuiltAnnotation]
 		}
 		return inner(ctx, o)
 	}
 	built := time.Date(2026, 11, 10, 9, 0, 0, 0, time.UTC)
-	if _, err := ensureDirector(context.Background(), d, setupOpts{ns: testNS, tag: "1.0.0", built: built, timeout: time.Second}, &strings.Builder{}); err != nil {
+	if _, err := EnsureDirector(context.Background(), d, Options{Ns: testNS, Tag: "1.0.0", Built: built, Timeout: time.Second}, &strings.Builder{}); err != nil {
 		t.Fatal(err)
 	}
 	if stamped != "2026-11-10T09:00:00Z" {

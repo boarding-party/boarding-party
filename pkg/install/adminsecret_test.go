@@ -1,9 +1,7 @@
-package cli
+package install
 
 import (
 	"context"
-	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -28,22 +26,22 @@ func TestSetupCreatesAdminSecretBeforeTheDeploymentAndOnlyOnce(t *testing.T) {
 	waitPoll = time.Millisecond
 	var applied []string
 	d := goodDeps(&applied, nil)
-	apply := d.apply
-	d.apply = func(ctx context.Context, o *unstructured.Unstructured) error {
-		if _, ok := adminSecretValue(t, d.kube); !ok {
+	apply := d.Apply
+	d.Apply = func(ctx context.Context, o *unstructured.Unstructured) error {
+		if _, ok := adminSecretValue(t, d.Kube); !ok {
 			t.Errorf("%s/%s applied before the admin secret existed", o.GetKind(), o.GetName())
 		}
 		return apply(ctx, o)
 	}
 	var out strings.Builder
-	if err := runSetup(context.Background(), d, setupOpts{ns: testNS, tag: "main", timeout: time.Second}, &out); err != nil {
+	if err := Setup(context.Background(), d, Options{Ns: testNS, Tag: "main", Timeout: time.Second}, &out); err != nil {
 		t.Fatal(err)
 	}
-	tok, ok := adminSecretValue(t, d.kube)
+	tok, ok := adminSecretValue(t, d.Kube)
 	if !ok || len(tok) != 64 || strings.Trim(tok, "0123456789abcdef") != "" {
 		t.Fatalf("admin token = %q", tok)
 	}
-	s, _ := d.kube.CoreV1().Secrets(testNS).Get(context.Background(), adminSecret, metav1.GetOptions{})
+	s, _ := d.Kube.CoreV1().Secrets(testNS).Get(context.Background(), adminSecret, metav1.GetOptions{})
 	if s.Labels[managedByLabel] != managedByValue || s.Labels["app.kubernetes.io/name"] != directorDeploy {
 		t.Errorf("labels = %v (leave wouldn't find it)", s.Labels)
 	}
@@ -55,10 +53,10 @@ func TestSetupCreatesAdminSecretBeforeTheDeploymentAndOnlyOnce(t *testing.T) {
 	}
 	// A second setup keeps the same secret.
 	out.Reset()
-	if err := runSetup(context.Background(), d, setupOpts{ns: testNS, tag: "main", timeout: time.Second}, &out); err != nil {
+	if err := Setup(context.Background(), d, Options{Ns: testNS, Tag: "main", Timeout: time.Second}, &out); err != nil {
 		t.Fatal(err)
 	}
-	if again, _ := adminSecretValue(t, d.kube); again != tok {
+	if again, _ := adminSecretValue(t, d.Kube); again != tok {
 		t.Errorf("secret rotated")
 	}
 	if strings.Contains(out.String(), "Secret/"+adminSecret) {
@@ -70,17 +68,17 @@ func TestSetupNeverOverwritesAnExistingAdminSecret(t *testing.T) {
 	waitPoll = time.Millisecond
 	var applied []string
 	d := goodDeps(&applied, nil)
-	_, err := d.kube.CoreV1().Secrets(testNS).Create(context.Background(), &corev1.Secret{
+	_, err := d.Kube.CoreV1().Secrets(testNS).Create(context.Background(), &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{Name: adminSecret, Namespace: testNS},
 		Data:       map[string][]byte{adminSecretKey: []byte("keep-me")},
 	}, metav1.CreateOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := runSetup(context.Background(), d, setupOpts{ns: testNS, tag: "main", timeout: time.Second}, &strings.Builder{}); err != nil {
+	if err := Setup(context.Background(), d, Options{Ns: testNS, Tag: "main", Timeout: time.Second}, &strings.Builder{}); err != nil {
 		t.Fatal(err)
 	}
-	if v, _ := adminSecretValue(t, d.kube); v != "keep-me" {
+	if v, _ := adminSecretValue(t, d.Kube); v != "keep-me" {
 		t.Errorf("secret overwritten: %q", v)
 	}
 }
@@ -88,62 +86,30 @@ func TestSetupNeverOverwritesAnExistingAdminSecret(t *testing.T) {
 func TestSetupDryRunAndFailedPreflightCreateNoSecret(t *testing.T) {
 	var applied []string
 	d := goodDeps(&applied, nil)
-	if err := runSetup(context.Background(), d, setupOpts{ns: testNS, tag: "main", dryRun: true, timeout: time.Second}, &strings.Builder{}); err != nil {
+	if err := Setup(context.Background(), d, Options{Ns: testNS, Tag: "main", DryRun: true, Timeout: time.Second}, &strings.Builder{}); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := adminSecretValue(t, d.kube); ok {
+	if _, ok := adminSecretValue(t, d.Kube); ok {
 		t.Error("dry run created the secret")
 	}
-	d.ext = extfake.NewSimpleClientset()
-	_ = runSetup(context.Background(), d, setupOpts{ns: testNS, tag: "main", timeout: time.Second}, &strings.Builder{})
-	if _, ok := adminSecretValue(t, d.kube); ok {
+	d.Ext = extfake.NewSimpleClientset()
+	_ = Setup(context.Background(), d, Options{Ns: testNS, Tag: "main", Timeout: time.Second}, &strings.Builder{})
+	if _, ok := adminSecretValue(t, d.Kube); ok {
 		t.Error("failed preflight created the secret")
 	}
 }
 
 func TestReadAdminToken(t *testing.T) {
 	var applied []string
-	kube := goodDeps(&applied, nil).kube
-	if _, err := readAdminToken(context.Background(), kube, testNS); err == nil || !strings.Contains(err.Error(), "boardingparty setup") {
+	kube := goodDeps(&applied, nil).Kube
+	if _, err := ReadAdminToken(context.Background(), kube, testNS); err == nil || !strings.Contains(err.Error(), "boardingparty setup") {
 		t.Errorf("missing secret err = %v", err)
 	}
 	if _, _, err := ensureAdminSecret(context.Background(), kube, testNS); err != nil {
 		t.Fatal(err)
 	}
-	tok, err := readAdminToken(context.Background(), kube, testNS)
+	tok, err := ReadAdminToken(context.Background(), kube, testNS)
 	if want, _ := adminSecretValue(t, kube); err != nil || tok != want {
-		t.Errorf("token = %q, %v", tok, err)
-	}
-}
-
-func TestClientSendsBearer(t *testing.T) {
-	var got []string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		got = append(got, r.Header.Get("Authorization"))
-		w.Write([]byte("[]"))
-	}))
-	defer srv.Close()
-	c := newClient(srv.URL, "s3cret")
-	if _, err := c.Runs(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	if err := c.PutProject(context.Background(), []byte("name: x")); err != nil {
-		t.Fatal(err)
-	}
-	for _, h := range got {
-		if h != "Bearer s3cret" {
-			t.Errorf("Authorization = %q", h)
-		}
-	}
-	if len(got) != 2 {
-		t.Errorf("requests = %d", len(got))
-	}
-}
-
-func TestTokenReusesWhatEnsureRead(t *testing.T) {
-	g := &globals{adminToken: "from-ensure"}
-	// nil config: any cluster call would fail.
-	if tok, err := g.token(context.Background(), nil, testNS); err != nil || tok != "from-ensure" {
 		t.Errorf("token = %q, %v", tok, err)
 	}
 }

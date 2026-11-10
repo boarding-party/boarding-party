@@ -1,4 +1,4 @@
-package cli
+package install
 
 import (
 	"context"
@@ -27,10 +27,10 @@ func podReady(p *corev1.Pod) bool {
 	return false
 }
 
-// forward port-forwards to a Ready pod matching podSelector in ns and returns
+// Forward port-forwards to a Ready pod matching podSelector in ns and returns
 // the local base URL. The admin API is loopback-only inside the pod, so we go
 // to the pod, not a Service.
-func forward(ctx context.Context, cfg *rest.Config, ns, podSelector string, remotePort int) (string, func(), error) {
+func Forward(ctx context.Context, cfg *rest.Config, ns, podSelector string, remotePort int) (string, func(), error) {
 	cs, err := kubernetes.NewForConfig(cfg)
 	if err != nil {
 		return "", nil, err
