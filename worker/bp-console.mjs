@@ -42,7 +42,10 @@ function cleanUrl(u) {
 // cleanText drops the query and fragment of every URL in a message: stack
 // traces and messages quote page URLs, which can carry tokens from emails.
 function cleanText(s) {
-  return String(s || '').replace(/https?:\/\/[^\s"'`<>()\[\]{}]+/g, (u) => cleanUrl(u) || '[url]');
+  // Match to the next space, quote or angle bracket (never stop at characters a
+  // URL may hold), then cut at the first ? or #. No URL parsing: what is cut
+  // must not depend on how a parser reads a malformed URL.
+  return String(s || '').replace(/\b(?:https?|wss?):\/\/[^\s"<>]+/gi, (u) => u.split(/[?#]/)[0]);
 }
 
 function argText(a) {
