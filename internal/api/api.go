@@ -151,7 +151,7 @@ func fail(w http.ResponseWriter, err error) {
 	case errors.Is(err, runs.ErrAllowList):
 		log.Printf("api: %v", err)
 		http.Error(w, err.Error(), http.StatusBadGateway)
-	case errors.Is(err, runs.ErrNoFence):
+	case errors.Is(err, runs.ErrNoFence), errors.Is(err, runs.ErrNoAgentKey):
 		http.Error(w, err.Error(), http.StatusPreconditionFailed)
 	case errors.Is(err, artifacts.ErrBadName):
 		http.Error(w, "bad name", http.StatusBadRequest)
@@ -252,6 +252,8 @@ func (s *server) startRun(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case errors.Is(err, runs.ErrInvalid):
 			http.Error(w, err.Error(), http.StatusBadRequest)
+		case errors.Is(err, runs.ErrNoAgentKey):
+			http.Error(w, err.Error(), http.StatusPreconditionFailed)
 		case run.ID != "" && !errors.Is(err, runs.ErrBusy):
 			log.Printf("api: start run %s: %v", run.ID, err)
 			http.Error(w, "failed to launch run", http.StatusBadGateway)

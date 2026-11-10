@@ -774,3 +774,16 @@ func TestContinueKeepsVerify(t *testing.T) {
 		t.Fatalf("context = %+v", c)
 	}
 }
+
+func TestDrainKeepsItemWithoutAgentKey(t *testing.T) {
+	f := newFix(t, schedYAML)
+	f.starter.SetErr(fmt.Errorf("%w: set the Anthropic key in Project → Agent key", runs.ErrNoAgentKey))
+	if err := f.st.Enqueue(store.Queued{ID: "q0", Persona: "Ada", Role: "patient", Story: "lone",
+		Journey: "j1", Via: "continue", Created: now}); err != nil {
+		t.Fatal(err)
+	}
+	f.tick()
+	if q, _ := f.st.Queue(); len(q) != 1 || q[0].ID != "q0" {
+		t.Fatalf("queued run dropped while the key is missing: %+v", q)
+	}
+}

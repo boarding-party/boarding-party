@@ -413,7 +413,7 @@ func (s *Scheduler) drain(ctx context.Context) error {
 			return nil // the item stays until the gate opens
 		case errors.Is(err, runs.ErrBusy):
 			return nil // the item stays for a later tick
-		case errors.Is(err, runs.ErrNoFence):
+		case errors.Is(err, runs.ErrNoFence), errors.Is(err, runs.ErrNoAgentKey):
 			log.Printf("scheduler: queued %s/%s cannot start yet: %v", q.Persona, q.Story, err)
 			return nil // the item stays for a later tick
 		case errors.Is(err, runs.ErrInvalid):

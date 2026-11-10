@@ -556,7 +556,7 @@ func TestStartNeedsAgentKey(t *testing.T) {
 	svc, _ := newSvc(t)
 	svc.AgentKey = keyStatus{set: false}
 	_, err := svc.Start(context.Background(), "ann", "checkout")
-	if !errors.Is(err, ErrInvalid) || !strings.Contains(err.Error(), "set the Anthropic key in Project → Agent key") {
+	if !errors.Is(err, ErrNoAgentKey) || errors.Is(err, ErrInvalid) || !strings.Contains(err.Error(), "set the Anthropic key in Project → Agent key") {
 		t.Fatalf("no key: %v", err)
 	}
 	svc.AgentKey = keyStatus{set: true}

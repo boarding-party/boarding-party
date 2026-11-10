@@ -54,6 +54,9 @@ var ErrBusy = errors.New("another run is active; Plan 1 runs one at a time")
 // agent can reach.
 var ErrNoFence = errors.New("runs are not fenced")
 
+// ErrNoAgentKey means agents have no Anthropic key yet; queued runs wait.
+var ErrNoAgentKey = errors.New("no agent key")
+
 // ErrBadState means Finish was given a state that is not final.
 var ErrBadState = errors.New("finish state must be done, stuck or failed")
 
@@ -255,7 +258,7 @@ func (s *Service) start(ctx context.Context, persona, story string, q *store.Que
 			return store.Run{}, fmt.Errorf("check the agent key: %w", err)
 		}
 		if !st.Set {
-			return store.Run{}, fmt.Errorf("%w: set the Anthropic key in Project → Agent key", ErrInvalid)
+			return store.Run{}, fmt.Errorf("%w: set the Anthropic key in Project → Agent key", ErrNoAgentKey)
 		}
 	}
 	if s.Fence != nil {
