@@ -160,3 +160,12 @@ Pages: sign in; check your email; projects (list, "Open", owners also "Link a pr
 - [ ] **Step 3:** Postgres: the existing in-cluster Postgres (decided by the user). Create a database `cloud` and a role `cloud` that owns only it; the URL goes into the External Secret.
 - [ ] **Step 4:** Verify: sign in, link `boardingparty-test`, open the board, start nothing, check `GET /api/audit` shows your email for a project save.
 - [ ] **Step 5: Commit** in flux-config `cloud: deploy`.
+
+## Rulings made during the build
+
+- Boards live on a different registrable domain from the cloud (config refuses the same one). A board is same-site with anything on the cloud's domain and could set cookies for it otherwise. Two domains to buy, such as `boardingparty.io` for the cloud and `bpboards.io` for `*.p.` project hosts. Cost if wrong: one extra domain.
+- The project-host cookie is `__Host-bp_proj; SameSite=None; Partitioned` (CHIPS): the board runs in a cross-site iframe, where Safari and Firefox block ordinary third-party cookies. The cloud puts the enter link straight into the iframe, because Safari drops partitioned cookies after cross-site redirect chains. Safari supports CHIPS from 26.2. Cost if wrong: boards ask people to reload in browsers without CHIPS.
+- Sign-in links open a "Sign in as …?" page and sign in only on its button, which stops a link sent by someone else from signing a browser in, and stops mail scanners spending links.
+- Nobody joins an account without following its invite link; an invite works only while its inviter is still an owner.
+- API servers must be public: internal names and addresses are refused, and every config is pinned to the checked IP with TLS on the original name, so port-forwards are pinned too.
+- The proxy adds its own CSP next to the director's (frame-ancestors = cloud; sandbox on artifacts and worker files) and refuses unclean paths.
