@@ -45,7 +45,7 @@ jobs:
     needs: [test, worker-smoke]
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
-    # A build normally takes about 3 minutes; the director push has hung for 25+.
+    # A build takes about 3 minutes; the director image cross-compiles, never under QEMU.
     timeout-minutes: 12
     permissions:
       contents: read
