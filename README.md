@@ -205,14 +205,20 @@ room for a pool to scale up from zero.
   that pool, and nothing else lands on it. A pool with nodes of at least
   2 CPU and 8GB fits a run; it can scale to zero between runs, and spot
   nodes work if a lost run now and then is fine.
+- A sandbox for run pods, ideally. Set `runtimeClass: gvisor` in the project
+  and each agent runs under gVisor, so its system calls never reach the
+  node's kernel. On GKE, create the pool with `--sandbox type=gvisor`. GKE
+  then taints it and installs a `gvisor` RuntimeClass that sends runs to
+  it on its own, so leave `nodePool` empty.
 - tiny's egress add-on (`egressProxy: "true"` in the `tiny-settings`
   ConfigMap). The director refuses to start runs without it.
 - Kubernetes with a CNI that enforces NetworkPolicy. Without that, the
   allow-list is only advisory.
-- tiny v0.12.1 or later. Earlier versions lack `spec.mcpServers`,
-  placement (`nodeSelector`, `tolerations`) and the `pkg/session` package
-  the director uses. A run with `nodePool` set fails with a hint if the
-  cluster's Session CRD is too old to keep it.
+- tiny v0.12.1 or later, and v0.13.0 for `runtimeClass`. Earlier versions
+  lack `spec.mcpServers`, placement (`nodeSelector`, `tolerations`) and the
+  `pkg/session` package the director uses. A run with `nodePool` or
+  `runtimeClass` set fails with a hint if the cluster's Session CRD is too
+  old to keep it; `tiny init` updates it.
 - A metered Anthropic API key. Runs are automated, so a Claude Pro or Max
   subscription isn't the right fit under the provider's terms.
 - Images: `ghcr.io/boarding-party/director` and `ghcr.io/boarding-party/worker`,

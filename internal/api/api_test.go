@@ -295,7 +295,7 @@ func TestStartRunUnknownPersonaIs400(t *testing.T) {
 	}
 }
 
-const fullProject = `{"name":"shop","sites":["https://a.test","https://b.test"],"extraHosts":["cdn.test"],"model":"m-1","nodePool":"pool=runs","resources":{"cpu":"500m","memory":"2Gi"},
+const fullProject = `{"name":"shop","sites":["https://a.test","https://b.test"],"extraHosts":["cdn.test"],"model":"m-1","nodePool":"pool=runs","runtimeClass":"gvisor","resources":{"cpu":"500m","memory":"2Gi"},
 "roles":[{"name":"buyer","description":"buys","canWatchRecordings":true,
 "personas":[{"name":"ann","traits":["impatient","phone"],"profile":{"device":"iphone-15","techLevel":"new","assistive":"zoom"},"identity":{"email":"a@x.test","password":"pw"}}],
 "stories":[{"name":"checkout","goal":"buy a thing"}]}]}`

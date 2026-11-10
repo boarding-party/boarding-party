@@ -100,6 +100,7 @@ function fromProject(p) {
     extraHosts: (p.extraHosts || []).map(row),
     model: p.model || '',
     nodePool: p.nodePool || '',
+    runtimeClass: p.runtimeClass || '',
     timezone: p.timezone || '',
     dailyBudget: p.dailyBudget != null ? String(p.dailyBudget) : '',
     // Not edited here, but carried so a save never drops it.
@@ -166,6 +167,7 @@ function toJSON(d) {
     extraHosts: vals(d.extraHosts),
     model: d.model.trim(),
     nodePool: d.nodePool.trim(),
+    ...(d.runtimeClass.trim() ? { runtimeClass: d.runtimeClass.trim() } : {}),
     ...(d.timezone.trim() ? { timezone: d.timezone.trim() } : {}),
     ...(d.dailyBudget.trim() !== '' && isFinite(Number(d.dailyBudget)) ? { dailyBudget: Number(d.dailyBudget) } : {}),
     ...(d.resources ? { resources: d.resources } : {}),
@@ -415,6 +417,12 @@ export function ProjectPage({ section = 'general', roleN = '', onSaved, onDirty 
             <span class="hint">Node label for the pool runs use, as key=value. The pool needs the same key=value as a NoSchedule taint. Leave empty to run on any node.</span>
           </div>
           <div class="field">
+            <label for="pj-runtime">Sandbox</label>
+            <input id="pj-runtime" value=${draft.runtimeClass} placeholder="gvisor"
+              onInput=${(e) => { const v = e.currentTarget.value; edit((d) => { d.runtimeClass = v; }); }} />
+            <span class="hint">RuntimeClass runs use, such as gvisor, so an agent never reaches the node's kernel. On GKE, gvisor also sends runs to the sandbox node pool, so leave Node pool empty. Leave empty for the cluster's default runtime.</span>
+          </div>
+          <div class="field">
             <label for="pj-budget">Daily budget</label>
             <input id="pj-budget" type="number" min="0" step="0.5" value=${draft.dailyBudget} placeholder="5"
               onInput=${(e) => { const v = e.currentTarget.value; edit((d) => { d.dailyBudget = v; }); }} />
@@ -447,7 +455,7 @@ export function ProjectPage({ section = 'general', roleN = '', onSaved, onDirty 
 
       <div class="projgrid">
         <nav class="subnav" aria-label="Project sections">
-          ${link('#/project/general', 'General', section === 'general', changed('name', 'model', 'nodePool', 'timezone', 'dailyBudget'))}
+          ${link('#/project/general', 'General', section === 'general', changed('name', 'model', 'nodePool', 'runtimeClass', 'timezone', 'dailyBudget'))}
           ${link('#/project/sites', 'Sites and hosts', section === 'sites', changed('sites', 'extraHosts'))}
           ${link('#/project/agent', 'Agent key', section === 'agent', false)}
           ${link('#/project/inbox', 'Inbox', section === 'inbox', changed('inbox'))}

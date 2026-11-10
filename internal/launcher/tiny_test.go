@@ -13,6 +13,7 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	nodev1 "k8s.io/api/node/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -28,7 +29,7 @@ import (
 
 func testScheme() *runtime.Scheme {
 	sc := runtime.NewScheme()
-	for _, add := range []func(*runtime.Scheme) error{corev1.AddToScheme, appsv1.AddToScheme, agentsv1.AddToScheme} {
+	for _, add := range []func(*runtime.Scheme) error{corev1.AddToScheme, appsv1.AddToScheme, nodev1.AddToScheme, agentsv1.AddToScheme} {
 		if err := add(sc); err != nil {
 			panic(err)
 		}
@@ -415,6 +416,56 @@ func TestStartRefusesWhenClusterDropsPlacement(t *testing.T) {
 		},
 	})
 	_, err := tn.Start(context.Background(), store.Run{ID: "eeeeeeee11", Token: "t"}, project.Project{NodePool: "pool=runs"})
+	if err == nil || !strings.Contains(err.Error(), "tiny init") {
+		t.Fatalf("err = %v, want a tiny init hint", err)
+	}
+	l := &agentsv1.SessionList{}
+	if err := tn.Client.List(context.Background(), l); err != nil {
+		t.Fatal(err)
+	}
+	if len(l.Items) != 0 {
+		t.Errorf("session left behind: %d", len(l.Items))
+	}
+}
+
+// withGVisor gives the fake cluster the RuntimeClass GKE Sandbox installs;
+// tiny refuses a session naming one the cluster lacks.
+func withGVisor(t *testing.T, tn *Tiny) *Tiny {
+	t.Helper()
+	if err := tn.Client.Create(context.Background(), &nodev1.RuntimeClass{ObjectMeta: metav1.ObjectMeta{Name: "gvisor"}, Handler: "gvisor"}); err != nil {
+		t.Fatal(err)
+	}
+	return tn
+}
+
+func TestStartRunsUnderRuntimeClass(t *testing.T) {
+	tn := withGVisor(t, newTiny())
+	name, err := tn.Start(context.Background(), store.Run{ID: "abababab11", Token: "t"}, project.Project{RuntimeClass: "gvisor"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := getSession(t, tn, name).Spec.RuntimeClassName; got != "gvisor" {
+		t.Errorf("runtimeClassName = %q", got)
+	}
+	name, _ = tn.Start(context.Background(), store.Run{ID: "cdcdcdcd11", Token: "t"}, project.Project{})
+	if got := getSession(t, tn, name).Spec.RuntimeClassName; got != "" {
+		t.Errorf("run without runtimeClass got %q", got)
+	}
+}
+
+func TestStartRefusesWhenClusterDropsRuntimeClass(t *testing.T) {
+	tn := withGVisor(t, newTiny())
+	base := tn.Client
+	// A Session CRD from before tiny v0.13 prunes runtimeClassName.
+	tn.Client = interceptor.NewClient(base.(client.WithWatch), interceptor.Funcs{
+		Create: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.CreateOption) error {
+			if s, ok := obj.(*agentsv1.Session); ok {
+				s.Spec.RuntimeClassName = ""
+			}
+			return c.Create(ctx, obj, opts...)
+		},
+	})
+	_, err := tn.Start(context.Background(), store.Run{ID: "efefefef11", Token: "t"}, project.Project{RuntimeClass: "gvisor"})
 	if err == nil || !strings.Contains(err.Error(), "tiny init") {
 		t.Fatalf("err = %v, want a tiny init hint", err)
 	}

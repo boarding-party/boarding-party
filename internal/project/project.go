@@ -36,6 +36,12 @@ type Project struct {
 	// NoSchedule taint, which runs tolerate. Optional; empty schedules runs
 	// anywhere.
 	NodePool string `json:"nodePool,omitempty"`
+	// RuntimeClass runs each run pod under a sandboxed container runtime the
+	// cluster provides, named by its RuntimeClass, such as gvisor. The
+	// agent's system calls then reach that runtime instead of the node's
+	// kernel. On GKE the gvisor RuntimeClass also places runs on the
+	// sandbox node pool. Optional; empty is the cluster's default runtime.
+	RuntimeClass string `json:"runtimeClass,omitempty"`
 	// Inbox configures inbound persona email. Optional; without it every
 	// received message is filtered.
 	Inbox *Inbox `json:"inbox,omitempty"`
@@ -298,6 +304,9 @@ func (p Project) validate() error {
 		if !ok || len(validation.IsQualifiedName(k)) > 0 || v == "" || len(validation.IsValidLabelValue(v)) > 0 {
 			return fmt.Errorf("nodePool %q must be a node label as key=value, such as boardingparty.io/run=true", p.NodePool)
 		}
+	}
+	if p.RuntimeClass != "" && len(validation.IsDNS1123Subdomain(p.RuntimeClass)) > 0 {
+		return fmt.Errorf("runtimeClass %q must be a RuntimeClass name, such as gvisor", p.RuntimeClass)
 	}
 	seen := map[string]bool{}
 	personas := map[string]bool{} // runs and persona state are keyed by persona name

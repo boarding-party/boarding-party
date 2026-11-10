@@ -133,6 +133,21 @@ func TestNodePool(t *testing.T) {
 	}
 }
 
+func TestRuntimeClass(t *testing.T) {
+	p, err := LoadJSON([]byte(`{"name":"p","sites":["https://x.test"],"runtimeClass":"gvisor"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.RuntimeClass != "gvisor" {
+		t.Errorf("RuntimeClass = %q", p.RuntimeClass)
+	}
+	for _, bad := range []string{"gVisor", "run sc", "a_b", "-gvisor"} {
+		if _, err := LoadJSON([]byte(`{"name":"p","sites":["https://x.test"],"runtimeClass":"` + bad + `"}`)); err == nil {
+			t.Errorf("accepted runtimeClass %q", bad)
+		}
+	}
+}
+
 func TestInboxAllowFrom(t *testing.T) {
 	base := "name: p\nsites: [\"https://x.test\"]\n"
 	p, err := Load([]byte(base + "inbox:\n  allowFrom: [Example.com, A@B.test]\n"))

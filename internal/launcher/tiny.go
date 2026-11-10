@@ -108,6 +108,7 @@ func (t *Tiny) Start(ctx context.Context, r store.Run, p project.Project) (strin
 		s.Spec.NodeSelector = map[string]string{k: v}
 		s.Spec.Tolerations = []corev1.Toleration{{Key: k, Operator: corev1.TolerationOpEqual, Value: v, Effect: corev1.TaintEffectNoSchedule}}
 	}
+	s.Spec.RuntimeClassName = p.RuntimeClass
 	if r.Story == project.LeadStory {
 		// A lead run has no browser; bp-browser only reports usage.
 		s.Spec.Task = LeadPrompt(r)
@@ -128,6 +129,15 @@ func (t *Tiny) Start(ctx context.Context, r store.Run, p project.Project) (strin
 			return "", fmt.Errorf("stop session %s: %w", name, err)
 		}
 		return "", fmt.Errorf("tiny on this cluster is older than v0.12 and ignores nodePool; update it with tiny init, then start the run again")
+	}
+	// Same for the sandbox before tiny v0.13: a dropped runtimeClassName
+	// would run the agent on the node's kernel, the one thing it was set to
+	// prevent.
+	if p.RuntimeClass != "" && s.Spec.RuntimeClassName == "" {
+		if err := t.Stop(ctx, name); err != nil {
+			return "", fmt.Errorf("stop session %s: %w", name, err)
+		}
+		return "", fmt.Errorf("tiny on this cluster is older than v0.13 and ignores runtimeClass; update it with tiny init, then start the run again")
 	}
 	return name, nil
 }
