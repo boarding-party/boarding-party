@@ -209,9 +209,10 @@ project gets a namespace with:
 - run pods under gVisor (a RuntimeClass `gvisor`): each run is an agent
   acting on a customer's instructions, and namespaces alone don't stop a
   container escape onto a node other customers share. Decided by the user.
-  This limits server types to ones where gVisor runs, and the director
-  gains a setting for the run pods' RuntimeClass (default none, so customer
-  clusters are unchanged).
+  This limits server types to ones where gVisor runs. tiny is gaining
+  runtime options for run pods (gVisor among them); the director passes the
+  project's choice through to tiny (default none, so customer clusters are
+  unchanged).
 
 **Data on the shared cluster.** Servers use local disks, so a lost node
 loses a project's database and videos. Backups are a paid add-on, next to
