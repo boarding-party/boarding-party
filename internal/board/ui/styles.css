@@ -294,7 +294,7 @@ fieldset.handoffs p { margin: 0; }
 .issue .sum { font-weight: 600; overflow-wrap: anywhere; }
 .issue .when { white-space: nowrap; }
 .issue .meta { grid-column: 2 / 4; overflow-wrap: anywhere; }
-.mark { display: inline-block; font-size: 12px; font-weight: 600; color: var(--bad); margin-right: 6px; }
+.reopened { display: inline-block; font-size: 12px; font-weight: 600; color: var(--bad); margin-right: 6px; }
 .issuepage { max-width: 880px; }
 .verdict { display: block; font-size: 14px; border-left: 3px solid var(--line); background: var(--surface); padding: 10px 12px; border-radius: 0 6px 6px 0; overflow-wrap: anywhere; white-space: pre-wrap; }
 .verdict b { display: block; font-weight: 600; margin-bottom: 2px; }

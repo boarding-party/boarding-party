@@ -91,7 +91,7 @@ function IssueGroup({ title, list }) {
             <span class="sum">${i.summary || 'No summary'}</span>
             <span class="when small muted">${i.lastSeen ? `Seen ${fmtWhen(i.lastSeen)}` : ''}</span>
             <span class="meta small muted">
-              ${parseTime(i.reopened) ? html`<span class="mark">Reopened</span>` : null}
+              ${parseTime(i.reopened) ? html`<span class="reopened">Reopened</span>` : null}
               ${plural(i.reports, 'report', 'reports')}${i.personas && i.personas.length ? `, by ${i.personas.join(', ')}` : ''}
             </span>
           </a></li>`)}
@@ -163,7 +163,7 @@ export function IssuePage({ id }) {
       <p class="crumb"><a href="#/bugs">Bugs</a> / ${issue.id}</p>
       <h1>${issue.summary || 'No summary'}</h1>
       <p class="lede"><${StatusTag} status=${st} />
-        ${parseTime(issue.reopened) ? html` <span class="mark">Reopened ${fmtWhen(issue.reopened)}</span>` : null}
+        ${parseTime(issue.reopened) ? html` <span class="reopened">Reopened ${fmtWhen(issue.reopened)}</span>` : null}
         ${' '}${plural(issue.reports, 'report', 'reports')}${issue.lastSeen ? `, last seen ${fmtWhen(issue.lastSeen)}` : ''}.</p>
       ${err ? html`<div class="note bad banner">Lost contact with the director: ${err}. Retrying.</div>` : null}
       <div class="stack issuepage">
