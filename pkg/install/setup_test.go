@@ -683,35 +683,16 @@ func TestInstallStampsCLIBuildTime(t *testing.T) {
 	}
 }
 
-func TestManifestReadsFrameFromProject(t *testing.T) {
+// The cloud owns bp-project; setup must never write it, or a later CLI setup
+// would undo the cloud's settings. The director reads it at request time.
+func TestManifestNeverWritesProjectConfigMap(t *testing.T) {
 	objs, err := renderManifest(deploy.Director, testNS, "1.0.0")
 	if err != nil {
 		t.Fatal(err)
 	}
-	found := false
 	for _, o := range objs {
-		if o.GetKind() == "ConfigMap" && o.GetName() == "bp-project" {
+		if o.GetKind() == "ConfigMap" && o.GetName() == ProjectConfigMap {
 			t.Fatal("setup must never write bp-project")
 		}
-		if o.GetKind() != "Deployment" {
-			continue
-		}
-		cs, _, _ := unstructured.NestedSlice(o.Object, "spec", "template", "spec", "containers")
-		for _, c := range cs {
-			env, _, _ := unstructured.NestedSlice(c.(map[string]any), "env")
-			for _, e := range env {
-				m := e.(map[string]any)
-				if m["name"] != "BP_FRAME_ANCESTORS" {
-					continue
-				}
-				ref, _, _ := unstructured.NestedMap(m, "valueFrom", "configMapKeyRef")
-				if ref["name"] == "bp-project" && ref["key"] == "frameAncestors" && ref["optional"] == true {
-					found = true
-				}
-			}
-		}
-	}
-	if !found {
-		t.Fatal("director env BP_FRAME_ANCESTORS from optional bp-project/frameAncestors missing")
 	}
 }

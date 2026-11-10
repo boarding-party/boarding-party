@@ -56,7 +56,9 @@ type config struct {
 	TinyImageTag     string
 	NoEgressFence    bool
 	AdminToken       string // from $BP_ADMIN_TOKEN, never a flag (flags show in ps)
-	FrameAncestors   string // from $BP_FRAME_ANCESTORS (ConfigMap bp-project, key frameAncestors)
+	// Frame says who may frame the board (ConfigMap bp-project, key
+	// frameAncestors); nil means nobody.
+	Frame func(ctx context.Context) string
 }
 
 // adminTokenEnv carries the admin API bearer secret (Secret bp-director-admin).
@@ -114,12 +116,15 @@ func newServers(cfg config, svc *runs.Service, st *store.Store, hub *live.Hub, m
 		panic(err) // the UI is embedded; this can't fail at run time
 	}
 	routes := api.AdminRoutes(svc, cfg.MaxArtifactBytes, hub, mail)
-	frame := board.FrameAncestors(cfg.FrameAncestors)
 	static := board.Static(ui)
 	top := http.NewServeMux()
 	top.Handle("/api", routes)
 	top.Handle("/api/", routes)
 	top.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		frame := "'none'"
+		if cfg.Frame != nil {
+			frame = cfg.Frame(r.Context())
+		}
 		board.UIHeaders(w.Header(), frame)
 		static.ServeHTTP(w, r)
 	}))
@@ -168,7 +173,6 @@ func run() error {
 	flag.Parse()
 
 	cfg.AdminToken = os.Getenv(adminTokenEnv)
-	cfg.FrameAncestors = os.Getenv("BP_FRAME_ANCESTORS")
 	if err := checkConfig(cfg); err != nil {
 		return err
 	}
@@ -201,6 +205,9 @@ func run() error {
 		return fmt.Errorf("scheme: %w", err)
 	}
 	kc, err := client.New(restCfg, client.Options{Scheme: scheme})
+	if err == nil {
+		cfg.Frame = (&frameSource{c: kc, ns: cfg.Namespace, ttl: frameTTL, now: time.Now}).Get
+	}
 	if err != nil {
 		return fmt.Errorf("kubernetes client: %w", err)
 	}

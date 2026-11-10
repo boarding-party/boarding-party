@@ -165,13 +165,6 @@ spec:
                 secretKeyRef:
                   name: bp-director-admin
                   key: token
-            # Who may frame the board (the cloud's origin); setup never writes bp-project.
-            - name: BP_FRAME_ANCESTORS
-              valueFrom:
-                configMapKeyRef:
-                  name: bp-project
-                  key: frameAncestors
-                  optional: true
           resources:
             requests:
               cpu: 100m

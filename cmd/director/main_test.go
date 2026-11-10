@@ -178,7 +178,8 @@ func TestAdminServesBoard(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer st.Close()
-	cfg := config{DirectorURL: "http://bp-director:8080", MaxArtifactBytes: 1 << 20, AdminToken: "admin-secret", FrameAncestors: "https://cloud.test"}
+	cfg := config{DirectorURL: "http://bp-director:8080", MaxArtifactBytes: 1 << 20, AdminToken: "admin-secret",
+		Frame: func(context.Context) string { return "https://cloud.test" }}
 	svc := &runs.Service{Store: st, Artifacts: artifacts.NewFS(t.TempDir(), cfg.MaxArtifactBytes), Launcher: fakeLauncher{}}
 	admin, _ := newServers(cfg, svc, st, live.NewHub(), nil)
 	get := func(path string, bearer bool) *httptest.ResponseRecorder {
