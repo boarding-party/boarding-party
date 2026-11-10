@@ -159,3 +159,15 @@ CREATE TABLE IF NOT EXISTS lead_log (
   created INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS lead_log_lead ON lead_log(lead, created);
+-- What a run's browser logged: console errors and warnings, uncaught
+-- exceptions and failed requests, as the worker saw them over CDP.
+CREATE TABLE IF NOT EXISTS console (
+  run_id TEXT NOT NULL,
+  seq    INTEGER PRIMARY KEY AUTOINCREMENT,
+  at     INTEGER NOT NULL,
+  level  TEXT NOT NULL,
+  kind   TEXT NOT NULL,
+  text   TEXT NOT NULL,
+  url    TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS console_run ON console(run_id, seq);

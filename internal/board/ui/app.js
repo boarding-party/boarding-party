@@ -9,6 +9,7 @@ import { html, api, directorDown, confirmDialog, DialogHost, parseTime, fmtWhen,
 import { BugsPage, IssuePage, issueHref, openCount } from './bugs.js';
 import { ProjectPage } from './project.js';
 import { LeadPage, leadHref } from './leads.js';
+import { ConsoleCard, ConsoleBefore } from './console.js';
 
 const ACTIVE = new Set(['pending', 'running']);
 const STATE_TAG = new Map([['pending', 'idle'], ['running', 'run'], ['done', 'ok'], ['stuck', 'wait'], ['failed', 'bad'], ['waiting', 'hold'], ['continued', 'idle']]);
@@ -761,9 +762,11 @@ function RunPage({ id, onChange }) {
           </div>
           <div class="card">
             <div class="row between"><h2>Bugs</h2><span class="small muted">${bugs.length && webm ? 'Click a bug with a time to jump to it.' : ''}</span></div>
-            ${bugs.length ? html`<ul class="bugs">${bugs.map((b) => html`<li key=${b.id}><${Bug} bug=${b} runId=${run.id} artifacts=${artifacts} duration=${webm ? duration : 0} onSeek=${seek} /></li>`)}</ul>`
+            ${bugs.length ? html`<ul class="bugs">${bugs.map((b) => html`<li key=${b.id}><${Bug} bug=${b} runId=${run.id} artifacts=${artifacts} duration=${webm ? duration : 0} onSeek=${seek} />
+              <${ConsoleBefore} bug=${b} events=${data.console} started=${run.started} /></li>`)}</ul>`
               : html`<p class="muted small" style="margin:0">${ACTIVE.has(run.state) ? 'No bugs reported so far.' : 'No bugs reported.'}</p>`}
           </div>
+          ${run.story !== '(lead)' ? html`<${ConsoleCard} events=${data.console || []} started=${run.started} active=${ACTIVE.has(run.state)} />` : null}
         </div>
         <div class="stack">
           <div class="card">

@@ -99,7 +99,7 @@ func TestStartCreatesSessionWithBothMCPServers(t *testing.T) {
 	if pw.Name != "pw" || pw.Command != "bp-browser" {
 		t.Errorf("pw = %v", pw)
 	}
-	want := []string{"--live-url=http://bp-director.bp.svc:8080/live/tok123", "--files-url=http://bp-director.bp.svc:8080/files/tok123/", "--usage-url=http://bp-director.bp.svc:8080/usage/tok123", "--profile-url=http://bp-director.bp.svc:8080/profile/tok123", "--headless", "--isolated", "--no-sandbox", "--browser=chromium",
+	want := []string{"--live-url=http://bp-director.bp.svc:8080/live/tok123", "--files-url=http://bp-director.bp.svc:8080/files/tok123/", "--usage-url=http://bp-director.bp.svc:8080/usage/tok123", "--profile-url=http://bp-director.bp.svc:8080/profile/tok123", "--console-url=http://bp-director.bp.svc:8080/console/tok123", "--headless", "--isolated", "--no-sandbox", "--browser=chromium",
 		"--output-dir=/workspace/out", "--viewport-size=1280x800", "--caps=devtools,storage"}
 	if strings.Join(pw.Args, " ") != strings.Join(want, " ") {
 		t.Errorf("args = %v", pw.Args)
@@ -490,7 +490,7 @@ func TestStartLaunchesPersonaDevice(t *testing.T) {
 	if !strings.Contains(args, "--bp-device=iphone-15") || strings.Contains(args, "--viewport-size") {
 		t.Errorf("phone args = %s", args)
 	}
-	for _, f := range []string{"--live-url=http://bp-director.bp.svc:8080/live/tk", "--files-url=http://bp-director.bp.svc:8080/files/tk/", "--usage-url=http://bp-director.bp.svc:8080/usage/tk", "--profile-url=http://bp-director.bp.svc:8080/profile/tk", "--headless", "--isolated", "--no-sandbox", "--browser=chromium", "--output-dir=/workspace/out", "--caps=devtools,storage"} {
+	for _, f := range []string{"--live-url=http://bp-director.bp.svc:8080/live/tk", "--files-url=http://bp-director.bp.svc:8080/files/tk/", "--usage-url=http://bp-director.bp.svc:8080/usage/tk", "--profile-url=http://bp-director.bp.svc:8080/profile/tk", "--console-url=http://bp-director.bp.svc:8080/console/tk", "--headless", "--isolated", "--no-sandbox", "--browser=chromium", "--output-dir=/workspace/out", "--caps=devtools,storage"} {
 		if !strings.Contains(args, f) {
 			t.Errorf("missing %s in %s", f, args)
 		}

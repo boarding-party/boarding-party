@@ -7,6 +7,7 @@ usage=""
 profile=""
 device=""
 usageonly=""
+consoleurl=""
 n=$#
 while [ "$n" -gt 0 ]; do
   a="$1"; shift; n=$((n - 1))
@@ -14,6 +15,7 @@ while [ "$n" -gt 0 ]; do
     --live-url=*) live="${a#--live-url=}" ;;
     --files-url=*) files="${a#--files-url=}" ;;
     --usage-url=*) usage="${a#--usage-url=}" ;;
+    --console-url=*) consoleurl="${a#--console-url=}" ;;
     --profile-url=*) profile="${a#--profile-url=}" ;;
     --bp-device=*) device="${a#--bp-device=}" ;;
     --usage-only) usageonly=1 ;;
@@ -27,6 +29,17 @@ if [ -n "$live" ]; then
   if [ -z "$pid" ] || ! kill -0 "$pid" 2>/dev/null; then
     node /opt/bp/bp-screen.mjs "--live-url=$live" >>/tmp/bp-screen.log 2>&1 &
     echo $! >/tmp/bp-screen.pid
+  fi
+fi
+
+# What the page logs (console errors, exceptions, failed requests) goes to the
+# director as it happens; one recorder per pod.
+if [ -n "$consoleurl" ]; then
+  pid=""
+  [ -f /tmp/bp-console.pid ] && pid=$(cat /tmp/bp-console.pid 2>/dev/null)
+  if [ -z "$pid" ] || ! kill -0 "$pid" 2>/dev/null; then
+    node /opt/bp/bp-console.mjs "--console-url=$consoleurl" >>/tmp/bp-console.log 2>&1 &
+    echo $! >/tmp/bp-console.pid
   fi
 fi
 

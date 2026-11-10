@@ -288,6 +288,7 @@ func (t *Tiny) browserArgs(r store.Run, p project.Project) []string {
 		"--files-url=" + t.DirectorURL + "/files/" + r.Token + "/",
 		"--usage-url=" + t.DirectorURL + "/usage/" + r.Token,
 		"--profile-url=" + t.DirectorURL + "/profile/" + r.Token,
+		"--console-url=" + t.DirectorURL + "/console/" + r.Token,
 		"--headless", "--isolated", "--no-sandbox", "--browser=chromium", "--output-dir=/workspace/out"}
 	device := personaDevice(r, p)
 	if pd, viewport := project.DeviceLaunch(device); pd != "" {

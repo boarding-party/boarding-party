@@ -107,6 +107,7 @@ func Worker(svc *runs.Service, maxBytes int64, hub *live.Hub) http.Handler {
 	mux.HandleFunc("PUT /artifacts/{token}/{name}", s.putArtifact)
 	mux.HandleFunc("PUT /live/{token}", s.putLive)
 	mux.HandleFunc("PUT /usage/{token}", s.putUsage)
+	mux.HandleFunc("PUT /console/{token}", s.putConsole)
 	mux.HandleFunc("GET /files/{token}/{$}", s.workerFiles)
 	mux.HandleFunc("GET /files/{token}/{name}", s.workerFile)
 	mux.HandleFunc("GET /profile/{token}", s.getProfile)
@@ -321,6 +322,11 @@ func (s *server) getRun(w http.ResponseWriter, r *http.Request) {
 		out["blocked"] = blocked
 	}
 	cancel()
+	if con, err := s.svc.Store.Console(run.ID); err != nil {
+		log.Printf("api: run %s console: %v", run.ID, err)
+	} else if len(con) > 0 {
+		out["console"] = con
+	}
 	if u, err := s.svc.Usage(run.ID); err != nil {
 		log.Printf("api: run %s usage: %v", run.ID, err)
 	} else if u != nil {
@@ -527,6 +533,41 @@ func (s *server) putUsage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.svc.SaveUsage(r.PathValue("token"), u, time.Now()); err != nil {
+		fail(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// maxConsoleBatch caps the events in one console upload.
+const maxConsoleBatch = 200
+
+var (
+	consoleLevels = map[string]bool{"error": true, "warning": true, "info": true}
+	consoleKinds  = map[string]bool{"console": true, "exception": true, "log": true, "network": true}
+)
+
+// putConsole takes a batch of what the run's browser logged.
+func (s *server) putConsole(w http.ResponseWriter, r *http.Request) {
+	run, err := s.svc.Active(r.PathValue("token"))
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
+	dec.DisallowUnknownFields()
+	var evs []store.ConsoleEvent
+	if err := dec.Decode(&evs); err != nil || len(evs) > maxConsoleBatch {
+		http.Error(w, "bad console batch", http.StatusBadRequest)
+		return
+	}
+	for _, e := range evs {
+		if !consoleLevels[e.Level] || !consoleKinds[e.Kind] || e.At.IsZero() {
+			http.Error(w, "bad console event", http.StatusBadRequest)
+			return
+		}
+	}
+	if err := s.svc.Store.AddConsole(run.ID, evs); err != nil {
 		fail(w, err)
 		return
 	}
