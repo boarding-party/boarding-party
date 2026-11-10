@@ -187,8 +187,11 @@ func TestBoardEnterGivesANewLink(t *testing.T) {
 	defer cancel()
 	out := &syncBuf{}
 	done := make(chan error, 1)
+	// The director serves the board's page; the link must land on it.
+	dir := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { io.WriteString(w, "<!doctype html>") }))
+	defer dir.Close()
 	go func() {
-		done <- runBoard(ctx, &stubForwarder{base: "http://127.0.0.1:1"}, boardOpts{noOpen: true, in: pr}, out)
+		done <- runBoard(ctx, &stubForwarder{base: dir.URL}, boardOpts{noOpen: true, in: pr}, out)
 	}()
 	first := waitFor(t, out, 1)[0]
 	if !strings.Contains(out.String(), "press Enter for a new link") {

@@ -111,9 +111,9 @@ func (c *clock) add(d time.Duration) {
 	c.mu.Unlock()
 }
 
-func newHandlerWith(t *testing.T, p http.Handler, ui fs.FS, now func() time.Time) (*Handler, string) {
+func newHandlerWith(t *testing.T, p http.Handler, now func() time.Time) (*Handler, string) {
 	t.Helper()
-	h, err := NewHandler(Config{Port: testPort, Proxy: p, UI: ui, Now: now})
+	h, err := NewHandler(Config{Port: testPort, Proxy: p, Now: now})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -131,7 +131,7 @@ func newTestHandler(t *testing.T, fw Forwarder) (*Handler, string) {
 	if err := p.Start(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	return newHandlerWith(t, p, testUI, nil)
+	return newHandlerWith(t, p, nil)
 }
 
 func do(h http.Handler, r *http.Request) *httptest.ResponseRecorder {
@@ -177,6 +177,14 @@ func backendDir(t *testing.T) (*httptest.Server, *fakeDirector) {
 	}))
 	t.Cleanup(s.Close)
 	return s, d
+}
+
+// uiURL is a director that serves the board's index page at /.
+func uiURL(t *testing.T) string {
+	t.Helper()
+	s := httptest.NewServer(Static(testUI))
+	t.Cleanup(s.Close)
+	return s.URL
 }
 
 func backend(t *testing.T, hits *atomic.Int32) *httptest.Server {
@@ -243,7 +251,7 @@ func TestWrongCookieOrKeyIs401(t *testing.T) {
 }
 
 func TestKeySetsSessionCookieAndRedirectsWithoutKey(t *testing.T) {
-	h, key := newTestHandler(t, &fakeForwarder{bases: []string{deadURL(t)}})
+	h, key := newTestHandler(t, &fakeForwarder{bases: []string{uiURL(t)}})
 	w := do(h, httptest.NewRequest(http.MethodGet, "/?key="+key, nil))
 	if w.Code != http.StatusSeeOther {
 		t.Fatalf("code = %d", w.Code)
@@ -309,7 +317,7 @@ func TestKeyIsSingleUse(t *testing.T) {
 
 func TestKeyExpires(t *testing.T) {
 	c := &clock{t: time.Date(2026, 11, 1, 12, 0, 0, 0, time.UTC)}
-	h, key := newHandlerWith(t, http.NotFoundHandler(), testUI, c.now)
+	h, key := newHandlerWith(t, http.NotFoundHandler(), c.now)
 	c.add(DefaultLinkTTL - time.Second)
 	k2, _ := h.NewLink() // fresh 10 minutes from now
 	c.add(2 * time.Second)
@@ -325,7 +333,7 @@ func TestKeyExpires(t *testing.T) {
 }
 
 func TestWrongHostIs403(t *testing.T) {
-	h, key := newTestHandler(t, &fakeForwarder{bases: []string{deadURL(t)}})
+	h, key := newTestHandler(t, &fakeForwarder{bases: []string{uiURL(t)}})
 	for _, host := range []string{"evil.example:4321", "evil.example", "127.0.0.1:9999", "127.0.0.1", "localhost", "[::1]:4321", "0.0.0.0:4321"} {
 		r := authed(h, httptest.NewRequest(http.MethodGet, "/?key="+key, nil))
 		r.Host = host
@@ -423,23 +431,48 @@ func TestAPIKeepsDirectorCacheControl(t *testing.T) {
 	}
 }
 
-func TestStaticFilesAndSPAFallback(t *testing.T) {
-	h, _ := newTestHandler(t, &fakeForwarder{bases: []string{deadURL(t)}})
-	w := do(h, authed(h, httptest.NewRequest(http.MethodGet, "/app.js", nil)))
-	if w.Code != http.StatusOK || w.Body.String() != "console.log('app')" {
-		t.Errorf("app.js = %d %q", w.Code, w.Body.String())
-	}
-	if ct := w.Header().Get("Content-Type"); !strings.Contains(ct, "javascript") {
-		t.Errorf("app.js Content-Type = %q", ct)
-	}
-	for _, p := range []string{"/runs/abc", "/project", "/index.html", "/../../etc/passwd"} {
-		w := do(h, authed(h, httptest.NewRequest(http.MethodGet, p, nil)))
-		if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "index") {
-			t.Errorf("%s = %d %q", p, w.Code, w.Body.String())
+func TestEveryPathIsProxied(t *testing.T) {
+	var paths []string
+	var mu sync.Mutex
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		paths = append(paths, r.URL.Path)
+		mu.Unlock()
+		io.WriteString(w, "ok")
+	}))
+	t.Cleanup(srv.Close)
+	h, _ := newTestHandler(t, &fakeForwarder{bases: []string{srv.URL}})
+	for _, p := range []string{"/", "/app.js", "/api/runs"} {
+		if w := do(h, authed(h, httptest.NewRequest(http.MethodGet, p, nil))); w.Code != http.StatusOK {
+			t.Errorf("%s = %d", p, w.Code)
 		}
 	}
-	if w := do(h, authed(h, httptest.NewRequest(http.MethodPost, "/app.js", nil))); w.Code != http.StatusMethodNotAllowed {
-		t.Errorf("POST /app.js = %d", w.Code)
+	if strings.Join(paths, ",") != "/,/app.js,/api/runs" {
+		t.Fatalf("director saw %v", paths)
+	}
+}
+
+func TestProxyDropsActorHeader(t *testing.T) {
+	srv, dir := backendDir(t)
+	h, _ := newTestHandler(t, &fakeForwarder{bases: []string{srv.URL}})
+	r := authed(h, httptest.NewRequest(http.MethodGet, "/api/runs", nil))
+	r.Header.Set("X-BP-Actor", "mallory@x.io")
+	do(h, r)
+	if got, _ := dir.lastReq(); got.Get("X-BP-Actor") != "" {
+		t.Fatalf("X-BP-Actor forwarded: %q", got.Get("X-BP-Actor"))
+	}
+}
+
+func TestOldDirectorMessage(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { http.NotFound(w, r) }))
+	t.Cleanup(srv.Close)
+	h, _ := newTestHandler(t, &fakeForwarder{bases: []string{srv.URL}})
+	w := do(h, authed(h, httptest.NewRequest(http.MethodGet, "/", nil)))
+	if w.Code != http.StatusBadGateway || !strings.Contains(w.Body.String(), "This director is too old to serve the board: run boardingparty setup") {
+		t.Fatalf("GET / = %d %q", w.Code, w.Body.String())
+	}
+	if w := do(h, authed(h, httptest.NewRequest(http.MethodGet, "/api/nope", nil))); w.Code != http.StatusNotFound {
+		t.Fatalf("GET /api/nope = %d, want the director's 404", w.Code)
 	}
 }
 
@@ -448,13 +481,31 @@ func TestEmbeddedUIHasIndex(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	h, err := NewHandler(Config{Port: testPort, Proxy: http.NotFoundHandler(), UI: ui})
-	if err != nil {
-		t.Fatal(err)
+	w := httptest.NewRecorder()
+	Static(ui).ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/", nil))
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "app.js") {
+		t.Fatalf("GET / = %d %q", w.Code, w.Body.String())
 	}
-	w := do(h, authed(h, httptest.NewRequest(http.MethodGet, "/", nil)))
-	if w.Code != http.StatusOK || !strings.Contains(strings.ToLower(w.Body.String()), "<html") {
-		t.Errorf("embedded index = %d %q", w.Code, w.Body.String())
+}
+
+func TestStaticFilesAndSPAFallback(t *testing.T) {
+	h := Static(testUI)
+	get := func(m, p string) *httptest.ResponseRecorder {
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, httptest.NewRequest(m, p, nil))
+		return w
+	}
+	w := get(http.MethodGet, "/app.js")
+	if w.Code != http.StatusOK || w.Body.String() != "console.log('app')" || !strings.Contains(w.Header().Get("Content-Type"), "javascript") {
+		t.Errorf("app.js = %d %q %q", w.Code, w.Body.String(), w.Header().Get("Content-Type"))
+	}
+	for _, p := range []string{"/runs/abc", "/project", "/index.html", "/../../etc/passwd"} {
+		if w := get(http.MethodGet, p); w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "index") {
+			t.Errorf("%s = %d %q", p, w.Code, w.Body.String())
+		}
+	}
+	if w := get(http.MethodPost, "/app.js"); w.Code != http.StatusMethodNotAllowed {
+		t.Errorf("POST /app.js = %d", w.Code)
 	}
 }
 
@@ -617,7 +668,7 @@ func TestProxyNoReconnectAfterClose(t *testing.T) {
 		t.Fatal(err)
 	}
 	p.Close()
-	h, _ := newHandlerWith(t, p, testUI, nil)
+	h, _ := newHandlerWith(t, p, nil)
 	w := do(h, authed(h, httptest.NewRequest(http.MethodGet, "/api/runs", nil)))
 	if w.Code != http.StatusBadGateway {
 		t.Errorf("code = %d", w.Code)

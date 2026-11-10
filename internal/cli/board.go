@@ -95,16 +95,12 @@ func runBoard(ctx context.Context, fw board.Forwarder, o boardOpts, out io.Write
 	defer p.Close()
 	fmt.Fprintln(out, "✓ director ready")
 
-	ui, err := board.UI()
-	if err != nil {
-		return err
-	}
 	l, err := net.Listen("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(o.port)))
 	if err != nil {
 		return fmt.Errorf("listen on 127.0.0.1:%d: %w", o.port, err)
 	}
 	port := l.Addr().(*net.TCPAddr).Port
-	h, err := board.NewHandler(board.Config{Port: port, Proxy: p, UI: ui})
+	h, err := board.NewHandler(board.Config{Port: port, Proxy: p})
 	if err != nil {
 		l.Close()
 		return err

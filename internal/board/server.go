@@ -61,9 +61,8 @@ func SecurityHeaders(h http.Header) {
 
 // Config is what the handler needs.
 type Config struct {
-	Port    int // the port the server listens on, for the Host and Origin checks
-	Proxy   http.Handler
-	UI      fs.FS
+	Port    int              // the port the server listens on, for the Host and Origin checks
+	Proxy   http.Handler     // the director, for every path: it serves the UI and the API
 	LinkTTL time.Duration    // default DefaultLinkTTL
 	Now     func() time.Time // default time.Now
 }
@@ -151,16 +150,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "forbidden: cross-site request", http.StatusForbidden)
 		return
 	}
-	if r.URL.Path == "/api" || strings.HasPrefix(r.URL.Path, "/api/") {
-		// The proxy sets these on the director's response; clear ours so they
-		// aren't doubled.
-		for k := range w.Header() {
-			w.Header().Del(k)
-		}
-		h.cfg.Proxy.ServeHTTP(w, r)
-		return
+	// The director serves the UI and the API; the proxy sets the headers on
+	// its responses, so clear ours to avoid doubling them.
+	for k := range w.Header() {
+		w.Header().Del(k)
 	}
-	h.static(w, r)
+	h.cfg.Proxy.ServeHTTP(w, r)
 }
 
 func (h *Handler) hasSession(r *http.Request) bool {
@@ -213,10 +208,6 @@ func (h *Handler) crossSite(r *http.Request) bool {
 }
 
 // static serves a UI file, or index.html for any path that isn't one.
-func (h *Handler) static(w http.ResponseWriter, r *http.Request) {
-	serveStatic(h.cfg.UI, w, r)
-}
-
 // Static serves the board's files: GET and HEAD only, with index.html for
 // any path that isn't a file (the app routes with #/...).
 func Static(ui fs.FS) http.Handler {

@@ -11,6 +11,7 @@ import (
 	"net/http/httptrace"
 	"net/http/httputil"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -64,16 +65,22 @@ func NewProxy(fw Forwarder, adminToken string) *Proxy {
 			// Browser-supplied credentials and cross-origin markers never reach
 			// the director: the session cookie is this server's, and the
 			// director refuses anything that looks like a browser.
-			for _, k := range []string{"Cookie", "Authorization", "Origin", "Referer",
+			for _, k := range []string{"Cookie", "Authorization", "Origin", "Referer", "X-BP-Actor",
 				"Sec-Fetch-Site", "Sec-Fetch-Mode", "Sec-Fetch-Dest", "Sec-Fetch-User"} {
 				h.Del(k)
 			}
 			h.Set("Authorization", "Bearer "+p.token)
 		},
-		Transport:      &reconnectTransport{p: p, next: tr},
-		ModifyResponse: func(r *http.Response) error { apiHeaders(r.Header); return nil },
-		ErrorLog:       log.New(io.Discard, "", 0),
-		ErrorHandler:   p.errorHandler,
+		Transport: &reconnectTransport{p: p, next: tr},
+		ModifyResponse: func(r *http.Response) error {
+			apiHeaders(r.Header)
+			if r.StatusCode == http.StatusNotFound && r.Request != nil && r.Request.URL.Path == "/" {
+				oldDirector(r)
+			}
+			return nil
+		},
+		ErrorLog:     log.New(io.Discard, "", 0),
+		ErrorHandler: p.errorHandler,
 	}
 	return p
 }
@@ -286,4 +293,18 @@ func connLost(err error, freshConn bool) bool {
 func isReset(err error) bool {
 	var op *net.OpError
 	return errors.As(err, &op) && op.Op == "read"
+}
+
+// oldDirectorMessage is what the board shows when the director predates
+// serving the UI itself (it answers 404 for /).
+const oldDirectorMessage = "This director is too old to serve the board: run boardingparty setup to upgrade it.\n"
+
+func oldDirector(r *http.Response) {
+	r.Body.Close()
+	r.StatusCode = http.StatusBadGateway
+	r.Status = "502 Bad Gateway"
+	r.Body = io.NopCloser(strings.NewReader(oldDirectorMessage))
+	r.ContentLength = int64(len(oldDirectorMessage))
+	r.Header.Set("Content-Length", strconv.Itoa(len(oldDirectorMessage)))
+	r.Header.Set("Content-Type", "text/plain; charset=utf-8")
 }
