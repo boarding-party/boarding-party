@@ -1037,7 +1037,7 @@ function AgentKeyCard() {
   };
   const line = !st ? null
     : st.kind === 'api-key' ? { cls: 'ok', text: 'Set: API key' }
-    : st.kind === 'subscription' ? { cls: 'ok', text: 'Set: subscription token' }
+    : st.kind === 'subscription' ? { cls: 'ok', text: 'Set: subscription token. Saving an API key switches runs to it.' }
     : { cls: 'bad', text: 'Not set. Runs wait until a key is saved.' };
   return html`
     <div class="card">
@@ -1045,7 +1045,7 @@ function AgentKeyCard() {
       <p class="hint">The Anthropic API key the personas run with. It is stored in this project's namespace and never shown again after you save it.</p>
       ${line ? html`<p class="mbstatus"><span class=${'dot ' + line.cls}></span>${line.text}</p>` : null}
       <div class="field">
-        <label for="ak-key">${st && st.set ? 'Replace key' : 'API key'}</label>
+        <label for="ak-key">${st && st.kind === 'api-key' ? 'Replace key' : 'API key'}</label>
         <div class="secret">
           <input id="ak-key" type=${maskByCSS || show ? 'text' : 'password'} class=${show ? '' : 'masked'} value=${key}
             autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck=${false}

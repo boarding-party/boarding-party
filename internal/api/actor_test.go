@@ -42,7 +42,7 @@ func TestActorHeader(t *testing.T) {
 	if r := doAs(t, "", "PUT", srv.URL+"/api/project", tinyProject); r.StatusCode != 204 {
 		t.Fatalf("save = %d", r.StatusCode)
 	}
-	for _, bad := range []string{strings.Repeat("a", 255), "ann@x.io\x01"} {
+	for _, bad := range []string{strings.Repeat("a", 255), "ann@x.io\x01", "ann@x.io\xff\xfe"} {
 		// Straight to the handler: Go's client refuses to send a control character.
 		req := httptest.NewRequest("PUT", "/api/project", strings.NewReader(tinyProject))
 		req.Host = "127.0.0.1"

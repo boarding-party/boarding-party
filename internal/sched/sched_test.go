@@ -787,3 +787,21 @@ func TestDrainKeepsItemWithoutAgentKey(t *testing.T) {
 		t.Fatalf("queued run dropped while the key is missing: %+v", q)
 	}
 }
+
+func TestDrainLogsAMissingKeyOnce(t *testing.T) {
+	f := newFix(t, schedYAML)
+	f.starter.SetErr(fmt.Errorf("%w: set the Anthropic key in Project → Agent key", runs.ErrNoAgentKey))
+	if err := f.st.Enqueue(store.Queued{ID: "q0", Persona: "Ada", Role: "patient", Story: "lone",
+		Journey: "j1", Via: "continue", Created: now}); err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	log.SetOutput(&buf)
+	t.Cleanup(func() { log.SetOutput(os.Stderr) })
+	f.tick()
+	f.tick()
+	f.tick()
+	if n := strings.Count(buf.String(), "cannot start yet"); n != 1 {
+		t.Fatalf("logged %d times over three ticks, want once:\n%s", n, buf.String())
+	}
+}

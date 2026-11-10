@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/boarding-party/boardingparty/deploy"
+	"github.com/boarding-party/boardingparty/internal/agentkey"
 	appsv1 "k8s.io/api/apps/v1"
 	apiextclient "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -33,7 +34,7 @@ const (
 	fieldManager    = "boardingparty"
 	sessionCRD      = "sessions.agents.tinysystems.io"
 	sessionSA       = "tiny-session"
-	agentSecret     = "tiny-agent-env"
+	agentSecret     = agentkey.SecretName
 	tinySettings    = "tiny-settings"
 	egressAllowCM   = "tiny-egress-allow"
 	egressAllowKey  = "hosts"

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 	"unicode"
+	"unicode/utf8"
 )
 
 // maxActor caps the X-BP-Actor header (an email address).
@@ -35,7 +36,7 @@ var auditActions = map[string]string{
 }
 
 func validActor(a string) bool {
-	if len(a) > maxActor {
+	if len(a) > maxActor || !utf8.ValidString(a) {
 		return false
 	}
 	for _, r := range a {

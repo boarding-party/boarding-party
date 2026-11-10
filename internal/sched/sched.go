@@ -51,6 +51,10 @@ type Scheduler struct {
 	mu       sync.Mutex // one Tick at a time
 	pokeOnce sync.Once
 	poke     chan struct{}
+	// blocked holds the last reason logged per queued item, so a run
+	// waiting on a key or fence is logged when the reason changes, not
+	// every tick. Guarded by mu.
+	blocked map[string]string
 }
 
 func (s *Scheduler) now() time.Time {
@@ -402,10 +406,16 @@ func (s *Scheduler) drain(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	for id := range s.blocked {
+		if !queued(queue, id) {
+			delete(s.blocked, id)
+		}
+	}
 	for _, q := range queue {
 		_, err := s.Runs.StartQueued(ctx, q)
 		switch {
 		case err == nil:
+			delete(s.blocked, q.ID)
 			return nil
 		case errors.Is(err, runs.ErrLeadOverBudget):
 			// Only this lead's work waits for tomorrow; try the next item.
@@ -414,7 +424,13 @@ func (s *Scheduler) drain(ctx context.Context) error {
 		case errors.Is(err, runs.ErrBusy):
 			return nil // the item stays for a later tick
 		case errors.Is(err, runs.ErrNoFence), errors.Is(err, runs.ErrNoAgentKey):
-			log.Printf("scheduler: queued %s/%s cannot start yet: %v", q.Persona, q.Story, err)
+			if s.blocked[q.ID] != err.Error() {
+				log.Printf("scheduler: queued %s/%s cannot start yet: %v", q.Persona, q.Story, err)
+				if s.blocked == nil {
+					s.blocked = map[string]string{}
+				}
+				s.blocked[q.ID] = err.Error()
+			}
 			return nil // the item stays for a later tick
 		case errors.Is(err, runs.ErrInvalid):
 			if derr := s.Store.DeleteQueued(q.ID); derr != nil && !errors.Is(derr, store.ErrNotFound) {
@@ -431,4 +447,13 @@ func (s *Scheduler) drain(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+func queued(queue []store.Queued, id string) bool {
+	for _, q := range queue {
+		if q.ID == id {
+			return true
+		}
+	}
+	return false
 }

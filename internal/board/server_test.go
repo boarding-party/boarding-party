@@ -798,3 +798,31 @@ func TestUIUsesRelativeURLs(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// The UI loads app.js and styles.css by relative path, so index.html served
+// for a deep path must point the browser back at the UI's root.
+func TestDeepPathGetsBase(t *testing.T) {
+	ui, err := UI()
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := Static(ui)
+	for path, want := range map[string]string{
+		"/":          "",
+		"/runs":      "",
+		"/runs/abc":  `<base href="../">`,
+		"/a/b/c":     `<base href="../../">`,
+		"/runs/abc/": `<base href="../../">`,
+	} {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+		body := rec.Body.String()
+		if !strings.Contains(body, `src="app.js"`) {
+			t.Fatalf("%s: not index.html: %.80s", path, body)
+		}
+		got := regexp.MustCompile(`<base href="[^"]*">`).FindString(body)
+		if got != want {
+			t.Errorf("%s: base %q, want %q", path, got, want)
+		}
+	}
+}

@@ -9,6 +9,7 @@
 package board
 
 import (
+	"bytes"
 	"crypto/rand"
 	"crypto/subtle"
 	"embed"
@@ -221,9 +222,25 @@ func serveStatic(ui fs.FS, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	name := strings.TrimPrefix(path.Clean("/"+r.URL.Path), "/")
-	if name == "" || !serveFile(ui, w, r, name) {
-		serveFile(ui, w, r, "index.html")
+	if name != "" && serveFile(ui, w, r, name) {
+		return
 	}
+	// The browser resolves the UI's relative URLs against this path's
+	// directory, as it sees it: count the escaped path's slashes.
+	depth := strings.Count(r.URL.EscapedPath(), "/") - 1
+	if depth <= 0 {
+		serveFile(ui, w, r, "index.html")
+		return
+	}
+	page, err := fs.ReadFile(ui, "index.html")
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	base := `<head>` + "\n" + `<base href="` + strings.Repeat("../", depth) + `">`
+	page = bytes.Replace(page, []byte("<head>"), []byte(base), 1)
+	w.Header().Set("Cache-Control", "no-cache")
+	http.ServeContent(w, r, "index.html", time.Time{}, bytes.NewReader(page))
 }
 
 func serveFile(ui fs.FS, w http.ResponseWriter, r *http.Request, name string) bool {
