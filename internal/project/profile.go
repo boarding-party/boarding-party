@@ -1,5 +1,11 @@
 package project
 
+import (
+	"fmt"
+	"slices"
+	"strings"
+)
+
 // Profile is a persona's structured background. Every field is optional; a
 // value is a stable key from ProfileFields (labels are display-only).
 type Profile struct {
@@ -99,6 +105,42 @@ func (p Profile) Labels() map[string]string {
 		}
 	}
 	return out
+}
+
+// ParseProfile reads a profile written by an agent: keys as in JSON, each
+// value either an option's value or its label, ignoring case and spaces.
+// Errors list what is allowed, so the agent can try again.
+func ParseProfile(m map[string]string) (Profile, error) {
+	var p Profile
+	slots := map[string]*string{"device": &p.Device, "age": &p.Age, "techLevel": &p.TechLevel,
+		"patience": &p.Patience, "reading": &p.Reading, "assistive": &p.Assistive}
+	for k, v := range m {
+		slot, ok := slots[k]
+		if !ok {
+			keys := make([]string, len(ProfileFields))
+			for i, f := range ProfileFields {
+				keys[i] = f.Key
+			}
+			return Profile{}, fmt.Errorf("unknown field %q; fields are %s", k, strings.Join(keys, ", "))
+		}
+		f := ProfileFields[slices.IndexFunc(ProfileFields, func(f Field) bool { return f.Key == k })]
+		want := strings.TrimSpace(v)
+		if want == "" {
+			continue
+		}
+		var vals []string
+		for _, o := range f.Options {
+			if strings.EqualFold(o.Value, want) || strings.EqualFold(o.Label, want) {
+				*slot = o.Value
+				break
+			}
+			vals = append(vals, o.Value)
+		}
+		if *slot == "" {
+			return Profile{}, fmt.Errorf("unknown %s %q; use one of %s", k, v, strings.Join(vals, ", "))
+		}
+	}
+	return p, nil
 }
 
 // validate checks every set value against its field's options.

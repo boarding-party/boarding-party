@@ -66,13 +66,23 @@ func TestLeadRunsOnlyLeadStory(t *testing.T) {
 
 func TestLeadBudgetCountsChildren(t *testing.T) {
 	svc := leadSvc(t, 2)
+	p0, _ := svc.Store.RawProject()
+	big := 100.0
+	p0.Roles[0].Personas[1].Lead.DailyBudget = &big
+	if err := svc.Store.PutProject(p0); err != nil {
+		t.Fatal(err)
+	}
 	pastRun(t, svc, "r1", "Kate", "buyer", project.LeadStory)
 	pastRun(t, svc, "r2", "Ana", "Ana", "pay")
 	p, _ := svc.Store.Project()
 	u, err := svc.LeadUsage(p, "Kate", time.Now())
-	if err != nil || u.Runs != 2 || u.Spent < 11.9 {
-		t.Fatalf("usage %+v %v", u, err)
+	if err != nil || u.Runs != 1 || u.Spent < 11.9 {
+		t.Fatalf("usage %+v %v (lead runs spend money but not child runs)", u, err)
 	}
+	if err := svc.LeadGate(p, "Ana", time.Now()); err != nil {
+		t.Fatalf("child under runs cap: %v", err)
+	}
+	pastRun(t, svc, "r3", "Ana", "Ana", "pay")
 	if _, err := svc.Start(context.Background(), "Ana", "pay"); !errors.Is(err, ErrLeadOverBudget) {
 		t.Fatalf("child over runs cap: %v", err)
 	}

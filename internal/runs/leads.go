@@ -17,7 +17,9 @@ import (
 // today. Unlike ErrOverBudget it stops only that lead and its children.
 var ErrLeadOverBudget = errors.New("the lead's budget is spent")
 
-// LeadUsage is what a lead and its children used today.
+// LeadUsage is what a lead and its children used today. Spent covers the
+// lead's own runs too; Runs counts only its children's, so planning never
+// eats the runs meant for testing.
 type LeadUsage struct {
 	Spent float64 `json:"spent"`
 	Runs  int     `json:"runs"`
@@ -48,7 +50,9 @@ func (s *Service) LeadUsage(p project.Project, lead string, now time.Time) (Lead
 		if !who[r.Persona] {
 			continue
 		}
-		u.Runs++
+		if r.Persona != lead {
+			u.Runs++
+		}
 		us, err := s.Usage(r.ID)
 		if err != nil {
 			return LeadUsage{}, err

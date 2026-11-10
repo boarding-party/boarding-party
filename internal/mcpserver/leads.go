@@ -1,7 +1,6 @@
 package mcpserver
 
 import (
-	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -308,7 +307,7 @@ type storyArgs struct {
 type childArgs struct {
 	Name    string            `json:"name" jsonschema:"the persona's name, such as Priya Shah"`
 	Traits  []string          `json:"traits,omitempty" jsonschema:"short traits, such as hurried or careful"`
-	Profile map[string]string `json:"profile,omitempty" jsonschema:"device, age, techLevel, patience, reading, assistive; values as the hand-made personas use"`
+	Profile map[string]string `json:"profile,omitempty" jsonschema:"device, age, techLevel, patience, reading, assistive; each value as shown on the hand-made personas; a wrong value is refused with the allowed list"`
 	Stories []storyArgs       `json:"stories,omitempty" jsonschema:"one to five stories"`
 	Reason  string            `json:"reason" jsonschema:"why, in one short sentence; shown to the owner"`
 }
@@ -381,13 +380,8 @@ func parseProfile(m map[string]string) (project.Profile, string) {
 	if len(m) == 0 {
 		return p, ""
 	}
-	b, _ := json.Marshal(m)
-	dec := json.NewDecoder(bytes.NewReader(b))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&p); err != nil {
-		return p, "profile: " + err.Error()
-	}
-	if err := p.Validate(); err != nil {
+	p, err := project.ParseProfile(m)
+	if err != nil {
 		return p, "profile: " + err.Error()
 	}
 	return p, ""

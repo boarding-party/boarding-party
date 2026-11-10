@@ -106,7 +106,8 @@ func TestLeadAssignment(t *testing.T) {
 	if a.Lead.Name != "Kate" || a.Lead.Brief != "find invoice bugs" || strings.Join(a.Lead.Powers, ",") != "createPersonas,startRuns" {
 		t.Fatalf("lead %+v", a.Lead)
 	}
-	if a.Budget.DailyBudget != 5 || a.Budget.DailyRuns != 10 || a.Budget.RunsToday != 2 || a.Budget.MaxChildren != 6 || !a.Inbox {
+	if a.Budget.DailyBudget != 5 || a.Budget.DailyRuns != 10 || a.Budget.RunsToday != 1 || // the lead run itself is not counted
+		a.Budget.MaxChildren != 6 || !a.Inbox {
 		t.Fatalf("budget %+v inbox %v", a.Budget, a.Inbox)
 	}
 	if len(a.Children) != 1 || a.Children[0].Name != "Ana" || a.Children[0].Reason != "phones" ||
@@ -157,12 +158,12 @@ func TestChildCreate(t *testing.T) {
 		}
 		return call(t, cs, "child_create", args)
 	}
-	if text, isErr := mk("Priya Shah", map[string]any{"device": "iphone-15"}); isErr {
+	if text, isErr := mk("Priya Shah", map[string]any{"device": "iPhone 15", "patience": "impatient"}); isErr {
 		t.Fatal(text)
 	}
 	c, err := f.st.Child("Priya Shah")
 	if err != nil || c.Lead != "Kate" || c.Persona.Identity["email"] != "megan+priya.shah@x.io" || len(c.Persona.Identity["password"]) != 16 ||
-		c.Persona.Profile.Device != "iphone-15" || c.Stories[0].Goal != "pay an invoice on a phone" {
+		c.Persona.Profile.Device != "iphone-15" || c.Persona.Profile.Patience != "impatient" || c.Stories[0].Goal != "pay an invoice on a phone" {
 		t.Fatalf("child %+v %v", c, err)
 	}
 	log, _ := f.st.LeadLog("Kate", 5)

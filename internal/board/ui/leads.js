@@ -61,7 +61,7 @@ export function LeadPage({ name }) {
         <h1>${lead.name}</h1>
         <button type="button" class="btn primary" disabled=${busy} onClick=${runNow}>Run now</button>
       </div>
-      <p class="lede">Lead. Spent ${money(usage.spent)} of ${money(budget)} today, ${usage.runs} of ${runs} runs.</p>
+      <p class="lede">Lead. Spent ${money(usage.spent)} of ${money(budget)} today, ${usage.runs} of ${runs} child runs.</p>
       ${note ? html`<div class="note" role="status">${note}</div>` : null}
       ${err ? html`<div class="note bad banner">Lost contact with the director: ${err}. Retrying.</div>` : null}
       ${l.brief ? html`<p class="small">${l.brief}</p>` : null}

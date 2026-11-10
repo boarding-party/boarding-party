@@ -123,3 +123,16 @@ func TestNoProfileOmitted(t *testing.T) {
 		t.Fatalf("%s", b)
 	}
 }
+
+func TestParseProfileTakesValuesOrLabels(t *testing.T) {
+	p, err := ParseProfile(map[string]string{"device": "iPhone 15", "techLevel": "everyday", "patience": " gives up quickly "})
+	if err != nil || p.Device != "iphone-15" || p.TechLevel != "everyday" || p.Patience != "impatient" {
+		t.Fatalf("%+v %v", p, err)
+	}
+	if _, err := ParseProfile(map[string]string{"device": "toaster"}); err == nil || !strings.Contains(err.Error(), "iphone-15") {
+		t.Fatalf("unknown value should list the options: %v", err)
+	}
+	if _, err := ParseProfile(map[string]string{"mood": "calm"}); err == nil || !strings.Contains(err.Error(), "techLevel") {
+		t.Fatalf("unknown field should list the fields: %v", err)
+	}
+}

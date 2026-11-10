@@ -33,7 +33,8 @@ type Lead struct {
 	// DailyBudget caps a day's spend of the lead and all its children, in US
 	// dollars. nil means DefaultLeadBudget.
 	DailyBudget *float64 `json:"dailyBudget,omitempty"`
-	// DailyRuns caps the runs started in a day by the lead and its children; 0 means DefaultLeadRuns.
+	// DailyRuns caps the runs its children start in a day (the lead's own runs
+	// count only against DailyBudget); 0 means DefaultLeadRuns.
 	DailyRuns int `json:"dailyRuns,omitempty"`
 	// MaxChildren caps the children that are not stopped; 0 means DefaultLeadChildren.
 	MaxChildren int `json:"maxChildren,omitempty"`

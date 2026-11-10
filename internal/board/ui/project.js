@@ -690,7 +690,7 @@ function LeadFields({ id, name, lead, onChange }) {
         </label>
         <div class="grid4">
           ${field('dailyBudget', 'Money per day (US$)', { inputmode: 'decimal', placeholder: '5' })}
-          ${field('dailyRuns', 'Runs per day', { inputmode: 'numeric', placeholder: '10' })}
+          ${field('dailyRuns', 'Child runs per day', { inputmode: 'numeric', placeholder: '10' })}
           ${field('maxChildren', 'Personas at most', { inputmode: 'numeric', placeholder: '6' })}
           ${field('wakeAt', 'Wakes daily at', { placeholder: '09:00' })}
         </div>` : null}
