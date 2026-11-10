@@ -95,6 +95,8 @@ func admin(svc *runs.Service, maxBytes int64, token string, hub *live.Hub, mail 
 	mux.HandleFunc("GET /api/files", s.listFiles)
 	mux.HandleFunc("PUT /api/files/{name}", s.putFile)
 	mux.HandleFunc("DELETE /api/files/{name}", s.deleteFile)
+	mux.HandleFunc("GET /api/agent-key", s.getAgentKey)
+	mux.HandleFunc("PUT /api/agent-key", s.putAgentKey)
 	mux.HandleFunc("GET /api/mailbox", s.getMailbox)
 	mux.HandleFunc("PUT /api/mailbox", s.putMailbox)
 	mux.HandleFunc("DELETE /api/mailbox", s.deleteMailbox)

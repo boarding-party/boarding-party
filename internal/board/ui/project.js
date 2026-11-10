@@ -366,6 +366,8 @@ export function ProjectPage({ section = 'general', roleN = '', onSaved, onDirty 
           rows=${draft.extraHosts} placeholder="cdn.example.com" addLabel="Add host"
           onChange=${(fn) => edit((d) => fn(d.extraHosts))} />
       </div>`;
+  } else if (section === 'agent') {
+    body = html`<${AgentKeyCard} />`;
   } else if (section === 'inbox') {
     body = html`<${InboxCard} allowFrom=${draft.allowFrom} authServId=${draft.authServId} onChange=${(fn) => edit((d) => fn(d))} />`;
   } else if (section === 'files') {
@@ -447,6 +449,7 @@ export function ProjectPage({ section = 'general', roleN = '', onSaved, onDirty 
         <nav class="subnav" aria-label="Project sections">
           ${link('#/project/general', 'General', section === 'general', changed('name', 'model', 'nodePool', 'timezone', 'dailyBudget'))}
           ${link('#/project/sites', 'Sites and hosts', section === 'sites', changed('sites', 'extraHosts'))}
+          ${link('#/project/agent', 'Agent key', section === 'agent', false)}
           ${link('#/project/inbox', 'Inbox', section === 'inbox', changed('inbox'))}
           ${link('#/project/files', 'Test files', section === 'files', false)}
           ${link('#/project/roles', html`Roles <span class="count">${draft.roles.length}</span>`, section === 'roles' && !roleN,
@@ -1011,6 +1014,55 @@ const fmtChecked = (s) => {
 const maskByCSS = typeof CSS !== 'undefined' && CSS.supports && CSS.supports('-webkit-text-security', 'disc');
 const eye = html`<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>`;
 const eyeOff = html`<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.6 5.1A10.4 10.4 0 0 1 12 5c6.5 0 10 7 10 7a17.6 17.6 0 0 1-2.6 3.6M6.6 6.6C3.8 8.5 2 12 2 12s3.5 7 10 7a9.7 9.7 0 0 0 5.4-1.6"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/><path d="M3 3l18 18"/></svg>`;
+
+// The Anthropic key agents run with. Saved straight away into the
+// namespace's agent secret; the board only ever learns whether one is set.
+function AgentKeyCard() {
+  const [st, setSt] = useState(null);
+  const [key, setKey] = useState('');
+  const [show, setShow] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const [done, setDone] = useState('');
+  const load = async () => {
+    try { setSt(await api('api/agent-key')); setErr(''); } catch (e) { setErr(e.message); }
+  };
+  useEffect(() => { load(); }, []);
+  const save = async () => {
+    setBusy(true); setErr(''); setDone('');
+    try {
+      await api('api/agent-key', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: key.trim() }) });
+      setKey(''); setDone('Saved.'); await load();
+    } catch (e) { setErr(e.message); } finally { setBusy(false); }
+  };
+  const line = !st ? null
+    : st.kind === 'api-key' ? { cls: 'ok', text: 'Set: API key' }
+    : st.kind === 'subscription' ? { cls: 'ok', text: 'Set: subscription token' }
+    : { cls: 'bad', text: 'Not set. Runs wait until a key is saved.' };
+  return html`
+    <div class="card">
+      <h2>Agent key</h2>
+      <p class="hint">The Anthropic API key the personas run with. It is stored in this project's namespace and never shown again after you save it.</p>
+      ${line ? html`<p class="mbstatus"><span class=${'dot ' + line.cls}></span>${line.text}</p>` : null}
+      <div class="field">
+        <label for="ak-key">${st && st.set ? 'Replace key' : 'API key'}</label>
+        <div class="secret">
+          <input id="ak-key" type=${maskByCSS || show ? 'text' : 'password'} class=${show ? '' : 'masked'} value=${key}
+            autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck=${false}
+            data-1p-ignore data-lpignore="true" data-bwignore data-form-type="other"
+            placeholder="sk-ant-…" onInput=${(e) => setKey(e.currentTarget.value)} />
+          <button class="btn icon" type="button" aria-pressed=${show} aria-controls="ak-key"
+            title=${show ? 'Hide key' : 'Show key'} aria-label=${show ? 'Hide key' : 'Show key'}
+            onClick=${() => setShow((v) => !v)}>${show ? eyeOff : eye}</button>
+        </div>
+      </div>
+      <div class="row" style="margin-top:12px">
+        <button class="btn primary" type="button" disabled=${busy || !key.trim()} onClick=${save}>${busy ? 'Saving…' : 'Save key'}</button>
+      </div>
+      ${err ? html`<div class="note bad" role="alert">${err}</div>` : null}
+      ${done && !err ? html`<div class="note ok" role="status">${done}</div>` : null}
+    </div>`;
+}
 
 function InboxCard({ allowFrom, authServId, onChange }) {
   const [mb, setMb] = useState(null); // the saved mailbox, as the director reports it

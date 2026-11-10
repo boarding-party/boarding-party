@@ -154,7 +154,7 @@ func checkAgentSecret(ctx context.Context, kube kubernetes.Interface, ns string,
 	sec, err := kube.CoreV1().Secrets(ns).Get(ctx, agentSecret, metav1.GetOptions{})
 	switch {
 	case apierrors.IsNotFound(err):
-		c.missing("secret %s not found in %s: add your agent credentials to tiny's agent secret", agentSecret, ns)
+		c.warn("secret %s not found in %s: set the Anthropic key in the board (Project → Agent key); runs wait until it is set", agentSecret, ns)
 		return
 	case apierrors.IsForbidden(err):
 		c.fail("secret %s: %s", agentSecret, denied("get", "secrets"))
@@ -171,7 +171,7 @@ func checkAgentSecret(ctx context.Context, kube kubernetes.Interface, ns string,
 	case oauth:
 		c.warn("secret %s has only CLAUDE_CODE_OAUTH_TOKEN: a subscription token; automated runs should use a metered ANTHROPIC_API_KEY under Anthropic's terms", agentSecret)
 	default:
-		c.missing("secret %s has neither ANTHROPIC_API_KEY nor CLAUDE_CODE_OAUTH_TOKEN", agentSecret)
+		c.warn("secret %s has neither ANTHROPIC_API_KEY nor CLAUDE_CODE_OAUTH_TOKEN: set the Anthropic key in the board (Project → Agent key); runs wait until it is set", agentSecret)
 	}
 }
 

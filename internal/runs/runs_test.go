@@ -3,6 +3,7 @@ package runs
 import (
 	"context"
 	"errors"
+	"github.com/boarding-party/boardingparty/internal/agentkey"
 	"io"
 	"path/filepath"
 	"reflect"
@@ -541,5 +542,25 @@ func TestQueuedStartWithoutJourneyStartsOne(t *testing.T) {
 	}
 	if _, err := svc.Enqueue("nobody", "checkout", time.Now().UTC()); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("unknown persona: %v, want ErrInvalid", err)
+	}
+}
+
+type keyStatus struct{ set bool }
+
+func (k keyStatus) Status(context.Context) (agentkey.Status, error) {
+	return agentkey.Status{Set: k.set}, nil
+}
+func (keyStatus) SetAPIKey(context.Context, string) error { return nil }
+
+func TestStartNeedsAgentKey(t *testing.T) {
+	svc, _ := newSvc(t)
+	svc.AgentKey = keyStatus{set: false}
+	_, err := svc.Start(context.Background(), "ann", "checkout")
+	if !errors.Is(err, ErrInvalid) || !strings.Contains(err.Error(), "set the Anthropic key in Project → Agent key") {
+		t.Fatalf("no key: %v", err)
+	}
+	svc.AgentKey = keyStatus{set: true}
+	if _, err := svc.Start(context.Background(), "ann", "checkout"); err != nil {
+		t.Fatalf("with key: %v", err)
 	}
 }

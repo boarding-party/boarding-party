@@ -77,7 +77,7 @@ function storiesFor(project, personaName) {
 function parseRoute(hash) {
   const parts = (hash || '').replace(/^#\/?/, '').split('/');
   if (parts[0] === 'project') {
-    const section = ['general', 'sites', 'inbox', 'files', 'roles'].includes(parts[1]) ? parts[1] : 'general';
+    const section = ['general', 'sites', 'agent', 'inbox', 'files', 'roles'].includes(parts[1]) ? parts[1] : 'general';
     return { page: 'project', section, roleN: section === 'roles' && /^[1-9][0-9]*$/.test(parts[2] || '') ? parts[2] : '' };
   }
   if (parts[0] === 'inbox') return { page: 'inbox' };

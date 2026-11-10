@@ -28,6 +28,7 @@ import (
 	agentsv1 "github.com/tiny-systems/tiny/api/v1alpha1"
 	"github.com/tiny-systems/tiny/pkg/session"
 
+	"github.com/boarding-party/boardingparty/internal/agentkey"
 	"github.com/boarding-party/boardingparty/internal/api"
 	"github.com/boarding-party/boardingparty/internal/artifacts"
 	"github.com/boarding-party/boardingparty/internal/board"
@@ -256,6 +257,7 @@ func run() error {
 
 	go sweepLive(ctx, hub, 10*time.Second)
 	mail := &inbox.Service{Store: st, Secrets: inbox.NewSecretStore(kc, cfg.Namespace)}
+	svc.AgentKey = agentkey.NewSecretStore(kc, cfg.Namespace)
 	go mail.Run(ctx)
 	admin, worker := newServers(cfg, svc, st, hub, mail)
 	return serve(ctx, []*http.Server{

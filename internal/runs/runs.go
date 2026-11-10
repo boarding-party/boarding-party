@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/boarding-party/boardingparty/internal/agentkey"
 	"github.com/boarding-party/boardingparty/internal/artifacts"
 	"github.com/boarding-party/boardingparty/internal/files"
 	"github.com/boarding-party/boardingparty/internal/project"
@@ -169,6 +170,9 @@ type Service struct {
 	// Egress, when set, keeps the project's hosts on the fence's allow-list
 	// and says which hosts the fence refused during a run.
 	Egress Egress
+	// AgentKey, when set, must report a key before a run starts, and is what
+	// the board's Agent key card reads and sets.
+	AgentKey agentkey.Store
 	// OnFinish, when set, is called after any run leaves the active states.
 	OnFinish func()
 
@@ -244,6 +248,15 @@ func (s *Service) start(ctx context.Context, persona, story string, q *store.Que
 	token, err := randHex(32)
 	if err != nil {
 		return store.Run{}, err
+	}
+	if s.AgentKey != nil {
+		st, err := s.AgentKey.Status(ctx)
+		if err != nil {
+			return store.Run{}, fmt.Errorf("check the agent key: %w", err)
+		}
+		if !st.Set {
+			return store.Run{}, fmt.Errorf("%w: set the Anthropic key in Project → Agent key", ErrInvalid)
+		}
 	}
 	if s.Fence != nil {
 		if err := s.Fence(ctx); err != nil {

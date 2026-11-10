@@ -67,6 +67,11 @@ rules:
     resources: ["secrets"]
     resourceNames: ["bp-mailbox"]
     verbs: ["get", "update", "delete"]
+  # The Anthropic key agents run with (tiny's agent Secret) is set from the board.
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: ["tiny-agent-env"]
+    verbs: ["get", "update"]
   - apiGroups: [""]
     resources: ["secrets"]
     verbs: ["create"]
