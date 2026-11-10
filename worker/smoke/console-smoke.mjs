@@ -16,7 +16,7 @@ console.log('quiet');
 console.error('boom', 42);
 console.warn('careful');
 console.error('at ' + location.href + ' and https://x.test/a?code=secret-token#f');
-console.error("odd https://x.test/a(b)?k=secret-token [https://x.test/c[d]?k=secret-token] 'https://x.test/e'f?k=secret-token HTTPS://X.TEST/G?k=secret-token wss://x.test/ws?k=secret-token https://x.test/h#secret-token xhttps://x.test/i?k=secret-token https://user:secret-token@x.test/j");
+console.error("odd https://x.test/a(b)?k=secret-token [https://x.test/c[d]?k=secret-token] 'https://x.test/e'f?k=secret-token HTTPS://X.TEST/G?k=secret-token wss://x.test/ws?k=secret-token https://x.test/h#secret-token xhttps://x.test/i?k=secret-token https://user:secret-token@x.test/j https://a.test/,https://user:secret-token@b.test/k https://a.test/r/https://u:secret-token@b.test/l https://u:p?secret-token@x.test/m");
 fetch('/missing');
 setTimeout(() => { throw new Error('kaput'); }, 10);
 </script>`;
@@ -55,7 +55,7 @@ has((e) => e.kind === 'network' && e.text === `GET 404 ${base}/missing`, '404 re
 if (got.some((e) => e.text.includes('quiet'))) fail('console.log recorded');
 if (JSON.stringify(got).includes('secret-token')) fail('query string leaked: ' + JSON.stringify(got));
 has((e) => e.kind === 'console' && e.text === `at ${base}/page and https://x.test/a`, 'URLs in text without their queries');
-has((e) => e.kind === 'console' && e.text === "odd https://x.test/a(b) [https://x.test/c[d] 'https://x.test/e'f HTTPS://X.TEST/G wss://x.test/ws https://x.test/h xhttps://x.test/i https://x.test/j", 'odd URLs cut at ? or #');
+has((e) => e.kind === 'console' && e.text === "odd https://x.test/a(b) [https://x.test/c[d] 'https://x.test/e'f HTTPS://X.TEST/G wss://x.test/ws https://x.test/h xhttps://x.test/i https://x.test/j https://a.test/,https://b.test/k https://a.test/r/https://b.test/l https://x.test/m", 'odd URLs cut at ? or #');
 if (got.some((e) => !e.at || Number.isNaN(Date.parse(e.at)))) fail('bad timestamps');
 console.log(`ok ${got.length} console events`);
 process.exit(0);
