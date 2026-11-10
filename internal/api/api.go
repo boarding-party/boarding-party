@@ -95,6 +95,7 @@ func admin(svc *runs.Service, maxBytes int64, token string, hub *live.Hub, mail 
 	mux.HandleFunc("GET /api/files", s.listFiles)
 	mux.HandleFunc("PUT /api/files/{name}", s.putFile)
 	mux.HandleFunc("DELETE /api/files/{name}", s.deleteFile)
+	mux.HandleFunc("GET /api/audit", s.getAudit)
 	mux.HandleFunc("GET /api/agent-key", s.getAgentKey)
 	mux.HandleFunc("PUT /api/agent-key", s.putAgentKey)
 	mux.HandleFunc("GET /api/mailbox", s.getMailbox)
@@ -111,8 +112,8 @@ func admin(svc *runs.Service, maxBytes int64, token string, hub *live.Hub, mail 
 	mux.HandleFunc("POST /api/leads/{persona}/wake", s.wakeLead)
 	mux.HandleFunc("PUT /api/children/{name}", s.adoptChild)
 	mux.HandleFunc("DELETE /api/children/{name}", s.deleteChild)
-	s.routes = mux
-	return s, guardAdmin(token, mux)
+	s.routes = s.withActor(mux)
+	return s, guardAdmin(token, s.routes)
 }
 
 // Worker is the surface reachable by worker pods: artifact, frame and usage upload, test files and health.

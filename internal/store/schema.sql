@@ -171,3 +171,12 @@ CREATE TABLE IF NOT EXISTS console (
   url    TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS console_run ON console(run_id, seq);
+-- Who did what from the board: the actor is the cloud user's email
+-- (X-BP-Actor) or "local" for the CLI. Never holds a secret.
+CREATE TABLE IF NOT EXISTS audit (
+  id      INTEGER PRIMARY KEY AUTOINCREMENT,
+  at      INTEGER NOT NULL,
+  actor   TEXT NOT NULL,
+  action  TEXT NOT NULL,
+  subject TEXT NOT NULL DEFAULT ''
+);
