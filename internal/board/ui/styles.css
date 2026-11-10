@@ -340,3 +340,4 @@ aside nav.leads .sublabel { color: var(--side-ink); opacity: .7; padding: 0 10px
 .con-before summary { cursor: pointer; color: var(--bad); }
 .con-before .console { margin-top: 4px; }
 @media (max-width: 560px) { .con { grid-template-columns: auto minmax(0, 1fr); } .con .tag { grid-column: 2; justify-self: start; } .con-text { grid-column: 1 / 3; } }
+.con-fenced { margin: 8px 0 0; }

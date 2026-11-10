@@ -10,6 +10,13 @@ const SHOWN = 50;
 // BEFORE_BUG_MS is how far back from a bug report its console errors are looked for.
 const BEFORE_BUG_MS = 30000;
 
+// fenced reports a request the network fence stopped; the Blocked hosts card
+// already lists those hosts, so the console only counts them.
+export function fenced(e, blocked) {
+  if (e.kind !== 'network' || !e.text.includes('ERR_TUNNEL_CONNECTION_FAILED') || !e.url) return false;
+  try { return blocked.includes(new URL(e.url).hostname); } catch { return false; }
+}
+
 const KIND = { console: 'Console', exception: 'Exception', log: 'Browser', network: 'Network' };
 
 function offset(at, started) {
@@ -28,9 +35,11 @@ function Row({ e, started }) {
   </li>`;
 }
 
-export function ConsoleCard({ events, started, active }) {
+export function ConsoleCard({ events: raw, blocked = [], started, active }) {
   const [all, setAll] = useState(false);
   const [errorsOnly, setErrorsOnly] = useState(false);
+  const events = raw.filter((e) => !fenced(e, blocked));
+  const fencedCount = raw.length - events.length;
   const list = errorsOnly ? events.filter((e) => e.level === 'error') : events;
   const shown = all ? list : list.slice(0, SHOWN);
   const errors = events.filter((e) => e.level === 'error').length;
@@ -43,17 +52,18 @@ export function ConsoleCard({ events, started, active }) {
         ? html`<ul class="console">${shown.map((e, i) => html`<${Row} key=${i} e=${e} started=${started} />`)}</ul>
           ${list.length > shown.length ? html`<button type="button" class="btn small ghost" onClick=${() => setAll(true)}>Show all ${list.length}</button>` : null}`
         : html`<p class="muted small" style="margin:0">${active ? 'Nothing logged so far.' : 'The page logged no errors or warnings.'}</p>`}
+      ${fencedCount ? html`<p class="muted small con-fenced">${fencedCount === 1 ? '1 request stopped by the network fence is' : `${fencedCount} requests stopped by the network fence are`} left out; see Blocked hosts.</p>` : null}
     </div>`;
 }
 
 // ConsoleBefore lists the console errors in the 30 seconds before a bug was
 // reported, the likely cause of what the persona saw.
-export function ConsoleBefore({ bug, events, started }) {
+export function ConsoleBefore({ bug, events, blocked = [], started }) {
   const at = parseTime(bug.created);
   if (!at || !events || !events.length) return null;
   const near = events.filter((e) => {
     const t = parseTime(e.at);
-    return e.level === 'error' && t && t <= at && at - t <= BEFORE_BUG_MS;
+    return e.level === 'error' && !fenced(e, blocked) && t && t <= at && at - t <= BEFORE_BUG_MS;
   });
   if (!near.length) return null;
   return html`<details class="con-before">
