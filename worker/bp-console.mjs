@@ -53,6 +53,8 @@ function cleanText(s) {
 // ? or # falls in the part between a scheme's :// and the next / and that part
 // also has an @, credentials and query can't be told apart: everything after
 // that :// goes.
+const stripCreds = (s) => s.replace(/((?:https?|wss?):\/\/)[^/]*@/gi, '$1');
+
 function cleanToken(u) {
   const q = u.search(/[?#]/);
   if (q >= 0) {
@@ -61,10 +63,10 @@ function cleanToken(u) {
       if (start > q) break;
       const slash = u.indexOf('/', start);
       const end = slash < 0 ? u.length : slash;
-      if (q < end && u.slice(start, end).includes('@')) return u.slice(0, start) + '[redacted]';
+      if (q < end && u.slice(start, end).includes('@')) return stripCreds(u.slice(0, start)) + '[redacted]';
     }
   }
-  return (q < 0 ? u : u.slice(0, q)).replace(/((?:https?|wss?):\/\/)[^/]*@/gi, '$1');
+  return stripCreds(q < 0 ? u : u.slice(0, q));
 }
 
 function argText(a) {
