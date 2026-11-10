@@ -120,7 +120,7 @@ func (g *globals) ensure(ctx context.Context, cfg *rest.Config, ns string) error
 	d.verify = verifyDirector(cfg, ns)
 	d.imageExists = ghcrImageExists
 	tag, note := resolveTag()
-	token, err := ensureDirector(ctx, d, setupOpts{ns: ns, tag: tag, note: note, timeout: 3 * time.Minute}, os.Stderr)
+	token, err := ensureDirector(ctx, d, setupOpts{ns: ns, tag: tag, note: note, timeout: 3 * time.Minute, built: buildTime(), noDowngrade: true}, os.Stderr)
 	if err != nil {
 		return err
 	}

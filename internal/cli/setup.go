@@ -47,6 +47,9 @@ const (
 	// manifestHashAnnotation is stamped on the director Deployment's own
 	// metadata (not its pod template) with the fingerprint of what was applied.
 	manifestHashAnnotation = "boardingparty.io/manifest-hash"
+	// cliBuiltAnnotation records when the CLI that last deployed the director
+	// was built, so an older CLI can tell it would be going backwards.
+	cliBuiltAnnotation = "boardingparty.io/cli-built"
 )
 
 // checker prints one line per preflight check and remembers failures.
@@ -264,6 +267,11 @@ type setupOpts struct {
 	dryRun  bool
 	force   bool
 	timeout time.Duration
+	built   time.Time // this CLI's build time; zero when unknown
+	// noDowngrade refuses to replace a director that a newer CLI deployed:
+	// the board's UI comes from this CLI, and an older one drops fields the
+	// newer director keeps.
+	noDowngrade bool
 }
 
 // setupDeps are the cluster-facing pieces, replaceable in tests.
@@ -335,6 +343,9 @@ func installDirector(ctx context.Context, d setupDeps, o setupOpts, objs []*unst
 				ann = map[string]string{}
 			}
 			ann[manifestHashAnnotation] = hash
+			if !o.built.IsZero() {
+				ann[cliBuiltAnnotation] = o.built.UTC().Format(time.RFC3339)
+			}
 			obj.SetAnnotations(ann)
 		}
 		if obj.GetKind() == "Deployment" && sec.UID != "" {
@@ -414,6 +425,12 @@ func ensureDirector(ctx context.Context, d setupDeps, o setupOpts, out io.Writer
 		}
 		keyMissing = true
 	}
+	if upgrade && o.noDowngrade && !o.built.IsZero() {
+		if theirs, err := time.Parse(time.RFC3339, dep.Annotations[cliBuiltAnnotation]); err == nil && theirs.After(o.built) {
+			return "", fmt.Errorf("the director in %s (%s) was deployed by a newer boardingparty CLI (built %s) than this one (built %s); update this CLI and run again",
+				o.ns, imageTag(dep), theirs.Format(time.DateTime), o.built.UTC().Format(time.DateTime))
+		}
+	}
 	var buf strings.Builder
 	if pc := preflightCheck(ctx, d.kube, d.ext, o.ns, &buf); pc.failed {
 		var failed []string
@@ -483,6 +500,21 @@ func tagOf(image string) string {
 }
 
 var releaseSemver = regexp.MustCompile(`^v\d+\.\d+\.\d+$`)
+
+// buildTime is when this binary's commit was made (vcs.time), or zero.
+func buildTime() time.Time {
+	bi, ok := debug.ReadBuildInfo()
+	if !ok {
+		return time.Time{}
+	}
+	for _, s := range bi.Settings {
+		if s.Key == "vcs.time" {
+			t, _ := time.Parse(time.RFC3339, s.Value)
+			return t
+		}
+	}
+	return time.Time{}
+}
 
 // wantedTag is the image tag this CLI wants; see resolveTag.
 func wantedTag() string {
@@ -665,7 +697,7 @@ func verifyDirector(cfg *rest.Config, ns string) func(context.Context) error {
 }
 
 func newSetup(g *globals) *cobra.Command {
-	var o setupOpts
+	o := setupOpts{built: buildTime()}
 	defTag, defNote := resolveTag()
 	cmd := &cobra.Command{
 		Use:   "setup",

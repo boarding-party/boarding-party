@@ -663,3 +663,41 @@ func TestCheckImagesSkipsNonSha(t *testing.T) {
 		t.Error("want error")
 	}
 }
+
+func TestEnsureDirectorRefusesDowngradeFromOlderCLI(t *testing.T) {
+	waitPoll = time.Millisecond
+	newer := directorAt("sha-bbbbbbb")
+	newer.Annotations[cliBuiltAnnotation] = "2026-11-10T08:00:00Z"
+	var applied []string
+	old := time.Date(2026, 11, 4, 23, 0, 0, 0, time.UTC)
+	_, err := ensureDirector(context.Background(), ensureDeps(&applied, true, newer),
+		setupOpts{ns: testNS, tag: "sha-aaaaaaa", built: old, noDowngrade: true, timeout: time.Second}, &strings.Builder{})
+	if err == nil || !strings.Contains(err.Error(), "newer") || len(applied) != 0 {
+		t.Fatalf("old CLI replaced a newer director: err=%v applied=%v", err, applied)
+	}
+	// setup with an explicit tag may still go back.
+	if _, err := ensureDirector(context.Background(), ensureDeps(&applied, true, newer),
+		setupOpts{ns: testNS, tag: "sha-aaaaaaa", built: old, timeout: time.Second}, &strings.Builder{}); err != nil {
+		t.Fatalf("explicit setup: %v", err)
+	}
+}
+
+func TestInstallStampsCLIBuildTime(t *testing.T) {
+	waitPoll = time.Millisecond
+	var stamped string
+	d := ensureDeps(&[]string{}, true, directorAt("0.9.0"))
+	inner := d.apply
+	d.apply = func(ctx context.Context, o *unstructured.Unstructured) error {
+		if o.GetKind() == "Deployment" {
+			stamped = o.GetAnnotations()[cliBuiltAnnotation]
+		}
+		return inner(ctx, o)
+	}
+	built := time.Date(2026, 11, 10, 9, 0, 0, 0, time.UTC)
+	if _, err := ensureDirector(context.Background(), d, setupOpts{ns: testNS, tag: "1.0.0", built: built, timeout: time.Second}, &strings.Builder{}); err != nil {
+		t.Fatal(err)
+	}
+	if stamped != "2026-11-10T09:00:00Z" {
+		t.Fatalf("stamped %q", stamped)
+	}
+}
