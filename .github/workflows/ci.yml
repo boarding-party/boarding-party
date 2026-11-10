@@ -45,6 +45,8 @@ jobs:
     needs: [test, worker-smoke]
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
+    # A build normally takes about 3 minutes; the director push has hung for 25+.
+    timeout-minutes: 12
     permissions:
       contents: read
       packages: write
