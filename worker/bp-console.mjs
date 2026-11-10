@@ -49,15 +49,21 @@ function cleanText(s) {
 }
 
 // cleanToken cuts one URL-like token at its first ? or #, then strips
-// credentials from it and from any URL nested in what is left. When an @ and
-// a ? or # share the part before the first /, it cannot tell credentials from
-// query, so it keeps only the scheme.
+// credentials from it and from any URL nested in what is left. When the first
+// ? or # falls in the part between a scheme's :// and the next / and that part
+// also has an @, credentials and query can't be told apart: everything after
+// that :// goes.
 function cleanToken(u) {
-  const start = u.indexOf('://') + 3;
-  const slash = u.indexOf('/', start);
-  const authority = u.slice(start, slash < 0 ? u.length : slash);
   const q = u.search(/[?#]/);
-  if (authority.includes('@') && q >= 0 && q < start + authority.length) return u.slice(0, start) + '[redacted]';
+  if (q >= 0) {
+    for (const m of u.matchAll(/(?:https?|wss?):\/\//gi)) {
+      const start = m.index + m[0].length;
+      if (start > q) break;
+      const slash = u.indexOf('/', start);
+      const end = slash < 0 ? u.length : slash;
+      if (q < end && u.slice(start, end).includes('@')) return u.slice(0, start) + '[redacted]';
+    }
+  }
   return (q < 0 ? u : u.slice(0, q)).replace(/((?:https?|wss?):\/\/)[^/]*@/gi, '$1');
 }
 
