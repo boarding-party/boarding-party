@@ -45,7 +45,9 @@ function cleanText(s) {
   // Match to the next space, quote or angle bracket (never stop at characters a
   // URL may hold), then cut at the first ? or #. No URL parsing: what is cut
   // must not depend on how a parser reads a malformed URL.
-  return String(s || '').replace(/\b(?:https?|wss?):\/\/[^\s"<>]+/gi, (u) => u.split(/[?#]/)[0]);
+  // Credentials before an @ go too.
+  return String(s || '').replace(/(?:https?|wss?):\/\/[^\s"<>]+/gi,
+    (u) => u.split(/[?#]/)[0].replace(/^([a-z]+:\/\/)[^/]*@/i, '$1'));
 }
 
 function argText(a) {
