@@ -214,19 +214,29 @@ func (h *Handler) crossSite(r *http.Request) bool {
 
 // static serves a UI file, or index.html for any path that isn't one.
 func (h *Handler) static(w http.ResponseWriter, r *http.Request) {
+	serveStatic(h.cfg.UI, w, r)
+}
+
+// Static serves the board's files: GET and HEAD only, with index.html for
+// any path that isn't a file (the app routes with #/...).
+func Static(ui fs.FS) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { serveStatic(ui, w, r) })
+}
+
+func serveStatic(ui fs.FS, w http.ResponseWriter, r *http.Request) {
 	if !safeMethod(r.Method) {
 		w.Header().Set("Allow", "GET, HEAD")
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 	name := strings.TrimPrefix(path.Clean("/"+r.URL.Path), "/")
-	if name == "" || !h.serveFile(w, r, name) {
-		h.serveFile(w, r, "index.html")
+	if name == "" || !serveFile(ui, w, r, name) {
+		serveFile(ui, w, r, "index.html")
 	}
 }
 
-func (h *Handler) serveFile(w http.ResponseWriter, r *http.Request, name string) bool {
-	f, err := h.cfg.UI.Open(name)
+func serveFile(ui fs.FS, w http.ResponseWriter, r *http.Request, name string) bool {
+	f, err := ui.Open(name)
 	if err != nil {
 		return false
 	}

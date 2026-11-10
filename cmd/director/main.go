@@ -30,6 +30,7 @@ import (
 
 	"github.com/boarding-party/boardingparty/internal/api"
 	"github.com/boarding-party/boardingparty/internal/artifacts"
+	"github.com/boarding-party/boardingparty/internal/board"
 	"github.com/boarding-party/boardingparty/internal/egress"
 	"github.com/boarding-party/boardingparty/internal/files"
 	"github.com/boarding-party/boardingparty/internal/inbox"
@@ -54,6 +55,7 @@ type config struct {
 	TinyImageTag     string
 	NoEgressFence    bool
 	AdminToken       string // from $BP_ADMIN_TOKEN, never a flag (flags show in ps)
+	FrameAncestors   string // from $BP_FRAME_ANCESTORS (ConfigMap bp-project, key frameAncestors)
 }
 
 // adminTokenEnv carries the admin API bearer secret (Secret bp-director-admin).
@@ -106,7 +108,21 @@ func newScheme() (*runtime.Scheme, error) {
 // served on loopback; the worker one is reachable by worker pods and carries
 // artifact upload, health and the per-run MCP endpoint, nothing from /api/*.
 func newServers(cfg config, svc *runs.Service, st *store.Store, hub *live.Hub, mail *inbox.Service) (admin, worker http.Handler) {
-	admin = api.Admin(svc, cfg.MaxArtifactBytes, cfg.AdminToken, hub, mail)
+	ui, err := board.UI()
+	if err != nil {
+		panic(err) // the UI is embedded; this can't fail at run time
+	}
+	routes := api.AdminRoutes(svc, cfg.MaxArtifactBytes, hub, mail)
+	frame := board.FrameAncestors(cfg.FrameAncestors)
+	static := board.Static(ui)
+	top := http.NewServeMux()
+	top.Handle("/api", routes)
+	top.Handle("/api/", routes)
+	top.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		board.UIHeaders(w.Header(), frame)
+		static.ServeHTTP(w, r)
+	}))
+	admin = api.Guard(cfg.AdminToken, top)
 	mux := http.NewServeMux()
 	mux.Handle("/mcp/run/", mcpserver.Handler(svc, st, cfg.DirectorURL, mail))
 	mux.Handle("/", api.Worker(svc, cfg.MaxArtifactBytes, hub))
@@ -151,6 +167,7 @@ func run() error {
 	flag.Parse()
 
 	cfg.AdminToken = os.Getenv(adminTokenEnv)
+	cfg.FrameAncestors = os.Getenv("BP_FRAME_ANCESTORS")
 	if err := checkConfig(cfg); err != nil {
 		return err
 	}

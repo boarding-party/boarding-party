@@ -171,3 +171,35 @@ func TestTinyVersionFromThisBinary(t *testing.T) {
 }
 
 func (fakeLauncher) Stage(context.Context, string) (string, string, error) { return "running", "", nil }
+
+func TestAdminServesBoard(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "bp.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	cfg := config{DirectorURL: "http://bp-director:8080", MaxArtifactBytes: 1 << 20, AdminToken: "admin-secret", FrameAncestors: "https://cloud.test"}
+	svc := &runs.Service{Store: st, Artifacts: artifacts.NewFS(t.TempDir(), cfg.MaxArtifactBytes), Launcher: fakeLauncher{}}
+	admin, _ := newServers(cfg, svc, st, live.NewHub(), nil)
+	get := func(path string, bearer bool) *httptest.ResponseRecorder {
+		req := httptest.NewRequest("GET", path, nil)
+		req.Host = "127.0.0.1:8081"
+		if bearer {
+			req.Header.Set("Authorization", "Bearer admin-secret")
+		}
+		rec := httptest.NewRecorder()
+		admin.ServeHTTP(rec, req)
+		return rec
+	}
+	rec := get("/", true)
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `<script type="module" src="app.js">`) ||
+		!strings.Contains(rec.Header().Get("Content-Security-Policy"), "frame-ancestors https://cloud.test") {
+		t.Fatalf("GET / = %d %q %v", rec.Code, rec.Body.String()[:min(80, rec.Body.Len())], rec.Header())
+	}
+	if c := get("/", false).Code; c != http.StatusUnauthorized {
+		t.Fatalf("GET / without bearer = %d", c)
+	}
+	if rec := get("/api/runs", true); rec.Code != 200 || !strings.HasPrefix(rec.Header().Get("Content-Type"), "application/json") {
+		t.Fatalf("GET /api/runs = %d %s", rec.Code, rec.Header().Get("Content-Type"))
+	}
+}

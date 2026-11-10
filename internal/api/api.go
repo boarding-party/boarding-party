@@ -31,6 +31,7 @@ const MaxArtifactBytes int64 = 500 << 20
 const MaxFrameBytes = 512 << 10
 
 type server struct {
+	routes   http.Handler // the admin mux, unguarded
 	svc      *runs.Service
 	maxBytes int64
 	hub      *live.Hub
@@ -60,6 +61,17 @@ func Admin(svc *runs.Service, maxBytes int64, token string, hub *live.Hub, mail 
 	_, h := admin(svc, maxBytes, token, hub, mail)
 	return h
 }
+
+// AdminRoutes is the admin API without the guard, for a caller that mounts
+// it beside other admin pages and wraps the whole set with Guard.
+func AdminRoutes(svc *runs.Service, maxBytes int64, hub *live.Hub, mail *inbox.Service) http.Handler {
+	s, _ := admin(svc, maxBytes, "", hub, mail)
+	return s.routes
+}
+
+// Guard wraps a handler served on the admin listener: loopback Host, no
+// browser markers, and the admin bearer.
+func Guard(token string, next http.Handler) http.Handler { return guardAdmin(token, next) }
 
 func admin(svc *runs.Service, maxBytes int64, token string, hub *live.Hub, mail *inbox.Service) (*server, http.Handler) {
 	s := newServer(svc, maxBytes, hub)
@@ -97,6 +109,7 @@ func admin(svc *runs.Service, maxBytes int64, token string, hub *live.Hub, mail 
 	mux.HandleFunc("POST /api/leads/{persona}/wake", s.wakeLead)
 	mux.HandleFunc("PUT /api/children/{name}", s.adoptChild)
 	mux.HandleFunc("DELETE /api/children/{name}", s.deleteChild)
+	s.routes = mux
 	return s, guardAdmin(token, mux)
 }
 
