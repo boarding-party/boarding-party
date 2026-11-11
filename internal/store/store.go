@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -470,6 +471,33 @@ func (s *Store) RunsInJourney(journey string) ([]Run, error) {
 // oldest finished first.
 func (s *Store) Unfollowed() ([]Run, error) {
 	return s.queryRuns(`SELECT ` + runCols + ` FROM runs WHERE state IN ('done','waiting') AND followed = 0 ORDER BY finished, rowid`)
+}
+
+// BugCounts returns how many bugs each of the runs reported; runs with none
+// are left out.
+func (s *Store) BugCounts(runIDs []string) (map[string]int, error) {
+	out := map[string]int{}
+	if len(runIDs) == 0 {
+		return out, nil
+	}
+	args := make([]any, len(runIDs))
+	for i, id := range runIDs {
+		args[i] = id
+	}
+	rows, err := s.db.Query(`SELECT run_id, COUNT(*) FROM bugs WHERE run_id IN (?`+strings.Repeat(",?", len(runIDs)-1)+`) GROUP BY run_id`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id string
+		var n int
+		if err := rows.Scan(&id, &n); err != nil {
+			return nil, err
+		}
+		out[id] = n
+	}
+	return out, rows.Err()
 }
 
 func (s *Store) AddBug(b Bug) error {

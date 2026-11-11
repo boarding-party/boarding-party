@@ -126,3 +126,23 @@ func TestRunByID(t *testing.T) {
 		t.Fatalf("got %+v %v", got, err)
 	}
 }
+
+func TestBugCounts(t *testing.T) {
+	s := open(t)
+	for _, b := range []Bug{{ID: "b1", RunID: "r1"}, {ID: "b2", RunID: "r1"}, {ID: "b3", RunID: "r2"}, {ID: "b4", RunID: "r9"}} {
+		b.Summary, b.Created = "x", time.Unix(1, 0)
+		if err := s.AddBug(b); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := s.BugCounts([]string{"r1", "r2", "r3"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got["r1"] != 2 || got["r2"] != 1 {
+		t.Fatalf("counts %v", got)
+	}
+	if got, err := s.BugCounts(nil); err != nil || len(got) != 0 {
+		t.Fatalf("empty: %v %v", got, err)
+	}
+}

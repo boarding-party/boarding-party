@@ -5,7 +5,7 @@
 // Never use innerHTML or dangerouslySetInnerHTML here.
 import { render } from './vendor/preact.module.js';
 import { useState, useEffect, useRef, useCallback } from './vendor/hooks.module.js';
-import { html, api, directorDown, confirmDialog, DialogHost, parseTime, fmtWhen, artifactURL, runHref, usePoll, SEVERITY_TAG, SHOT_TOKEN } from './lib.js';
+import { html, api, directorDown, confirmDialog, DialogHost, parseTime, sameDay, fmtWhen, artifactURL, runHref, usePoll, SEVERITY_TAG, SHOT_TOKEN } from './lib.js';
 import { BugsPage, IssuePage, issueHref, openCount } from './bugs.js';
 import { ProjectPage } from './project.js';
 import { LeadPage, leadHref } from './leads.js';
@@ -329,7 +329,7 @@ function RunStrip({ director, active, status, onChange }) {
 
 function RunsPage({ project, projectErr, runs, runsErr, queue, status, active, onStarted }) {
   return html`
-    <section class="page">
+    <section class="page wide">
       <h1>Runs</h1>
       <p class="lede">One persona working through one story on your staging site. Runs go one at a time.</p>
       <div class="stack">
@@ -337,12 +337,14 @@ function RunsPage({ project, projectErr, runs, runsErr, queue, status, active, o
         ${project === null
           ? html`<div class="empty"><b>Set up your project first</b>Runs need a site, a role, a persona and a story.
               <div style="margin-top:12px"><a class="btn primary" href="#/project">Set up your project</a></div></div>`
-          : project ? html`<${StartRun} project=${project} active=${active} status=${status} onStarted=${onStarted} />` : null}
+          : project ? html`<div class="runs-top">
+              <${StartRun} project=${project} active=${active} status=${status} onStarted=${onStarted} />
+              ${queue.length || (status && status.due.length) ? html`<${UpNext} queue=${queue} due=${status ? status.due : []} zone=${status && status.timezone} onChange=${onStarted} />` : null}
+            </div>` : null}
         ${runsErr ? html`<div class="note bad">Could not load runs: ${runsErr}</div>` : null}
         ${runs && runs.length === 0 && project !== null
           ? html`<div class="empty"><b>No runs yet.</b>Start one above.</div>` : null}
-        ${queue.length || (status && status.due.length) ? html`<${UpNext} queue=${queue} due=${status ? status.due : []} zone=${status && status.timezone} onChange=${onStarted} />` : null}
-        ${runs && runs.length > 0 ? html`<${RunsTable} runs=${runs} />` : null}
+        ${runs && runs.length > 0 ? html`<${RunsBoard} runs=${runs} />` : null}
       </div>
     </section>`;
 }
@@ -507,6 +509,121 @@ function EndedThumb({ id }) {
       ${ok ? html`<img src=${artifactURL(id, 'last-frame.jpg')} alt="Last screen of the run" loading="lazy" onError=${() => setOk(false)} />`
         : html`<span>Session over</span>`}
     </a>`;
+}
+
+// ---- runs board ----------------------------------------------------------
+// The runs as cards grouped by day (or the compact table), with filters by
+// state, persona, story, bugs and text. Filters last for the browser
+// session; the view choice is remembered.
+
+const STATE_FILTERS = [
+  ['all', 'All', () => true],
+  ['live', 'Live', (r) => ACTIVE.has(r.state)],
+  ['waiting', 'Waiting', (r) => r.state === 'waiting'],
+  ['done', 'Done', (r) => r.state === 'done'],
+  ['problem', 'Failed or stuck', (r) => r.state === 'failed' || r.state === 'stuck'],
+];
+const FILTER_KEY = 'bp.runs.filter';
+const VIEW_KEY = 'bp.runs.view';
+const NO_FILTER = { state: 'all', persona: '', story: '', bugs: false, q: '' };
+
+function stored(store, key, fallback) {
+  try { const v = JSON.parse(store.getItem(key)); return v ?? fallback; } catch (_) { return fallback; }
+}
+function keep(store, key, v) { try { store.setItem(key, JSON.stringify(v)); } catch (_) { /* private mode */ } }
+
+// dayLabel names the day a run started: Today, Yesterday, or the date.
+function dayLabel(d) {
+  const now = new Date();
+  const y = new Date(now); y.setDate(now.getDate() - 1);
+  if (sameDay(d, now)) return 'Today';
+  if (sameDay(d, y)) return 'Yesterday';
+  return d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: d.getFullYear() === now.getFullYear() ? undefined : 'numeric' });
+}
+
+function RunsBoard({ runs }) {
+  const [f, setF] = useState(() => ({ ...NO_FILTER, ...stored(sessionStorage, FILTER_KEY, {}) }));
+  const [view, setView] = useState(() => stored(localStorage, VIEW_KEY, 'cards'));
+  const set = (patch) => setF((cur) => { const next = { ...cur, ...patch }; keep(sessionStorage, FILTER_KEY, next); return next; });
+  const pickView = (v) => { setView(v); keep(localStorage, VIEW_KEY, v); };
+
+  const personas = [...new Set(runs.map((r) => r.persona))].sort();
+  const stories = [...new Set(runs.filter((r) => !f.persona || r.persona === f.persona).map((r) => r.story))].sort();
+  const q = f.q.trim().toLowerCase();
+  // Every filter but the state one, so each state chip can count its runs.
+  const base = runs.filter((r) => (!f.persona || r.persona === f.persona) && (!f.story || r.story === f.story)
+    && (!f.bugs || r.bugs > 0)
+    && (!q || `${r.persona} ${r.role || ''} ${r.story} ${r.outcome || ''}`.toLowerCase().includes(q)));
+  const test = (STATE_FILTERS.find(([k]) => k === f.state) || STATE_FILTERS[0])[2];
+  const shown = base.filter(test);
+  const filtered = f.state !== 'all' || f.persona || f.story || f.bugs || q;
+
+  const groups = [];
+  for (const r of shown) {
+    const d = parseTime(r.started);
+    const label = d ? dayLabel(d) : 'Not started';
+    const g = groups[groups.length - 1];
+    if (g && g.label === label) g.runs.push(r); else groups.push({ label, runs: [r] });
+  }
+
+  return html`
+    <div class="runsboard">
+      <div class="filters" role="group" aria-label="Filter runs">
+        <div class="chips">
+          ${STATE_FILTERS.map(([k, label, t]) => {
+            const n = base.filter(t).length;
+            return html`<button key=${k} type="button" class=${'chip' + (f.state === k ? ' on' : '') + (k === 'live' && n ? ' live' : '')}
+              aria-pressed=${f.state === k} onClick=${() => set({ state: k })}>${k === 'live' && n ? html`<span class="dot live"></span>` : null}${label} <span class="n">${n}</span></button>`;
+          })}
+          <button type="button" class=${'chip' + (f.bugs ? ' on' : '')} aria-pressed=${f.bugs} onClick=${() => set({ bugs: !f.bugs })}>With bugs</button>
+        </div>
+        <div class="pickers">
+          <select aria-label="Persona" value=${f.persona} onChange=${(e) => set({ persona: e.currentTarget.value, story: '' })}>
+            <option value="">All personas</option>${personas.map((p) => html`<option key=${p} value=${p}>${p}</option>`)}
+          </select>
+          <select aria-label="Story" value=${f.story} onChange=${(e) => set({ story: e.currentTarget.value })}>
+            <option value="">All stories</option>${stories.map((st) => html`<option key=${st} value=${st}>${st}</option>`)}
+          </select>
+          <input type="search" placeholder="Search outcomes" aria-label="Search outcomes" value=${f.q} onInput=${(e) => set({ q: e.currentTarget.value })} />
+          <div class="viewtoggle" role="group" aria-label="View">
+            <button type="button" class=${view === 'cards' ? 'on' : ''} aria-pressed=${view === 'cards'} onClick=${() => pickView('cards')}>Cards</button>
+            <button type="button" class=${view === 'list' ? 'on' : ''} aria-pressed=${view === 'list'} onClick=${() => pickView('list')}>List</button>
+          </div>
+        </div>
+      </div>
+      ${!shown.length ? html`<div class="empty"><b>No runs match.</b>${filtered ? html`<button type="button" class="link" onClick=${() => set(NO_FILTER)}>Clear the filters</button>` : null}</div>`
+        : view === 'list' ? html`<${RunsTable} runs=${shown} />`
+        : groups.map((g) => html`<section key=${g.label} class="daygroup">
+            <h2>${g.label} <span class="muted">${g.runs.length === 1 ? '1 run' : `${g.runs.length} runs`}</span></h2>
+            <div class="runcards">${g.runs.map((r) => html`<${RunCard} key=${r.id} r=${r} />`)}</div>
+          </section>`)}
+    </div>`;
+}
+
+function RunCard({ r }) {
+  const active = ACTIVE.has(r.state);
+  const started = parseTime(r.started), finished = parseTime(r.finished);
+  const took = started && finished ? fmtDuration(finished - started) : '';
+  const out = firstLine(r.outcome);
+  return html`
+    <article class=${'runcard' + (active ? ' live' : '') + (r.state === 'failed' || r.state === 'stuck' ? ' problem' : '')}
+      onClick=${() => { location.hash = runHref(r.id); }}>
+      <div class="rc-shot">
+        ${active ? html`<${Thumb} key=${r.id} id=${r.id} stage=${r.stage} live=${r.live} />` : html`<${EndedThumb} key=${'end-' + r.id} id=${r.id} />`}
+        <div class="rc-tags">
+          <${StateTag} state=${r.state} wait=${r.wait} />
+          ${r.bugs ? html`<span class="tag bad">${r.bugs === 1 ? '1 bug' : `${r.bugs} bugs`}</span>` : null}
+          ${r.blocked ? html`<span class="tag wait" title="The network fence refused hosts the site tried to load. Open the run to allow them.">${r.blocked} blocked</span>` : null}
+        </div>
+      </div>
+      <div class="rc-body">
+        <div class="rc-who"><a href=${runHref(r.id)} onClick=${(e) => e.stopPropagation()}>${r.persona}</a>${r.role ? html` <span class="muted">${r.role}</span>` : null}</div>
+        <div class="rc-meta"><span class="rc-story">${r.story}</span><span title=${fmtFull(r.started)}>${started ? started.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) : ''}</span>${took ? html`<span>${took}</span>` : null}</div>
+        ${r.state === 'waiting' && r.wait && r.wait.status === 'open'
+          ? html`<p class="rc-out wait">Waiting for ${r.wait.waitingFor}, gives up ${fmtWhen(r.wait.deadline)}</p>`
+          : html`<p class="rc-out" title=${out}>${out || html`<span class="muted">${active ? 'In progress' : 'No outcome recorded'}</span>`}</p>`}
+      </div>
+    </article>`;
 }
 
 function RunsTable({ runs }) {

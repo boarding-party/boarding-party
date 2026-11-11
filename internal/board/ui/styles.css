@@ -437,3 +437,43 @@ dialog.shotbox::backdrop { background: rgba(10,14,20,.72); }
 .tl-lanes.scrubs { cursor: col-resize; touch-action: none; user-select: none; }
 .tl-head { position: absolute; top: -4px; bottom: 0; width: 2px; margin-left: -1px; background: #8FB0FF; pointer-events: none; z-index: 2; }
 .tl-head b { position: absolute; top: -16px; left: 50%; transform: translateX(-50%); font-size: 10px; font-weight: 600; color: #0F1622; background: #8FB0FF; border-radius: 3px; padding: 0 4px; white-space: nowrap; }
+
+/* runs board */
+.page.wide { max-width: 1760px; }
+.filters { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 16px; margin-bottom: 14px; }
+.chips, .pickers { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.chip { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); border-radius: 6px; padding: 5px 10px; font-size: 13px; font-weight: 500; }
+.chip:hover { border-color: #B7C0CC; }
+.chip .n { color: var(--muted); font-weight: 400; font-variant-numeric: tabular-nums; }
+.chip.on { background: var(--ink); border-color: var(--ink); color: #fff; }
+.chip.on .n { color: #B7C0CC; }
+.pickers select, .pickers input { width: auto; max-width: 220px; font: inherit; font-size: 13px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); padding: 5px 8px; color: var(--ink); }
+.pickers input { width: 200px; }
+.viewtoggle { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+.viewtoggle button { border: 0; background: var(--surface); padding: 5px 10px; font-size: 13px; color: var(--muted); }
+.viewtoggle button + button { border-left: 1px solid var(--line); }
+.viewtoggle button.on { background: var(--idle-soft); color: var(--ink); font-weight: 600; }
+.daygroup + .daygroup { margin-top: 22px; }
+.daygroup h2 { font-size: 14px; margin: 0 0 10px; }
+.daygroup h2 .muted { font-weight: 400; margin-left: 6px; }
+.runcards { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; }
+.runcard { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; cursor: pointer; display: flex; flex-direction: column; min-width: 0; }
+.runcard:hover { border-color: #B7C0CC; }
+.runcard:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
+.runcard.live { border-color: var(--ok); box-shadow: 0 0 0 1px var(--ok); }
+.runcard.problem .rc-shot { box-shadow: inset 0 -3px 0 var(--bad); }
+.rc-shot { position: relative; background: var(--player); }
+.rc-shot a.thumb { width: 100%; height: auto; aspect-ratio: 16 / 10; border-radius: 0; font-size: 12px; }
+.rc-tags { position: absolute; left: 8px; top: 8px; display: flex; flex-wrap: wrap; gap: 4px; pointer-events: none; }
+.rc-tags .tag { box-shadow: 0 1px 2px rgba(0,0,0,.25); }
+.rc-body { padding: 10px 12px 12px; display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.rc-who { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rc-who a { color: var(--ink); }
+.rc-who .muted { font-weight: 400; font-size: 12px; }
+.rc-meta { display: flex; gap: 10px; font-size: 12px; color: var(--muted); }
+.rc-meta .rc-story { color: var(--ink); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.rc-out { margin: 4px 0 0; font-size: 13px; line-height: 1.4; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+.rc-out.wait { color: var(--sup); }
+@media (max-width: 860px) { .filters { align-items: stretch; } .pickers input { width: auto; flex: 1; } .runcards { grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); } }
+.runs-top { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; align-items: start; }
+@media (min-width: 1400px) { .runs-top:has(> :nth-child(2)) { grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); } }

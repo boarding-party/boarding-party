@@ -282,6 +282,7 @@ func (s *server) listRuns(w http.ResponseWriter, r *http.Request) {
 		StageReason string    `json:"stageReason,omitempty"`
 		Live        bool      `json:"live,omitempty"`
 		Blocked     int       `json:"blocked,omitempty"` // hosts the egress fence refused
+		Bugs        int       `json:"bugs,omitempty"`
 		Wait        *waitView `json:"wait,omitempty"`
 	}
 	out := make([]item, len(rs))
@@ -294,12 +295,17 @@ func (s *server) listRuns(w http.ResponseWriter, r *http.Request) {
 		fail(w, err)
 		return
 	}
+	bugs, err := s.svc.Store.BugCounts(ids)
+	if err != nil {
+		fail(w, err)
+		return
+	}
 	// One deadline for every lookup: a slow cluster costs the list at most
 	// listStageBudget, and runs after it expires just omit their stage.
 	ctx, cancel := context.WithTimeout(r.Context(), listStageBudget)
 	defer cancel()
 	for i, x := range rs {
-		out[i] = item{Run: redact(x)}
+		out[i] = item{Run: redact(x), Bugs: bugs[x.ID]}
 		if wt, ok := waits[x.ID]; ok {
 			out[i].Wait = newWaitView(wt)
 		}
