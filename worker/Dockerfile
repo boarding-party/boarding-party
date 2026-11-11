@@ -6,14 +6,14 @@ FROM mcr.microsoft.com/playwright:v1.64.1-noble
 
 ARG PLAYWRIGHT_MCP_VERSION=0.0.84
 
-# The base image points apt at Azure's Ubuntu mirrors, which CI runners
-# (on Azure) reach but the arm64 one has gone missing; fall back to
-# Ubuntu's own mirrors only when the first update fails.
+# The base image points apt at Ubuntu's mirrors on ubuntu.com, which CI
+# runners at times can't resolve (and the arm64 Azure host is gone). If
+# the first update errors, retry from a university mirror over HTTPS.
 RUN { apt-get update --error-on=any \
-      || { sed -i -e 's|http://azure.archive.ubuntu.com|http://archive.ubuntu.com|g' \
-                  -e 's|http://azure.ports.ubuntu.com|http://ports.ubuntu.com|g' \
+      || { sed -i -e 's#http://[a-z.]*ports\.ubuntu\.com/ubuntu-ports#https://mirrors.ocf.berkeley.edu/ubuntu-ports#g' \
+                  -e 's#http://[a-z.]*\(archive\|security\)\.ubuntu\.com/ubuntu#https://mirrors.ocf.berkeley.edu/ubuntu#g' \
                   /etc/apt/sources.list.d/*.sources \
-           && apt-get update; }; } \
+           && apt-get update --error-on=any; }; } \
     && apt-get install -y --no-install-recommends git curl ca-certificates zip \
     && rm -rf /var/lib/apt/lists/*
 
