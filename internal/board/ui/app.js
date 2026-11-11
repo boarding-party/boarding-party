@@ -17,6 +17,14 @@ const ACTIVE = new Set(['pending', 'running']);
 // LOCAL is the CLI's own board, which listens on loopback only; anywhere
 // else the board is served through the cloud.
 const LOCAL = ['127.0.0.1', 'localhost', '[::1]'].includes(location.hostname);
+// Inside the cloud's frame, tell the cloud page the route so its address
+// follows the board and a run's link can be shared. Only the cloud may frame
+// the board (frame-ancestors), so the route goes nowhere else.
+if (window.parent !== window) {
+  const tell = () => window.parent.postMessage({ type: 'bp:route', hash: location.hash }, '*');
+  addEventListener('hashchange', tell);
+  tell();
+}
 const STATE_TAG = new Map([['pending', 'idle'], ['running', 'run'], ['done', 'ok'], ['stuck', 'wait'], ['failed', 'bad'], ['waiting', 'hold'], ['continued', 'idle']]);
 const RETRY_MS = [5000, 10000, 30000]; // back-off after consecutive errors
 const MAX_FINISHED_FAILURES = 5;
