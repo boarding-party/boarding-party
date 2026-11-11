@@ -159,13 +159,15 @@ await sleep(3000);
 const aRate = wf.length - aStart;
 if (aRate < 5) fail(`watched cadence too slow: ${aRate} PUTs in 3s`);
 
-// Phase B: no watchers, so the cadence drops to the slow gap (about one PUT per 5s).
+// Phase B: no watchers, so the cadence drops to about one PUT a second (the
+// director keeps those for scrolling back), well below the watched rate.
 wWatchers = '0';
 await sleep(1500); // let the in-flight response carry the new header
 const bStart = wf.length;
 await sleep(8000);
 const bRate = wf.length - bStart;
-if (bRate > 3) fail(`unwatched cadence too fast: ${bRate} PUTs in 8s`);
+if (bRate > 12) fail(`unwatched cadence too fast: ${bRate} PUTs in 8s`);
+if (bRate < 4) fail(`unwatched cadence too slow for scrolling back: ${bRate} PUTs in 8s`);
 if (bRate < 1) fail('keepalive missing: no PUT in 8s while unwatched');
 
 // Phase C: the director says the run is over (404); PUTs must stop.
