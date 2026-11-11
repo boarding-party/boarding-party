@@ -6,7 +6,12 @@ FROM mcr.microsoft.com/playwright:v1.64.1-noble
 
 ARG PLAYWRIGHT_MCP_VERSION=0.0.84
 
-RUN apt-get update \
+# The base image points apt at Azure's Ubuntu mirrors, whose arm64 host
+# (azure.ports.ubuntu.com) stops resolving at times; use Ubuntu's own.
+RUN sed -i -e 's|http://azure.archive.ubuntu.com|http://archive.ubuntu.com|g' \
+        -e 's|http://azure.ports.ubuntu.com|http://ports.ubuntu.com|g' \
+        /etc/apt/sources.list.d/*.sources /etc/apt/sources.list 2>/dev/null; \
+    apt-get update \
     && apt-get install -y --no-install-recommends git curl ca-certificates zip \
     && rm -rf /var/lib/apt/lists/*
 
