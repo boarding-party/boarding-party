@@ -299,6 +299,21 @@ func TestLeadNoReportBug(t *testing.T) {
 	}
 }
 
+// Mail reaches a lead's address, but a lead run reads none of it: email is
+// outside text, and a lead can make personas and spend the budget.
+func TestLeadReadsNoMail(t *testing.T) {
+	f := newLeadFix(t, allPowers())
+	f.run(t, "l1", "Kate", "owner", project.LeadStory, store.RunRunning)
+	cs := connect(t, f.srv, "tok-l1")
+	for name, args := range map[string]map[string]any{
+		"messages_list": {}, "message_read": {"id": "m1"}, "message_wait": {}, "calendar_list": {},
+	} {
+		if text, isErr := call(t, cs, name, args); !isErr || !strings.Contains(text, "a lead reads no mail") {
+			t.Errorf("%s on a lead run: %s", name, text)
+		}
+	}
+}
+
 func TestLeadFinishNoWaiting(t *testing.T) {
 	f := newLeadFix(t, allPowers())
 	f.run(t, "l1", "Kate", "owner", project.LeadStory, store.RunRunning)

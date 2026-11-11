@@ -398,8 +398,21 @@ func newServer(svc *runs.Service, st *store.Store, directorURL, token string, ma
 			}
 			return text("finished")
 		})
-	addMailTools(s, st, mail, active)
-	addCalendarTool(s, st, active)
+	// A lead's address can receive mail, but a lead run reads none of it:
+	// email is outside text, and a lead can make personas and spend budget.
+	personaOnly := func() (store.Run, *mcp.CallToolResult, error) {
+		r, bad, err := active()
+		if bad != nil || err != nil {
+			return r, bad, err
+		}
+		if r.Story == project.LeadStory {
+			bad, _, err = toolErr("a lead reads no mail or calendar; its personas do")
+			return r, bad, err
+		}
+		return r, nil, nil
+	}
+	addMailTools(s, st, mail, personaOnly)
+	addCalendarTool(s, st, personaOnly)
 	addLeadTools(s, lt)
 	return s
 }
