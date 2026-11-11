@@ -9,6 +9,7 @@ import { html, api, directorDown, confirmDialog, DialogHost, parseTime, sameDay,
 import { BugsPage, IssuePage, issueHref, openCount } from './bugs.js';
 import { ProjectPage } from './project.js';
 import { LeadPage, leadHref } from './leads.js';
+import { Coverage, LEAD_STORY, isLead } from './coverage.js';
 import { ConsoleCard, ConsoleBefore, fenced } from './console.js';
 import { Timeline } from './timeline.js';
 import { Shot } from './shot.js';
@@ -206,9 +207,26 @@ function App() {
 
   const active = (runs || []).find((r) => ACTIVE.has(r.state));
 
+  // The personas each lead made live beside the project, not in it.
+  const [children, setChildren] = useState({}); // lead name -> live children
+  const leads = ((project && project.roles) || []).flatMap((r) => (r.personas || []).filter(isLead).map((p) => p.name));
+  usePoll(async (stale) => {
+    const next = {};
+    for (const n of leads) {
+      try {
+        const d = await api(`api/leads/${encodeURIComponent(n)}`);
+        next[n] = (d.children || []).filter((c) => !c.stopped);
+      } catch (_) { /* optional: cards and coverage just lose "made by" */ }
+    }
+    if (stale()) return null;
+    setChildren(next);
+    return SIDEBAR_POLL_MS;
+  }, [route.page, leads.join('\n')]);
+  const full = withChildren(project, children);
+
   return html`
     <div class="app">
-      <${Sidebar} route=${route} project=${project} runs=${runs} />
+      <${Sidebar} route=${route} project=${project} runs=${runs} leads=${leads} children=${children} />
       <main>
         <${RunStrip} director=${director} active=${active} status=${status} onChange=${loadRuns} />
         ${route.page === 'run' ? html`<${RunPage} key=${route.id} id=${route.id} onChange=${loadRuns} />`
@@ -217,36 +235,33 @@ function App() {
           : route.page === 'bugs' ? html`<${BugsPage} />`
           : route.page === 'issue' ? html`<${IssuePage} key=${route.id} id=${route.id} />`
           : route.page === 'lead' ? html`<${LeadPage} key=${route.id} name=${route.id} />`
-          : html`<${RunsPage} project=${project} projectErr=${projectErr} runs=${runs} runsErr=${runsErr}
+          : html`<${RunsPage} project=${full} projectErr=${projectErr} runs=${runs} runsErr=${runsErr}
                     queue=${queue} status=${status} active=${active} onStarted=${loadRuns} />`}
       </main>
       <${DialogHost} />
     </div>`;
 }
 
-function Sidebar({ route, project, runs }) {
+// withChildren adds a role per persona a lead made, marked with its lead,
+// the way the director merges them when it runs.
+function withChildren(project, children) {
+  if (!project) return project;
+  const extra = Object.entries(children).flatMap(([lead, cs]) => cs.map((c) => ({
+    name: c.name, madeBy: lead, personas: [c.persona || { name: c.name }], stories: c.stories || [] })));
+  return extra.length ? { ...project, roles: [...(project.roles || []), ...extra] } : project;
+}
+
+function Sidebar({ route, project, runs, leads, children }) {
   const on = (p) => (route.page === p || (p === 'runs' && route.page === 'run') || (p === 'bugs' && route.page === 'issue') ? 'on' : '');
   const [open, setOpen] = useState(null);
-  const [kids, setKids] = useState({}); // lead name -> children count
-  const leads = ((project && project.roles) || []).flatMap((r) => (r.personas || [])
-    .filter((p) => p.lead && (p.lead.seeRuns || p.lead.createPersonas || p.lead.startRuns || p.lead.tidyBugs)).map((p) => p.name));
   usePoll(async (stale) => {
     try {
       const d = await api('api/issues');
       if (stale()) return null;
       setOpen(openCount(d && d.issues));
     } catch (_) { /* the count is optional */ }
-    const counts = {};
-    for (const n of leads) {
-      try {
-        const d = await api(`api/leads/${encodeURIComponent(n)}`);
-        counts[n] = (d.children || []).filter((c) => !c.stopped).length;
-      } catch (_) { /* the count is optional */ }
-    }
-    if (stale()) return null;
-    setKids(counts);
     return SIDEBAR_POLL_MS;
-  }, [route.page, leads.join('\n')]);
+  }, [route.page]);
   const site = (project && project.sites && project.sites[0]) || '';
   let host = site;
   try { host = site ? new URL(site).host : ''; } catch (_) { /* show it as written */ }
@@ -265,7 +280,7 @@ function Sidebar({ route, project, runs }) {
       ${leads.length ? html`<nav aria-label="Leads" class="leads">
         <span class="sublabel">Leads</span>
         ${leads.map((n) => html`<a key=${n} href=${leadHref(n)} class=${route.page === 'lead' && route.id === n ? 'on' : ''}>${n}
-          ${kids[n] != null ? html`<span class="count" title="Personas it made">${kids[n]}</span>` : null}</a>`)}
+          ${children[n] ? html`<span class="count" title="Personas it made">${children[n].length}</span>` : null}</a>`)}
       </nav>` : null}
       ${LOCAL ? html`<div class="foot">Local board. Close the terminal to stop it.</div>` : null}
     </aside>`;
@@ -344,7 +359,7 @@ function RunsPage({ project, projectErr, runs, runsErr, queue, status, active, o
         ${runsErr ? html`<div class="note bad">Could not load runs: ${runsErr}</div>` : null}
         ${runs && runs.length === 0 && project !== null
           ? html`<div class="empty"><b>No runs yet.</b>Start one above.</div>` : null}
-        ${runs && runs.length > 0 ? html`<${RunsBoard} runs=${runs} />` : null}
+        ${runs && runs.length > 0 ? html`<${RunsBoard} runs=${runs} project=${project} />` : null}
       </div>
     </section>`;
 }
@@ -507,7 +522,7 @@ function EndedThumb({ id }) {
   return html`
     <a class="thumb" href=${runHref(id)} onClick=${(e) => e.stopPropagation()} title="Open this run">
       ${ok ? html`<img src=${artifactURL(id, 'last-frame.jpg')} alt="Last screen of the run" loading="lazy" onError=${() => setOk(false)} />`
-        : html`<span>Session over</span>`}
+        : html`<span>No screen saved</span>`}
     </a>`;
 }
 
@@ -541,7 +556,7 @@ function dayLabel(d) {
   return d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: d.getFullYear() === now.getFullYear() ? undefined : 'numeric' });
 }
 
-function RunsBoard({ runs }) {
+function RunsBoard({ runs, project }) {
   const [f, setF] = useState(() => ({ ...NO_FILTER, ...stored(sessionStorage, FILTER_KEY, {}) }));
   const [view, setView] = useState(() => stored(localStorage, VIEW_KEY, 'cards'));
   const set = (patch) => setF((cur) => { const next = { ...cur, ...patch }; keep(sessionStorage, FILTER_KEY, next); return next; });
@@ -557,6 +572,8 @@ function RunsBoard({ runs }) {
   const test = (STATE_FILTERS.find(([k]) => k === f.state) || STATE_FILTERS[0])[2];
   const shown = base.filter(test);
   const filtered = f.state !== 'all' || f.persona || f.story || f.bugs || q;
+  const madeBy = new Map(((project && project.roles) || []).filter((r) => r.madeBy).flatMap((r) => (r.personas || []).map((p) => [p.name, r.madeBy])));
+  const coverage = view === 'coverage';
 
   const groups = [];
   for (const r of shown) {
@@ -569,47 +586,53 @@ function RunsBoard({ runs }) {
   return html`
     <div class="runsboard">
       <div class="filters" role="group" aria-label="Filter runs">
-        <div class="chips">
+        ${coverage ? html`<span></span>` : html`<div class="chips">
           ${STATE_FILTERS.map(([k, label, t]) => {
             const n = base.filter(t).length;
             return html`<button key=${k} type="button" class=${'chip' + (f.state === k ? ' on' : '') + (k === 'live' && n ? ' live' : '')}
               aria-pressed=${f.state === k} onClick=${() => set({ state: k })}>${k === 'live' && n ? html`<span class="dot live"></span>` : null}${label} <span class="n">${n}</span></button>`;
           })}
           <button type="button" class=${'chip' + (f.bugs ? ' on' : '')} aria-pressed=${f.bugs} onClick=${() => set({ bugs: !f.bugs })}>With bugs</button>
-        </div>
+        </div>`}
         <div class="pickers">
-          <select aria-label="Persona" value=${f.persona} onChange=${(e) => set({ persona: e.currentTarget.value, story: '' })}>
+          ${coverage ? null : html`<select aria-label="Persona" value=${f.persona} onChange=${(e) => set({ persona: e.currentTarget.value, story: '' })}>
             <option value="">All personas</option>${personas.map((p) => html`<option key=${p} value=${p}>${p}</option>`)}
           </select>
           <select aria-label="Story" value=${f.story} onChange=${(e) => set({ story: e.currentTarget.value })}>
             <option value="">All stories</option>${stories.map((st) => html`<option key=${st} value=${st}>${st}</option>`)}
           </select>
-          <input type="search" placeholder="Search outcomes" aria-label="Search outcomes" value=${f.q} onInput=${(e) => set({ q: e.currentTarget.value })} />
+          <input type="search" placeholder="Search outcomes" aria-label="Search outcomes" value=${f.q} onInput=${(e) => set({ q: e.currentTarget.value })} />`}
           <div class="viewtoggle" role="group" aria-label="View">
             <button type="button" class=${view === 'cards' ? 'on' : ''} aria-pressed=${view === 'cards'} onClick=${() => pickView('cards')}>Cards</button>
             <button type="button" class=${view === 'list' ? 'on' : ''} aria-pressed=${view === 'list'} onClick=${() => pickView('list')}>List</button>
+            <button type="button" class=${coverage ? 'on' : ''} aria-pressed=${coverage} onClick=${() => pickView('coverage')}>Coverage</button>
           </div>
         </div>
       </div>
-      ${!shown.length ? html`<div class="empty"><b>No runs match.</b>${filtered ? html`<button type="button" class="link" onClick=${() => set(NO_FILTER)}>Clear the filters</button>` : null}</div>`
+      ${coverage ? html`<${Coverage} project=${project} runs=${runs}
+            onPick=${(persona, story) => { set({ ...NO_FILTER, persona, story }); pickView('cards'); }} />`
+        : !shown.length ? html`<div class="empty"><b>No runs match.</b>${filtered ? html`<button type="button" class="link" onClick=${() => set(NO_FILTER)}>Clear the filters</button>` : null}</div>`
         : view === 'list' ? html`<${RunsTable} runs=${shown} />`
         : groups.map((g) => html`<section key=${g.label} class="daygroup">
             <h2>${g.label} <span class="muted">${g.runs.length === 1 ? '1 run' : `${g.runs.length} runs`}</span></h2>
-            <div class="runcards">${g.runs.map((r) => html`<${RunCard} key=${r.id} r=${r} />`)}</div>
+            <div class="runcards">${g.runs.map((r) => html`<${RunCard} key=${r.id} r=${r} madeBy=${madeBy.get(r.persona)} />`)}</div>
           </section>`)}
     </div>`;
 }
 
-function RunCard({ r }) {
+function RunCard({ r, madeBy }) {
   const active = ACTIVE.has(r.state);
   const started = parseTime(r.started), finished = parseTime(r.finished);
   const took = started && finished ? fmtDuration(finished - started) : '';
   const out = firstLine(r.outcome);
+  const lead = r.story === LEAD_STORY;
+  const who = madeBy ? `made by ${madeBy}` : r.role && r.role !== r.persona ? r.role : '';
   return html`
     <article class=${'runcard' + (active ? ' live' : '') + (r.state === 'failed' || r.state === 'stuck' ? ' problem' : '')}
       onClick=${() => { location.hash = runHref(r.id); }}>
       <div class="rc-shot">
-        ${active ? html`<${Thumb} key=${r.id} id=${r.id} stage=${r.stage} live=${r.live} />` : html`<${EndedThumb} key=${'end-' + r.id} id=${r.id} />`}
+        ${lead ? html`<div class="rc-lead"><b>Lead run</b><span>Reads runs and decides what to test next. No browser.</span></div>`
+          : active ? html`<${Thumb} key=${r.id} id=${r.id} stage=${r.stage} live=${r.live} />` : html`<${EndedThumb} key=${'end-' + r.id} id=${r.id} />`}
         <div class="rc-tags">
           <${StateTag} state=${r.state} wait=${r.wait} />
           ${r.bugs ? html`<span class="tag bad">${r.bugs === 1 ? '1 bug' : `${r.bugs} bugs`}</span>` : null}
@@ -617,8 +640,8 @@ function RunCard({ r }) {
         </div>
       </div>
       <div class="rc-body">
-        <div class="rc-who"><a href=${runHref(r.id)} onClick=${(e) => e.stopPropagation()}>${r.persona}</a>${r.role ? html` <span class="muted">${r.role}</span>` : null}</div>
-        <div class="rc-meta"><span class="rc-story">${r.story}</span><span title=${fmtFull(r.started)}>${started ? started.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) : ''}</span>${took ? html`<span>${took}</span>` : null}</div>
+        <div class="rc-who"><a href=${runHref(r.id)} onClick=${(e) => e.stopPropagation()}>${r.persona}</a>${who ? html` <span class="muted">${who}</span>` : null}</div>
+        <div class="rc-meta"><span class="rc-story">${lead ? 'Lead run' : r.story}</span><span title=${fmtFull(r.started)}>${started ? started.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) : ''}</span>${took ? html`<span>${took}</span>` : null}</div>
         ${r.state === 'waiting' && r.wait && r.wait.status === 'open'
           ? html`<p class="rc-out wait">Waiting for ${r.wait.waitingFor}, gives up ${fmtWhen(r.wait.deadline)}</p>`
           : html`<p class="rc-out" title=${out}>${out || html`<span class="muted">${active ? 'In progress' : 'No outcome recorded'}</span>`}</p>`}
@@ -973,7 +996,7 @@ function RunPage({ id, onChange }) {
           ${typeof data.cost === 'number' ? html`<li><b>${fmtCost(data.cost)}</b></li>` : null}
           ${usage ? html`<li><b>${usage.turns || 0}</b> ${usage.turns === 1 ? 'turn' : 'turns'}</li>` : null}
           <li><a href="#bugs" onClick=${(e) => { e.preventDefault(); document.getElementById('bugs').scrollIntoView({ block: 'start' }); }}><b>${bugs.length}</b> ${bugs.length === 1 ? 'bug' : 'bugs'}</a></li>
-          ${run.story !== '(lead)' ? html`<li><a href="#console" class=${conErrors ? 'bad-text' : ''} onClick=${(e) => { e.preventDefault(); document.getElementById('console').scrollIntoView({ block: 'start' }); }}><b>${conErrors}</b> console ${conErrors === 1 ? 'error' : 'errors'}</a></li>` : null}
+          ${run.story !== LEAD_STORY ? html`<li><a href="#console" class=${conErrors ? 'bad-text' : ''} onClick=${(e) => { e.preventDefault(); document.getElementById('console').scrollIntoView({ block: 'start' }); }}><b>${conErrors}</b> console ${conErrors === 1 ? 'error' : 'errors'}</a></li>` : null}
           ${blocked.length ? html`<li><a href="#blocked" onClick=${(e) => { e.preventDefault(); document.getElementById('blocked').scrollIntoView({ block: 'start' }); }}>${plural(blocked.length, 'blocked host', 'blocked hosts')}</a></li>` : null}
         </ul>
       </header>
@@ -988,7 +1011,7 @@ function RunPage({ id, onChange }) {
                   onLoadedMetadata=${(e) => { const d = e.currentTarget.duration; setDuration(d > 0 ? d : 0); }}></video>`
                 : html`<p>This run has no recording.</p>`}
             </div>
-            <${Timeline} run=${run} bugs=${bugs} events=${run.story !== '(lead)' ? events : null} blocked=${blocked}
+            <${Timeline} run=${run} bugs=${bugs} events=${run.story !== LEAD_STORY ? events : null} blocked=${blocked}
               active=${active} onBug=${toBug} onEvent=${toEvent}
               frames=${framesMode ? frames : null} scrub=${framesMode ? (scrub ?? (active ? null : frames[frames.length - 1])) : null}
               onScrub=${(ms) => { setPlaying(false); setScrub(frames[frameAt(frames, ms)]); }} />
@@ -1000,7 +1023,7 @@ function RunPage({ id, onChange }) {
               <${ConsoleBefore} bug=${b} events=${events} blocked=${blocked} started=${run.started} /></li>`)}</ol>`
               : html`<p class="muted small" style="margin:0">${active ? 'No bugs reported so far.' : 'No bugs reported.'}</p>`}
           </div>
-          ${run.story !== '(lead)' ? html`<${ConsoleCard} events=${events} blocked=${blocked} started=${run.started} active=${active} focus=${conFocus} />` : null}
+          ${run.story !== LEAD_STORY ? html`<${ConsoleCard} events=${events} blocked=${blocked} started=${run.started} active=${active} focus=${conFocus} />` : null}
         </div>
         <div class="stack">
           ${chain || queued ? html`<${Chain} links=${links} current=${run.id} queued=${queued || []} />` : null}
