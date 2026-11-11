@@ -5,6 +5,7 @@
 // text through htm/Preact.
 import { useState } from './vendor/hooks.module.js';
 import { html, api, fmtWhen, parseTime, artifactURL, runHref, usePoll, SEVERITY_TAG, SHOT_TOKEN } from './lib.js';
+import { Shot } from './shot.js';
 
 const POLL_MS = 15000;
 const CHECK_POLL_MS = 5000; // while a fix check is under way
@@ -213,6 +214,5 @@ function Report({ r }) {
       ${r.evidence ? html`<span class="meta"><b>Evidence:</b> ${r.evidence}</span>` : null}
       ${r.note ? html`<span class="meta"><b>Note:</b> ${r.note}</span>` : null}
     </div>
-    ${tok ? html`<a class="bug-shot" href=${artifactURL(r.run_id, tok[0])} target="_blank" rel="noopener" title="Open the full screenshot">
-      <img src=${artifactURL(r.run_id, tok[0])} onError=${(e) => { e.currentTarget.parentElement.hidden = true; }} alt=${'Screenshot for: ' + r.summary} loading="lazy" /></a>` : null}`;
+    ${tok ? html`<div class="report-shot"><${Shot} src=${artifactURL(r.run_id, tok[0])} alt=${'Screenshot for: ' + r.summary} height=${280} /></div>` : null}`;
 }

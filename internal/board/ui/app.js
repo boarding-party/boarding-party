@@ -9,9 +9,14 @@ import { html, api, directorDown, confirmDialog, DialogHost, parseTime, fmtWhen,
 import { BugsPage, IssuePage, issueHref, openCount } from './bugs.js';
 import { ProjectPage } from './project.js';
 import { LeadPage, leadHref } from './leads.js';
-import { ConsoleCard, ConsoleBefore } from './console.js';
+import { ConsoleCard, ConsoleBefore, fenced } from './console.js';
+import { Timeline } from './timeline.js';
+import { Shot } from './shot.js';
 
 const ACTIVE = new Set(['pending', 'running']);
+// LOCAL is the CLI's own board, which listens on loopback only; anywhere
+// else the board is served through the cloud.
+const LOCAL = ['127.0.0.1', 'localhost', '[::1]'].includes(location.hostname);
 const STATE_TAG = new Map([['pending', 'idle'], ['running', 'run'], ['done', 'ok'], ['stuck', 'wait'], ['failed', 'bad'], ['waiting', 'hold'], ['continued', 'idle']]);
 const RETRY_MS = [5000, 10000, 30000]; // back-off after consecutive errors
 const MAX_FINISHED_FAILURES = 5;
@@ -254,7 +259,7 @@ function Sidebar({ route, project, runs }) {
         ${leads.map((n) => html`<a key=${n} href=${leadHref(n)} class=${route.page === 'lead' && route.id === n ? 'on' : ''}>${n}
           ${kids[n] != null ? html`<span class="count" title="Personas it made">${kids[n]}</span>` : null}</a>`)}
       </nav>` : null}
-      <div class="foot">Local board. Close the terminal to stop it.</div>
+      ${LOCAL ? html`<div class="foot">Local board. Close the terminal to stop it.</div>` : null}
     </aside>`;
 }
 
@@ -690,6 +695,9 @@ function RunPage({ id, onChange }) {
   const lastState = useRef('');
   const failures = useRef(0);
   const [gaveUp, setGaveUp] = useState(false);
+  const [lit, setLit] = useState(''); // bug id picked on the timeline
+  const [conFocus, setConFocus] = useState(null);
+  useEffect(() => { if (!lit) return; const t = setTimeout(() => setLit(''), 2400); return () => clearTimeout(t); }, [lit]);
 
   usePoll(async (stale) => {
     try {
@@ -746,36 +754,62 @@ function RunPage({ id, onChange }) {
     v.play().catch(() => {});
     v.focus();
   };
+  const active = ACTIVE.has(run.state);
+  const events = data.console || [];
+  const blocked = data.blocked || [];
+  const conErrors = events.filter((e) => e.level === 'error' && !fenced(e, blocked)).length;
+  const toBug = (i) => {
+    const b = bugs[i];
+    const secs = b && webm ? stampOf(b) : null;
+    if (secs !== null && (!duration || secs <= Math.ceil(duration))) seek(secs);
+    setLit(b ? b.id : '');
+    const el = document.getElementById('bug-' + i);
+    if (el) el.scrollIntoView({ block: 'nearest', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+  };
+  const toEvent = (i) => setConFocus((f) => ({ i, n: (f ? f.n : 0) + 1 }));
+  const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 
   return html`
-    <section class="page">
+    <section class="page runpage">
       <p class="crumb"><a href="#/runs">Runs</a> / ${run.id}</p>
-      <h1>${run.persona} · ${run.story} <${StateTag} state=${run.state} wait=${wait} /></h1>
-      <p class="lede">${run.role ? `${run.role}. ` : ''}Started ${fmtFull(run.started)}${finished ? `, took ${took}` : took ? `, ${took} so far` : ''}.</p>
+      <header class="runhead">
+        <h1>${run.persona} <span class="muted">on</span> ${run.story} <${StateTag} state=${run.state} wait=${wait} /></h1>
+        <p class="runverdict">${run.outcome || (active ? 'Running. The outcome appears when the persona finishes.' : 'No outcome recorded.')}</p>
+        <ul class="readout">
+          <li>${run.role || 'Persona'}</li>
+          <li>Started ${fmtFull(run.started)}</li>
+          ${took ? html`<li><b>${took}</b>${active ? ' so far' : ''}</li>` : null}
+          ${typeof data.cost === 'number' ? html`<li><b>${fmtCost(data.cost)}</b></li>` : null}
+          ${usage ? html`<li><b>${usage.turns || 0}</b> ${usage.turns === 1 ? 'turn' : 'turns'}</li>` : null}
+          <li><a href="#bugs" onClick=${(e) => { e.preventDefault(); document.getElementById('bugs').scrollIntoView({ block: 'start' }); }}><b>${bugs.length}</b> ${bugs.length === 1 ? 'bug' : 'bugs'}</a></li>
+          ${run.story !== '(lead)' ? html`<li><a href="#console" class=${conErrors ? 'bad-text' : ''} onClick=${(e) => { e.preventDefault(); document.getElementById('console').scrollIntoView({ block: 'start' }); }}><b>${conErrors}</b> console ${conErrors === 1 ? 'error' : 'errors'}</a></li>` : null}
+          ${blocked.length ? html`<li><a href="#blocked" onClick=${(e) => { e.preventDefault(); document.getElementById('blocked').scrollIntoView({ block: 'start' }); }}>${plural(blocked.length, 'blocked host', 'blocked hosts')}</a></li>` : null}
+        </ul>
+      </header>
       ${err ? html`<div class="note bad banner">Lost contact with the director: ${err}. ${gaveUp ? 'Reload the page to try again.' : 'Retrying.'}</div>` : null}
       <div class="grid g-side">
         <div class="stack">
-          <div class=${'player' + (ACTIVE.has(run.state) ? ' live' : '')}>
-            ${ACTIVE.has(run.state) ? html`<${LiveView} key=${run.id} id=${run.id} stage=${data.stage} reason=${data.stageReason} started=${run.started} />` : webm ? html`<video ref=${video} key=${webm} src=${artifactURL(run.id, webm)} controls preload="metadata" playsinline
-                onLoadedMetadata=${(e) => { const d = e.currentTarget.duration; setDuration(d > 0 ? d : 0); }}></video>`
-              : html`<p>This run has no recording.</p>`}
+          <div class="recorder">
+            <div class=${'player' + (active ? ' live' : '')}>
+              ${active ? html`<${LiveView} key=${run.id} id=${run.id} stage=${data.stage} reason=${data.stageReason} started=${run.started} />` : webm ? html`<video ref=${video} key=${webm} src=${artifactURL(run.id, webm)} controls preload="metadata" playsinline
+                  onLoadedMetadata=${(e) => { const d = e.currentTarget.duration; setDuration(d > 0 ? d : 0); }}></video>`
+                : html`<p>This run has no recording.</p>`}
+            </div>
+            <${Timeline} run=${run} bugs=${bugs} events=${run.story !== '(lead)' ? events : null} blocked=${blocked}
+              active=${active} onBug=${toBug} onEvent=${toEvent} />
           </div>
-          <div class="card">
-            <div class="row between"><h2>Bugs</h2><span class="small muted">${bugs.length && webm ? 'Click a bug with a time to jump to it.' : ''}</span></div>
-            ${bugs.length ? html`<ul class="bugs">${bugs.map((b) => html`<li key=${b.id}><${Bug} bug=${b} runId=${run.id} artifacts=${artifacts} duration=${webm ? duration : 0} onSeek=${seek} />
-              <${ConsoleBefore} bug=${b} events=${data.console} blocked=${data.blocked || []} started=${run.started} /></li>`)}</ul>`
-              : html`<p class="muted small" style="margin:0">${ACTIVE.has(run.state) ? 'No bugs reported so far.' : 'No bugs reported.'}</p>`}
+          <div class="card" id="bugs">
+            <div class="row between"><h2>Bugs</h2><span class="small muted">${bugs.length && webm ? 'A bug with a time jumps the video there.' : ''}</span></div>
+            ${bugs.length ? html`<ol class="bugs">${bugs.map((b, i) => html`<li key=${b.id} id=${'bug-' + i} class=${lit === b.id ? 'lit' : ''}>
+              <${Bug} n=${i + 1} bug=${b} runId=${run.id} artifacts=${artifacts} duration=${webm ? duration : 0} onSeek=${seek} />
+              <${ConsoleBefore} bug=${b} events=${events} blocked=${blocked} started=${run.started} /></li>`)}</ol>`
+              : html`<p class="muted small" style="margin:0">${active ? 'No bugs reported so far.' : 'No bugs reported.'}</p>`}
           </div>
-          ${run.story !== '(lead)' ? html`<${ConsoleCard} events=${data.console || []} blocked=${data.blocked || []} started=${run.started} active=${ACTIVE.has(run.state)} />` : null}
+          ${run.story !== '(lead)' ? html`<${ConsoleCard} events=${events} blocked=${blocked} started=${run.started} active=${active} focus=${conFocus} />` : null}
         </div>
         <div class="stack">
-          <div class="card">
-            <h2>Outcome</h2>
-            ${run.outcome ? html`<p class="outcome-text">${run.outcome}</p>`
-              : html`<p class="muted small" style="margin:0">${ACTIVE.has(run.state) ? 'Still running.' : 'No outcome recorded.'}</p>`}
-          </div>
           ${chain || queued ? html`<${Chain} links=${links} current=${run.id} queued=${queued || []} />` : null}
-          ${data.blocked && data.blocked.length ? html`<${BlockedHosts} hosts=${data.blocked} />` : null}
+          ${blocked.length ? html`<${BlockedHosts} hosts=${blocked} />` : null}
           <div class="card">
             <h2>Details</h2>
             <dl class="facts">
@@ -905,7 +939,7 @@ function BlockedHosts({ hosts }) {
 
   const shown = hosts.slice(0, MAX_BLOCKED);
   return html`
-    <div class="card">
+    <div class="card" id="blocked">
       <h2>Blocked hosts</h2>
       <p class="small muted" style="margin-top:0">The network fence stopped the browser reaching these hosts, so parts of the site may not have loaded. Allow the ones the site needs, such as fonts, scripts or payments. The next run can reach them.</p>
       <ul class="files blocked">${shown.map((h) => html`
@@ -936,26 +970,28 @@ function hostOf(site) {
 // A bug seeks only when its text carries a time that fits inside the
 // recording; that also keeps clock times such as "Wed 16:00" from seeking.
 // A live-recorded webm can report Infinity, which lets every time through.
-function Bug({ bug, runId, artifacts, duration, onSeek }) {
+function Bug({ n, bug, runId, artifacts, duration, onSeek }) {
   const found = stampOf(bug);
   const secs = found !== null && duration > 0 && found <= Math.ceil(duration) ? found : null;
-  const seekable = secs !== null;
-  const body = html`
-    <span class=${'tag ' + (SEVERITY_TAG.get((bug.severity || '').toLowerCase()) || 'idle')}>${bug.severity || 'unrated'}</span>
-    <span class="sum">${bug.summary}</span>
-    ${secs !== null ? html`<span class="stamp">${fmtStamp(secs)}</span>` : html`<span></span>`}
-    ${bug.step ? html`<span class="meta"><b>Step:</b> ${bug.step}</span>` : null}
-    ${bug.evidence ? html`<span class="meta"><b>Evidence:</b> ${bug.evidence}</span>` : null}
-    ${bug.note ? html`<span class="meta"><b>Note:</b> ${bug.note}</span>` : null}`;
-  const issue = bug.issue_id ? html`<a class="bug-issue small" href=${issueHref(bug.issue_id)}>Open in Bugs</a>` : null;
   const tok = SHOT_TOKEN.exec(bug.evidence || '');
   const shot = tok && artifacts.includes(tok[0]) ? tok[0] : '';
-  return html`${seekable
-    ? html`<button type="button" class="bug seek" title=${'Jump to ' + fmtStamp(secs)} onClick=${() => onSeek(secs)}>${body}</button>`
-    : html`<div class="bug">${body}</div>`}
-    ${issue}
-    ${shot ? html`<a class="bug-shot" href=${artifactURL(runId, shot)} target="_blank" rel="noopener" title="Open the full screenshot">
-      <img src=${artifactURL(runId, shot)} alt=${'Screenshot for: ' + bug.summary} loading="lazy" /></a>` : null}`;
+  return html`<div class=${'finding' + (shot ? ' with-shot' : '')}>
+    <div class="finding-text">
+      <div class="finding-head">
+        <span class="finding-n">${n}</span>
+        <span class=${'tag ' + (SEVERITY_TAG.get((bug.severity || '').toLowerCase()) || 'idle')}>${bug.severity || 'unrated'}</span>
+        ${secs !== null ? html`<button type="button" class="stamp" title=${'Play from ' + fmtStamp(secs)} onClick=${() => onSeek(secs)}>▶ ${fmtStamp(secs)}</button>` : null}
+        ${bug.issue_id ? html`<a class="small finding-issue" href=${issueHref(bug.issue_id)}>Open in Bugs</a>` : null}
+      </div>
+      <p class="finding-sum">${bug.summary}</p>
+      <dl class="finding-meta">
+        ${bug.step ? html`<dt>Step</dt><dd>${bug.step}</dd>` : null}
+        ${bug.evidence ? html`<dt>Evidence</dt><dd>${bug.evidence}</dd>` : null}
+        ${bug.note ? html`<dt>Note</dt><dd>${bug.note}</dd>` : null}
+      </dl>
+    </div>
+    ${shot ? html`<${Shot} src=${artifactURL(runId, shot)} alt=${'Screenshot for bug ' + n + ': ' + bug.summary} height=${320} />` : null}
+  </div>`;
 }
 
 
