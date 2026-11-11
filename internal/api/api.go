@@ -90,6 +90,8 @@ func admin(svc *runs.Service, maxBytes int64, token string, hub *live.Hub, mail 
 	mux.HandleFunc("GET /api/runs/{id}/artifacts/{name}", s.getArtifact)
 	mux.HandleFunc("GET /api/runs/{id}/live", s.streamLive)
 	mux.HandleFunc("GET /api/runs/{id}/live.jpg", s.liveStill)
+	mux.HandleFunc("GET /api/runs/{id}/rewind", s.rewindIndex)
+	mux.HandleFunc("GET /api/runs/{id}/rewind/{n}", s.rewindFrame)
 	mux.HandleFunc("GET /api/queue", s.listQueue)
 	mux.HandleFunc("DELETE /api/queue/{id}", s.deleteQueued)
 	mux.HandleFunc("GET /api/files", s.listFiles)
@@ -614,6 +616,11 @@ func (s *server) putLive(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	n := s.hub.Publish(run.ID, b)
+	if s.svc.Rewind != nil {
+		if err := s.svc.Rewind.Append(run.ID, time.Now(), b); err != nil {
+			log.Printf("api: keep frame of %s: %v", run.ID, err)
+		}
+	}
 	w.Header().Set("X-Bp-Watchers", strconv.Itoa(n))
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -773,4 +780,36 @@ func (s *server) stopRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// rewindIndex lists when each kept frame of a run arrived (Unix ms), so the
+// board can scroll back through a live run or replay one with no recording.
+func (s *server) rewindIndex(w http.ResponseWriter, r *http.Request) {
+	frames := []int64{}
+	if s.svc.Rewind != nil {
+		at, err := s.svc.Rewind.Index(r.PathValue("id"))
+		if err != nil {
+			fail(w, err)
+			return
+		}
+		frames = append(frames, at...)
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, http.StatusOK, map[string]any{"frames": frames})
+}
+
+// rewindFrame serves the run's n-th kept frame. A kept frame never changes.
+func (s *server) rewindFrame(w http.ResponseWriter, r *http.Request) {
+	n, err := strconv.Atoi(r.PathValue("n"))
+	var f []byte
+	if err == nil && s.svc.Rewind != nil {
+		f, err = s.svc.Rewind.Frame(r.PathValue("id"), n)
+	}
+	if err != nil || f == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no such frame"})
+		return
+	}
+	w.Header().Set("Content-Type", "image/jpeg")
+	w.Header().Set("Cache-Control", "private, max-age=86400, immutable")
+	w.Write(f)
 }

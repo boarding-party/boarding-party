@@ -10,6 +10,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
+	"strings"
 	"sync"
 	"time"
 
@@ -17,6 +19,7 @@ import (
 	"github.com/boarding-party/boardingparty/internal/artifacts"
 	"github.com/boarding-party/boardingparty/internal/files"
 	"github.com/boarding-party/boardingparty/internal/project"
+	"github.com/boarding-party/boardingparty/internal/rewind"
 	"github.com/boarding-party/boardingparty/internal/store"
 )
 
@@ -40,6 +43,26 @@ func (s *Service) keepLastFrame(runID string) {
 	}
 	if f := s.LastFrame(runID); len(f) > 0 {
 		_, _ = s.Artifacts.Put(runID, LastFrameName, bytes.NewReader(f))
+	}
+}
+
+// trimRewind drops the run's kept frames once it has a recording, which
+// shows the same screen; a run without one keeps them as its replay.
+func (s *Service) trimRewind(runID string) {
+	if s.Rewind == nil || s.Artifacts == nil {
+		return
+	}
+	names, err := s.Artifacts.List(runID)
+	if err != nil {
+		return
+	}
+	for _, n := range names {
+		if strings.HasSuffix(n, ".webm") || strings.HasSuffix(n, ".mp4") {
+			if err := s.Rewind.Remove(runID); err != nil {
+				log.Printf("runs: drop frames of %s: %v", runID, err)
+			}
+			return
+		}
 	}
 }
 
@@ -167,6 +190,9 @@ type Service struct {
 	// LastFrame returns the run's newest live screen frame, or nil. When set,
 	// a finished run keeps it as the artifact LastFrameName.
 	LastFrame func(runID string) []byte
+	// Rewind, when set, keeps the run's screen frames so the board can scroll
+	// back through a live run; a run that ends with a recording drops them.
+	Rewind *rewind.Store
 	// Fence, when set, must return nil before a run starts: it checks that
 	// agents can reach only the hosts someone allowed.
 	Fence func(ctx context.Context) error
@@ -425,6 +451,7 @@ func (s *Service) FinishWaiting(ctx context.Context, token string, w store.Wait,
 // it, and tell the scheduler a slot is free.
 func (s *Service) ended(ctx context.Context, r store.Run, finished time.Time) error {
 	s.keepLastFrame(r.ID)
+	s.trimRewind(r.ID)
 	s.keepBlocked(ctx, r, finished)
 	defer s.finished()
 	if r.Session == "" {

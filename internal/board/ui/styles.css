@@ -429,3 +429,11 @@ dialog.shotbox::backdrop { background: rgba(10,14,20,.72); }
 @media (max-width: 1100px) { .finding.with-shot { grid-template-columns: minmax(0, 1fr); } .finding .shot { margin-left: 22px; max-width: 420px; } }
 @media (max-width: 560px) { .tl { --tl-name: 64px; } .tl-axis { margin-left: 64px; } .tl-lane { grid-template-columns: 64px minmax(0, 1fr); } .readout li { padding: 0 8px; } }
 @media (prefers-reduced-motion: reduce) { ol.bugs > li, .con { transition: none; } }
+
+/* scrolling back through kept frames */
+.framebar { position: absolute; left: 12px; right: 12px; bottom: 12px; display: flex; align-items: center; gap: 10px; padding: 6px 8px; border-radius: 8px; background: rgba(21,27,36,.86); color: #E6EAF0; font-size: 13px; text-align: left; }
+.framebar span { flex: 1; font-variant-numeric: tabular-nums; }
+.framebar .btn.primary { display: inline-flex; align-items: center; gap: 6px; }
+.tl-lanes.scrubs { cursor: col-resize; touch-action: none; user-select: none; }
+.tl-head { position: absolute; top: -4px; bottom: 0; width: 2px; margin-left: -1px; background: #8FB0FF; pointer-events: none; z-index: 2; }
+.tl-head b { position: absolute; top: -16px; left: 50%; transform: translateX(-50%); font-size: 10px; font-weight: 600; color: #0F1622; background: #8FB0FF; border-radius: 3px; padding: 0 4px; white-space: nowrap; }

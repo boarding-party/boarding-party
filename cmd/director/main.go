@@ -38,6 +38,7 @@ import (
 	"github.com/boarding-party/boardingparty/internal/launcher"
 	"github.com/boarding-party/boardingparty/internal/live"
 	"github.com/boarding-party/boardingparty/internal/mcpserver"
+	"github.com/boarding-party/boardingparty/internal/rewind"
 	"github.com/boarding-party/boardingparty/internal/runs"
 	"github.com/boarding-party/boardingparty/internal/sched"
 	"github.com/boarding-party/boardingparty/internal/store"
@@ -65,6 +66,10 @@ type config struct {
 const adminTokenEnv = "BP_ADMIN_TOKEN"
 
 const tinyModule = "github.com/tiny-systems/tiny"
+
+// maxRewindBytes caps one run's kept screen frames: about ten minutes at one
+// frame a second.
+const maxRewindBytes = 48 << 20
 
 // tinyVersion returns the version of the tiny module this binary was built
 // against, from build info ("v0.11.0"); "" when unknown or not a release
@@ -227,6 +232,7 @@ func run() error {
 		Artifacts: artifacts.NewFS(filepath.Join(cfg.Data, "artifacts"), cfg.MaxArtifactBytes),
 		Files:     files.New(filepath.Join(cfg.Data, "files")),
 		Launcher:  tl,
+		Rewind:    rewind.New(filepath.Join(cfg.Data, "rewind"), maxRewindBytes),
 	}
 	kube, err := kubernetes.NewForConfig(restCfg)
 	if err != nil {

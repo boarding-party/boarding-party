@@ -694,6 +694,37 @@ function LiveView({ id, stage, reason, started }) {
     ${shown ? null : html`<${LiveStatus} stage=${stage} reason=${reason} started=${started} />`}`;
 }
 
+// frameAt returns the index of the last kept frame at or before ms (the
+// first frame when ms is earlier than all of them).
+function frameAt(frames, ms) {
+  let lo = 0, hi = frames.length - 1, best = 0;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (frames[mid] <= ms) { best = mid; lo = mid + 1; } else hi = mid - 1;
+  }
+  return best;
+}
+
+// FrameView shows the kept frame at a moment of the run: scrolled back during
+// a live run, or the replay of a run that has no recording.
+function FrameView({ id, frames, at, started, active, playing, onPlay, onLive }) {
+  const n = frameAt(frames, at == null ? frames[frames.length - 1] : at);
+  const t0 = parseTime(started);
+  const secs = t0 ? Math.max(0, Math.floor((frames[n] - t0) / 1000)) : 0;
+  const clock = `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`;
+  const next = n + 1 < frames.length ? artifactFrame(id, n + 1) : '';
+  return html`
+    <img class="livefeed" src=${artifactFrame(id, n)} alt=${'The screen at ' + clock} />
+    ${next ? html`<link rel="prefetch" href=${next} />` : null}
+    <div class="framebar">
+      <button type="button" class="btn small" onClick=${() => onPlay(!playing)}>${playing ? 'Pause' : 'Play'}</button>
+      <span>${active ? 'Scrolled back to ' : 'Replay at '}${clock}</span>
+      ${active ? html`<button type="button" class="btn small primary" onClick=${onLive}><span class="dot live"></span> Back to live</button>` : null}
+    </div>`;
+}
+
+const artifactFrame = (id, n) => `api/runs/${encodeURIComponent(id)}/rewind/${n}`;
+
 function RunPage({ id, onChange }) {
   const [data, setData] = useState(null);
   const [err, setErr] = useState('');
@@ -705,6 +736,34 @@ function RunPage({ id, onChange }) {
   const [gaveUp, setGaveUp] = useState(false);
   const [lit, setLit] = useState(''); // bug id picked on the timeline
   const [conFocus, setConFocus] = useState(null);
+  const [frames, setFrames] = useState([]); // kept screen frames, Unix ms
+  const [scrub, setScrub] = useState(null); // Unix ms shown instead of live/end; null = live
+  const [playing, setPlaying] = useState(false);
+  const runActive = !!(data && data.run && ACTIVE.has(data.run.state));
+  // The kept frames grow while the run is live; a finished run's are fixed.
+  useEffect(() => {
+    let live = true, t = 0;
+    const load = async () => {
+      try {
+        const d = await api(`api/runs/${encodeURIComponent(id)}/rewind`);
+        if (live) setFrames(d.frames || []);
+      } catch (_) { /* no frames: scrubbing stays off */ }
+      if (live && runActive) t = setTimeout(load, 2000);
+    };
+    load();
+    return () => { live = false; clearTimeout(t); };
+  }, [id, runActive]);
+  // Playing steps through kept frames four times faster than they were taken.
+  useEffect(() => {
+    if (!playing || !frames.length) return;
+    const t = setInterval(() => setScrub((cur) => {
+      const n = frameAt(frames, cur == null ? frames[0] : cur) + 1;
+      if (n < frames.length) return frames[n];
+      setPlaying(false);
+      return runActive ? null : frames[frames.length - 1];
+    }), 250);
+    return () => clearInterval(t);
+  }, [playing, frames, runActive]);
   useEffect(() => { if (!lit) return; const t = setTimeout(() => setLit(''), 2400); return () => clearTimeout(t); }, [lit]);
 
   usePoll(async (stale) => {
@@ -766,15 +825,22 @@ function RunPage({ id, onChange }) {
   const events = data.console || [];
   const blocked = data.blocked || [];
   const conErrors = events.filter((e) => e.level === 'error' && !fenced(e, blocked)).length;
+  // Kept frames replace the video while live, or when there is no video.
+  const framesMode = frames.length > 0 && (active || !webm);
+  const toTime = (iso) => { const t = parseTime(iso); if (t) { setPlaying(false); setScrub(frames[frameAt(frames, t.getTime())]); } };
   const toBug = (i) => {
     const b = bugs[i];
-    const secs = b && webm ? stampOf(b) : null;
+    const secs = b && webm && !framesMode ? stampOf(b) : null;
+    if (framesMode && b) toTime(b.created);
     if (secs !== null && (!duration || secs <= Math.ceil(duration))) seek(secs);
     setLit(b ? b.id : '');
     const el = document.getElementById('bug-' + i);
     if (el) el.scrollIntoView({ block: 'nearest', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
   };
-  const toEvent = (i) => setConFocus((f) => ({ i, n: (f ? f.n : 0) + 1 }));
+  const toEvent = (i) => {
+    if (framesMode && events[i]) toTime(events[i].at);
+    setConFocus((f) => ({ i, n: (f ? f.n : 0) + 1, quiet: framesMode }));
+  };
   const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 
   return html`
@@ -798,13 +864,17 @@ function RunPage({ id, onChange }) {
       <div class="grid g-side">
         <div class="stack">
           <div class="recorder">
-            <div class=${'player' + (active ? ' live' : '')}>
-              ${active ? html`<${LiveView} key=${run.id} id=${run.id} stage=${data.stage} reason=${data.stageReason} started=${run.started} />` : webm ? html`<video ref=${video} key=${webm} src=${artifactURL(run.id, webm)} controls preload="metadata" playsinline
+            <div class=${'player' + (active || framesMode ? ' live' : '')}>
+              ${framesMode && (scrub !== null || !active) ? html`<${FrameView} id=${run.id} frames=${frames} at=${scrub} started=${run.started}
+                  active=${active} playing=${playing} onPlay=${setPlaying} onLive=${() => { setPlaying(false); setScrub(null); }} />`
+              : active ? html`<${LiveView} key=${run.id} id=${run.id} stage=${data.stage} reason=${data.stageReason} started=${run.started} />` : webm ? html`<video ref=${video} key=${webm} src=${artifactURL(run.id, webm)} controls preload="metadata" playsinline
                   onLoadedMetadata=${(e) => { const d = e.currentTarget.duration; setDuration(d > 0 ? d : 0); }}></video>`
                 : html`<p>This run has no recording.</p>`}
             </div>
             <${Timeline} run=${run} bugs=${bugs} events=${run.story !== '(lead)' ? events : null} blocked=${blocked}
-              active=${active} onBug=${toBug} onEvent=${toEvent} />
+              active=${active} onBug=${toBug} onEvent=${toEvent}
+              frames=${framesMode ? frames : null} scrub=${framesMode ? (scrub ?? (active ? null : frames[frames.length - 1])) : null}
+              onScrub=${(ms) => { setPlaying(false); setScrub(frames[frameAt(frames, ms)]); }} />
           </div>
           <div class="card" id="bugs">
             <div class="row between"><h2>Bugs</h2><span class="small muted">${bugs.length && webm ? 'A bug with a time jumps the video there.' : ''}</span></div>

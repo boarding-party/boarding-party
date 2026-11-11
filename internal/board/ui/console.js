@@ -49,7 +49,7 @@ export function ConsoleCard({ events: raw, blocked = [], started, active, focus 
     if (errorsOnly && e.level !== 'error') setErrorsOnly(false);
     setAll(true);
     setLit(focus.i);
-    requestAnimationFrame(() => {
+    if (!focus.quiet) requestAnimationFrame(() => {
       const el = document.getElementById('con-' + focus.i);
       if (el) el.scrollIntoView({ block: 'center', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
     });

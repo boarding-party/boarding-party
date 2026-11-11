@@ -11,8 +11,9 @@ try { host = new URL(liveUrl).host; } catch { console.error('bp-screen: bad live
 const log = (...a) => console.error(new Date().toISOString(), 'bp-screen:', ...a);
 
 const CDP = 'http://127.0.0.1:' + (process.env.BP_CDP_PORT || '9222');
-const FAST_MS = 250;
-const SLOW_MS = 5000;
+const FAST_MS = 250; // someone is watching
+const BASE_MS = 1000; // nobody watching: the director still keeps a frame a second for scrolling back
+const SLOW_MS = 5000; // idle page keepalive
 
 let ws = null;
 let targetId = '';
@@ -123,7 +124,7 @@ async function send() {
 
 function tick() {
   if (over || inflight) return;
-  const gap = watchers > 0 ? FAST_MS : SLOW_MS;
+  const gap = watchers > 0 ? FAST_MS : BASE_MS;
   if (Date.now() - lastSend < gap) return;
   // a fresh frame supersedes a queued retry
   if (pending) latest = ackPending();

@@ -24,7 +24,10 @@ function ticks(span) {
   return out;
 }
 
-export function Timeline({ run, bugs, events, blocked, active, onBug, onEvent }) {
+// frames (Unix ms) are the screen frames the director kept; with them the
+// track scrubs: click or drag to see the screen at that moment (onScrub gets
+// Unix ms), and scrub (Unix ms, or null for live) draws the playhead.
+export function Timeline({ run, bugs, events, blocked, active, onBug, onEvent, frames, scrub, onScrub }) {
   const [now, setNow] = useState(Date.now());
   const [tip, setTip] = useState(null); // {x, text}
   useEffect(() => {
@@ -76,6 +79,22 @@ export function Timeline({ run, bugs, events, blocked, active, onBug, onEvent })
     setTip({ x: Math.min(Math.max(r.left + r.width / 2 - box.left, 80), box.width - 80), text: `${clock(s)}  ${text}` });
   };
   const hide = () => setTip(null);
+  const canScrub = !!(frames && frames.length && onScrub);
+  // Clicking or dragging on the lanes (not on a mark) scrubs to that time.
+  const drag = (e) => {
+    if (!canScrub || e.button !== 0 || e.target.closest('button')) return;
+    const track = e.currentTarget.querySelector('.tl-track').getBoundingClientRect();
+    const go = (x) => {
+      const f = Math.min(1, Math.max(0, (x - track.left) / track.width));
+      onScrub(t0.getTime() + f * span * 1000);
+    };
+    go(e.clientX);
+    const move = (ev) => go(ev.clientX);
+    const up = () => { removeEventListener('pointermove', move); removeEventListener('pointerup', up); };
+    addEventListener('pointermove', move);
+    addEventListener('pointerup', up);
+  };
+  const head = scrub != null ? Math.min(span, Math.max(0, (scrub - t0) / 1000)) : null;
 
   return html`
     <div class="tl" aria-label="Run timeline">
@@ -83,7 +102,7 @@ export function Timeline({ run, bugs, events, blocked, active, onBug, onEvent })
         ${ticks(span).map((t) => html`<span key=${t} style=${{ left: pct(t) }}>${clock(t)}</span>`)}
         <span class="tl-end">${active ? 'now' : clock(span)}</span>
       </div>
-      <div class="tl-lanes" onMouseLeave=${hide}>
+      <div class=${'tl-lanes' + (canScrub ? ' scrubs' : '')} onMouseLeave=${hide} onPointerDown=${drag}>
         ${first !== null && first / span > 0.04 ? html`<div class="tl-setup" style=${{ width: `calc((100% - var(--tl-name)) * ${first / span})` }}
           title=${`Starting: ${clock(first)} before the browser's first activity`}><span>Starting</span></div>` : null}
         <div class="tl-lane">
@@ -106,7 +125,8 @@ export function Timeline({ run, bugs, events, blocked, active, onBug, onEvent })
                 onClick=${() => onEvent(i)}></button>`)}
           </div>
         </div>` : null}
-        ${active ? html`<span class="tl-now" aria-hidden="true"></span>` : null}
+        ${active && head === null ? html`<span class="tl-now" aria-hidden="true"></span>` : null}
+        ${head !== null ? html`<span class="tl-head" aria-hidden="true" style=${{ left: `calc(var(--tl-name) + (100% - var(--tl-name)) * ${head / span})` }}><b>${clock(head)}</b></span>` : null}
         ${tip ? html`<div class="tl-tip" role="status" style=${{ left: tip.x + 'px' }}>${tip.text}</div>` : null}
       </div>
     </div>`;

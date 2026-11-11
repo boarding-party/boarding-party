@@ -30,10 +30,12 @@ import (
 
 	"github.com/boarding-party/boardingparty/internal/api"
 	"github.com/boarding-party/boardingparty/internal/artifacts"
+	"github.com/boarding-party/boardingparty/internal/board"
 	"github.com/boarding-party/boardingparty/internal/files"
 	"github.com/boarding-party/boardingparty/internal/inbox"
 	"github.com/boarding-party/boardingparty/internal/live"
 	"github.com/boarding-party/boardingparty/internal/project"
+	"github.com/boarding-party/boardingparty/internal/rewind"
 	"github.com/boarding-party/boardingparty/internal/runs"
 	"github.com/boarding-party/boardingparty/internal/store"
 )
@@ -154,6 +156,9 @@ func (l *Launcher) publishFrames(r store.Run) {
 		}
 		if b := fakeFrame(time.Since(begin)); b != nil {
 			l.Hub.Publish(r.ID, b)
+			if l.Svc.Rewind != nil {
+				_ = l.Svc.Rewind.Append(r.ID, time.Now(), b)
+			}
 		}
 	}
 }
@@ -311,6 +316,7 @@ func start(ctx context.Context, dir string, projectYAML []byte, duration time.Du
 		Launcher:  l,
 		LastFrame: hub.Latest,
 		Egress:    &devEgress{},
+		Rewind:    rewind.New(filepath.Join(dir, "rewind"), 48<<20),
 	}
 	l.Svc = svc
 	b := make([]byte, 32)
@@ -324,7 +330,22 @@ func start(ctx context.Context, dir string, projectYAML []byte, duration time.Du
 		st.Close()
 		return nil, err
 	}
-	srv := &http.Server{Handler: api.Admin(svc, 0, token, hub, mail), ReadHeaderTimeout: 10 * time.Second}
+	// Serve the UI beside the API, as the real director does, so the CLI's
+	// board finds a director new enough to serve it.
+	ui, err := board.UI()
+	if err != nil {
+		return nil, err
+	}
+	routes := api.AdminRoutes(svc, 0, hub, mail)
+	static := board.Static(ui)
+	top := http.NewServeMux()
+	top.Handle("/api", routes)
+	top.Handle("/api/", routes)
+	top.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		board.UIHeaders(w.Header(), "'none'")
+		static.ServeHTTP(w, r)
+	}))
+	srv := &http.Server{Handler: api.Guard(token, top), ReadHeaderTimeout: 10 * time.Second}
 	go func() {
 		if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			fmt.Fprintln(os.Stderr, "dev director:", err)
