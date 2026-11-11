@@ -22,9 +22,6 @@ func Route(m Message, p project.Project) (persona, filtered string) {
 	owner := map[string]string{}
 	for _, r := range p.Roles {
 		for _, pe := range r.Personas {
-			if pe.IsLead() {
-				continue // a lead takes no browser runs, so no mail
-			}
 			if a, err := mail.ParseAddress(pe.Identity["email"]); err == nil {
 				owner[strings.ToLower(a.Address)] = pe.Name
 			}

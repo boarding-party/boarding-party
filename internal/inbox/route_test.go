@@ -83,7 +83,9 @@ func TestRouteTrustedAuthServ(t *testing.T) {
 	}
 }
 
-func TestRouteSkipsLead(t *testing.T) {
+// A lead's mail still reaches it: a persona can turn lead while a run of its
+// is waiting for an email, and that email must not be kept out.
+func TestRouteReachesLead(t *testing.T) {
 	p := project.Project{
 		Roles: []project.Role{{Name: "r", Personas: []project.Persona{
 			{Name: "Kate", Identity: map[string]string{"email": "cast+kate@ex.test"}, Lead: &project.Lead{SeeRuns: true}},
@@ -91,7 +93,7 @@ func TestRouteSkipsLead(t *testing.T) {
 		Inbox: &project.Inbox{AllowFrom: []string{"ex.test"}},
 	}
 	persona, filtered := Route(Message{From: "a@ex.test", Verified: true, AuthServ: "mx.google.com", To: []string{"cast+kate@ex.test"}}, p)
-	if persona != "" || filtered != FilteredNoPersona {
+	if persona != "Kate" || filtered != "" {
 		t.Fatalf("got (%q, %q)", persona, filtered)
 	}
 }
