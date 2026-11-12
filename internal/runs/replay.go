@@ -1,11 +1,14 @@
 package runs
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/boarding-party/boardingparty/internal/store"
@@ -18,6 +21,10 @@ var ErrStaleJourney = errors.New("this journey cannot be replayed")
 // ErrBadReplay means a replay result was refused: the run is not a replay,
 // or the result is not one bp-replay sends.
 var ErrBadReplay = errors.New("bad replay result")
+
+// ReplayResultName is the artifact keeping a replay run's result: its seed
+// and drawn inputs, which the run page shows.
+const ReplayResultName = "replay-result.json"
 
 // replayNoResult is a replay run's outcome when its session ended, failed or
 // timed out before bp-replay reported.
@@ -102,6 +109,11 @@ func (s *Service) FinishReplay(token string, res ReplayResult, now time.Time) er
 	}
 	if err := s.Store.CountReplay(r.JourneyID, state == store.RunDone, now); err != nil && !errors.Is(err, store.ErrNotFound) {
 		return err
+	}
+	if b, err := json.Marshal(res); err == nil && s.Artifacts != nil {
+		if _, err := s.Artifacts.Put(r.ID, ReplayResultName, bytes.NewReader(b)); err != nil {
+			log.Printf("runs: keep replay result of %s: %v", r.ID, err)
+		}
 	}
 	return s.ended(context.Background(), r, now)
 }

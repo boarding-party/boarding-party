@@ -2,6 +2,7 @@ package runs
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -175,5 +176,26 @@ func TestReplayIgnoresBudgetButNotPause(t *testing.T) {
 	}
 	if _, err := svc.StartReplay(context.Background(), j.ID, 0, 0, "owner"); !errors.Is(err, ErrPaused) {
 		t.Fatalf("paused replay: %v", err)
+	}
+}
+
+func TestFinishReplayKeepsTheResult(t *testing.T) {
+	svc, _ := newSvc(t)
+	j := recorded(t, svc, 1)
+	r, err := svc.StartReplay(context.Background(), j.ID, 0, 3, "owner")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.FinishReplay(r.Token, ReplayResult{Status: "passed", Seed: 3, Inputs: map[string]any{"int1": 4}}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	rc, err := svc.Artifacts.Open(r.ID, ReplayResultName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rc.Close()
+	var got ReplayResult
+	if err := json.NewDecoder(rc).Decode(&got); err != nil || got.Seed != 3 || got.Inputs["int1"] != float64(4) {
+		t.Fatalf("%+v %v", got, err)
 	}
 }

@@ -412,18 +412,42 @@ function StartRun({ project, active, status, onStarted, onClose }) {
   const goal = (stories.find((x) => x.name === s) || {}).goal;
 
   const roles = (project.roles || []).filter((r) => (r.personas || []).length);
-  const disabled = busy || !p || !s;
+
+  // A persona and story with a recorded journey can be replayed instead:
+  // the same steps in a browser, with no model.
+  const [journey, setJourney] = useState(null);
+  const [how, setHow] = useState('ai');
+  const [rev, setRev] = useState(0);
+  useEffect(() => {
+    let live = true;
+    setJourney(null);
+    if (!p || !s) return undefined;
+    api(`api/journeys?persona=${encodeURIComponent(p)}&story=${encodeURIComponent(s)}`)
+      .then((js) => { if (live) setJourney((js || []).find((j) => (j.revisions || []).length) || null); })
+      .catch(() => {}); // no journeys to offer: an AI run, as before
+    return () => { live = false; };
+  }, [p, s]);
+  const revisions = journey ? journey.revisions : [];
+  const replay = how === 'replay' && revisions.length > 0;
+  const pickedRev = revisions.some((r) => r.n === rev) ? rev : (journey && journey.liveRev) || (revisions[0] && revisions[0].n) || 0;
+  const disabled = busy || !p || !s || (replay && (!pickedRev || !!active));
 
   const submit = async (e) => {
     e.preventDefault();
     if (disabled) return;
     setBusy(true); setErr('');
     try {
-      const run = await api('api/runs', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ persona: p, story: s }),
-      });
+      const run = replay
+        ? await api(`api/journeys/${encodeURIComponent(journey.id)}/replay`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ revision: pickedRev }),
+        })
+        : await api('api/runs', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ persona: p, story: s }),
+        });
       await onStarted();
       onClose();
       if (run && run.id) location.hash = runHref(run.id); // a queued run has no id yet
@@ -456,14 +480,35 @@ function StartRun({ project, active, status, onStarted, onClose }) {
         </select>
       </div>
       ${goal ? html`<p class="goal">${goal}</p>` : null}
-      ${active ? html`<div class="note">A run is active (<a href=${runHref(active.id)}>${active.persona} · ${active.story}</a>). A new run waits in Up next and starts when it finishes.</div>` : null}
+      ${revisions.length ? html`<div class="field">
+        <span class="label" id="sr-how">How</span>
+        <div class="viewtoggle" role="group" aria-labelledby="sr-how">
+          <button type="button" class=${!replay ? 'on' : ''} aria-pressed=${!replay} disabled=${busy} onClick=${() => { setHow('ai'); setErr(''); }}>AI run</button>
+          <button type="button" class=${replay ? 'on' : ''} aria-pressed=${replay} disabled=${busy} onClick=${() => { setHow('replay'); setErr(''); }}>Replay journey</button>
+        </div>
+      </div>` : null}
+      ${replay ? html`<div class="field">
+        <label for="sr-rev">Revision</label>
+        <select id="sr-rev" value=${pickedRev} disabled=${busy} onChange=${(e) => { setRev(Number(e.currentTarget.value)); setErr(''); }}>
+          ${revisions.map((r) => html`<option key=${r.n} value=${r.n}>${revLabel(r, journey.liveRev)}</option>`)}
+        </select>
+        <p class="hint">Plays the recorded steps back in a browser with fresh test data. No model, so it costs nothing.</p>
+      </div>` : null}
+      ${active && replay ? html`<div class="note">A run is active (<a href=${runHref(active.id)}>${active.persona} · ${active.story}</a>). Replays don't wait in Up next yet: start this one when it finishes.</div>`
+        : active ? html`<div class="note">A run is active (<a href=${runHref(active.id)}>${active.persona} · ${active.story}</a>). A new run waits in Up next and starts when it finishes.</div>` : null}
       ${err ? html`<div class="note bad" role="alert">${err.charAt(0).toUpperCase() + err.slice(1)}</div>` : null}
       <div class="row end">
         <button class="btn" type="button" onClick=${onClose}>Cancel</button>
-        <button class="btn primary" type="submit" disabled=${disabled}>${busy ? (active ? 'Adding…' : 'Starting…') : (active ? 'Add to queue' : 'Start run')}</button>
+        <button class="btn primary" type="submit" disabled=${disabled}>${replay ? (busy ? 'Starting…' : 'Start replay') : busy ? (active ? 'Adding…' : 'Starting…') : (active ? 'Add to queue' : 'Start run')}</button>
       </div>
     </form>`;
 }
+
+// revLabel names a journey revision in the replay picker.
+const revLabel = (r, liveRev) => (r.kind === 'bug' ? `Bug revision ${r.n}` : r.n === liveRev ? `Revision ${r.n} (live)` : `Revision ${r.n}`);
+
+// replayLabel is how runs lists name a replay run.
+const replayLabel = (r) => `Replay · revision ${r.revision}`;
 
 // shownState is what the board calls a run's state: a waiting run whose wait
 // was met has been continued by a later run.
@@ -666,6 +711,7 @@ function RunCard({ r, madeBy }) {
           : active ? html`<${Thumb} key=${r.id} id=${r.id} stage=${r.stage} live=${r.live} />` : html`<${EndedThumb} key=${'end-' + r.id} id=${r.id} />`}
         <div class="rc-tags">
           <${StateTag} state=${r.state} wait=${r.wait} />
+          ${r.kind === 'replay' ? html`<span class="tag idle">${replayLabel(r)}</span>` : null}
           ${r.bugs ? html`<span class="tag bad">${r.bugs === 1 ? '1 bug' : `${r.bugs} bugs`}</span>` : null}
           ${r.blocked ? html`<span class="tag wait" title="The network fence refused hosts the site tried to load. Open the run to allow them.">${r.blocked} blocked</span>` : null}
         </div>
@@ -692,7 +738,8 @@ function RunsTable({ runs }) {
               <td class="thumbcell">${ACTIVE.has(r.state) ? html`<${Thumb} key=${r.id} id=${r.id} stage=${r.stage} live=${r.live} />` : html`<${EndedThumb} key=${'end-' + r.id} id=${r.id} />`}</td>
               <td><a href=${runHref(r.id)} onClick=${(e) => e.stopPropagation()}>${r.persona}</a>
                 ${r.role ? html`<div class="small muted">${r.role}</div>` : null}</td>
-              <td>${r.story}${ACTIVE.has(r.state) ? html` <a class="small" href=${runHref(r.id)} onClick=${(e) => e.stopPropagation()}>Watch</a>` : null}</td>
+              <td>${r.story}${ACTIVE.has(r.state) ? html` <a class="small" href=${runHref(r.id)} onClick=${(e) => e.stopPropagation()}>Watch</a>` : null}
+                ${r.kind === 'replay' ? html`<div class="small muted">${replayLabel(r)}</div>` : null}</td>
               <td><${StateTag} state=${r.state} wait=${r.wait} />${r.blocked ? html` <span class="tag wait" title="The network fence refused hosts the site tried to load. Open the run to allow them.">${r.blocked} blocked</span>` : null}
                 ${r.state === 'waiting' && r.wait && r.wait.status === 'open'
                   ? html`<div class="waitline small muted">Waiting for ${r.wait.waitingFor} · gives up ${fmtWhen(r.wait.deadline)}</div>` : null}</td>
@@ -1040,14 +1087,16 @@ function RunPage({ id, onChange }) {
     setConFocus((f) => ({ i, n: (f ? f.n : 0) + 1, quiet: framesMode }));
   };
   const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+  const replay = run.kind === 'replay';
 
   return html`
     <section class="page runpage">
       <p class="crumb"><a href="#/runs">Runs</a> / ${run.id}</p>
       <header class="runhead">
         <h1>${run.persona} <span class="muted">on</span> ${run.story} <${StateTag} state=${run.state} wait=${wait} /></h1>
-        <p class="runverdict">${run.outcome || (active ? 'Running. The outcome appears when the persona finishes.' : 'No outcome recorded.')}</p>
+        <p class="runverdict">${run.outcome || (active ? (replay ? 'Replaying. The outcome appears when the journey ends.' : 'Running. The outcome appears when the persona finishes.') : 'No outcome recorded.')}</p>
         <ul class="readout">
+          ${replay ? html`<li><b>${replayLabel(run)}</b></li>` : null}
           <li>${run.role || 'Persona'}</li>
           <li>Started ${fmtFull(run.started)}</li>
           ${took ? html`<li><b>${took}</b>${active ? ' so far' : ''}</li>` : null}
@@ -1085,6 +1134,7 @@ function RunPage({ id, onChange }) {
           ${run.story !== LEAD_STORY ? html`<${ConsoleCard} events=${events} blocked=${blocked} started=${run.started} active=${active} focus=${conFocus} />` : null}
         </div>
         <div class="stack">
+          ${replay ? html`<${ReplayCard} run=${run} artifacts=${artifacts} />` : null}
           ${chain || queued ? html`<${Chain} links=${links} current=${run.id} queued=${queued || []} />` : null}
           ${blocked.length ? html`<${BlockedHosts} hosts=${blocked} />` : null}
           <div class="card">
@@ -1117,6 +1167,37 @@ function RunPage({ id, onChange }) {
         </div>
       </div>
     </section>`;
+}
+
+// ReplayCard shows what a replay ran: the journey revision, its seed and
+// the test data drawn from it, and the screen where it stopped. Values are
+// shown as text: they come from agent-written code.
+function ReplayCard({ run, artifacts }) {
+  const has = (n) => artifacts.includes(n);
+  const [res, setRes] = useState(null);
+  const kept = has('replay-result.json');
+  useEffect(() => {
+    if (!kept) return undefined;
+    let live = true;
+    fetch(artifactURL(run.id, 'replay-result.json')).then((r) => (r.ok ? r.json() : null))
+      .then((x) => { if (live) setRes(x); }).catch(() => {});
+    return () => { live = false; };
+  }, [run.id, kept]);
+  const inputs = Object.entries((res && res.inputs) || {});
+  return html`
+    <div class="card replaycard">
+      <h2>Replay</h2>
+      <dl class="facts">
+        <dt>Journey</dt><dd>Revision ${run.revision}</dd>
+        <dt>Seed</dt><dd><code>${run.seed}</code></dd>
+        ${res && res.durationMs ? html`<dt>Took</dt><dd>${fmtDuration(res.durationMs)}</dd>` : null}
+      </dl>
+      ${inputs.length ? html`<h3>Test data</h3>
+        <dl class="facts inputs">${inputs.map(([k, v]) => html`<dt key=${'k' + k}>${k}</dt><dd key=${'v' + k}><code>${typeof v === 'string' ? v : JSON.stringify(v)}</code></dd>`)}</dl>`
+        : res ? html`<p class="muted small">This journey drew no test data.</p>` : null}
+      ${has('failed-step.png') ? html`<h3>Where it stopped</h3>
+        <a href=${artifactURL(run.id, 'failed-step.png')} target="_blank" rel="noopener"><img class="failedstep" src=${artifactURL(run.id, 'failed-step.png')} alt="The screen at the step that failed" /></a>` : null}
+    </div>`;
 }
 
 // waitText says what a run waited for and how that ended.

@@ -7,10 +7,12 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/boarding-party/boardingparty/internal/runs"
 	"github.com/boarding-party/boardingparty/internal/store"
 )
 
@@ -198,4 +200,47 @@ func TestDevDirectorSeedsChain(t *testing.T) {
 	if err := json.Unmarshal(b, &detail); err != nil || len(detail.Chain) != 2 {
 		t.Fatalf("continued run detail chain = %s (%v), want two", b, err)
 	}
+}
+
+// The dev director has a journey to replay, and a replay finishes with a
+// result like a real one.
+func TestDevDirectorReplaysAJourney(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	d, err := Start(ctx, sample(t), 50*time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	_, b := do(t, d, "GET", "/api/journeys", "", d.Token, "")
+	var js []struct {
+		ID      string `json:"id"`
+		LiveRev int    `json:"liveRev"`
+	}
+	if err := json.Unmarshal(b, &js); err != nil || len(js) != 1 || js[0].LiveRev == 0 {
+		t.Fatalf("journeys %s %v", b, err)
+	}
+	resp, b := do(t, d, "POST", "/api/journeys/"+js[0].ID+"/replay", "application/json", d.Token, `{}`)
+	if resp.StatusCode != 201 {
+		t.Fatalf("replay %d %s", resp.StatusCode, b)
+	}
+	var run store.Run
+	_ = json.Unmarshal(b, &run)
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		_, b = do(t, d, "GET", "/api/runs/"+run.ID, "", d.Token, "")
+		var got struct {
+			Run       store.Run `json:"run"`
+			Artifacts []string  `json:"artifacts"`
+		}
+		_ = json.Unmarshal(b, &got)
+		if got.Run.State.Final() {
+			if got.Run.Kind != store.RunReplay || !slices.Contains(got.Artifacts, runs.ReplayResultName) {
+				t.Fatalf("replay ended as %+v with %v", got.Run, got.Artifacts)
+			}
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatal("the replay never finished")
 }

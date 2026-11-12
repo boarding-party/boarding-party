@@ -206,6 +206,13 @@ func (l *Launcher) finishLater(r store.Run) {
 	if _, err := l.Svc.Active(r.Token); err != nil {
 		return // already ended
 	}
+	if r.Kind == store.RunReplay {
+		// A replay plays the journey back: a recording and a result, no bugs.
+		_, _ = l.Svc.Artifacts.Put(r.ID, "replay-1.webm", bytes.NewReader(sampleWebm))
+		_ = l.Svc.FinishReplay(r.Token, runs.ReplayResult{Status: "passed", Seed: r.Seed, DurationMs: int(l.Duration / time.Millisecond),
+			Inputs: map[string]any{"int1": 3, "plusEmail1": fmt.Sprintf("sam+%d@example.test", r.Seed)}}, time.Now().UTC())
+		return
+	}
 	if _, err := l.Svc.Artifacts.Put(r.ID, SampleArtifact, bytes.NewReader(sampleWebm)); err != nil {
 		_ = l.Svc.Finish(context.Background(), r.Token, store.RunFailed, "fake run: "+err.Error())
 		return
@@ -293,6 +300,10 @@ func start(ctx context.Context, dir string, projectYAML []byte, duration time.Du
 		st.Close()
 		return nil, err
 	}
+	if err := seedJourney(st, p, time.Now().UTC()); err != nil {
+		st.Close()
+		return nil, err
+	}
 	if err := seedChain(st, p, time.Now().UTC()); err != nil {
 		st.Close()
 		return nil, fmt.Errorf("seed runs: %w", err)
@@ -353,6 +364,34 @@ func start(ctx context.Context, dir string, projectYAML []byte, duration time.Du
 	}()
 	go svc.Watch(ctx, time.Second, 10*time.Minute)
 	return &Director{Base: "http://" + ln.Addr().String(), Token: token, srv: srv, st: st, dir: dir}, nil
+}
+
+// devJourney is the code of the journey a dev director starts with.
+const devJourney = `export default async function journey({ page, data, bp, expect }) {
+  const n = data.int(1, 5);
+  await bp.step('Open the app', async () => { await page.goto('https://demo.playwright.dev/todomvc/'); });
+  await bp.step('Add the todos', async () => {
+    for (let i = 1; i <= n; i++) await page.getByPlaceholder('What needs to be done?').fill('Todo ' + i).then(() => page.keyboard.press('Enter'));
+  });
+  await bp.step('Check the counter', async () => { await expect(page.getByTestId('todo-count')).toContainText(String(n)); });
+}
+`
+
+// seedJourney gives the first persona's first story a journey with two
+// revisions, so Start run can offer a replay.
+func seedJourney(st *store.Store, p project.Project, now time.Time) error {
+	if len(p.Roles) == 0 || len(p.Roles[0].Personas) == 0 || len(p.Roles[0].Stories) == 0 {
+		return nil
+	}
+	persona, story := p.Roles[0].Personas[0].Name, p.Roles[0].Stories[0].Name
+	for i, reason := range []string{"First recording of the story.", "The counter check now waits for the list to settle."} {
+		at := now.Add(time.Duration(i-2) * time.Hour)
+		if _, _, err := st.AddRevision(persona, story, store.Revision{Kind: store.RevisionFull, Code: devJourney, Reason: reason, Created: at},
+			store.Decision{Kind: "recorded", Reason: reason, Actor: store.ActorModel, Created: at}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // seedChain stores finished runs so the board has a chain, a waiting run and

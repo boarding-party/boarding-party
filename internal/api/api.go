@@ -115,6 +115,8 @@ func admin(svc *runs.Service, maxBytes int64, token string, hub *live.Hub, mail 
 	mux.HandleFunc("POST /api/leads/{persona}/wake", s.wakeLead)
 	mux.HandleFunc("PUT /api/children/{name}", s.adoptChild)
 	mux.HandleFunc("DELETE /api/children/{name}", s.deleteChild)
+	mux.HandleFunc("GET /api/journeys", s.listJourneys)
+	mux.HandleFunc("POST /api/journeys/{id}/replay", s.replayJourney)
 	s.routes = s.withActor(mux)
 	return s, guardAdmin(token, s.routes)
 }
