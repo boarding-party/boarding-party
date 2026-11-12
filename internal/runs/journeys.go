@@ -3,11 +3,16 @@ package runs
 import (
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
 	"github.com/boarding-party/boardingparty/internal/store"
 )
+
+// tokenLike matches a run token: 64 hex characters, as every director URL
+// a run is given carries one.
+var tokenLike = regexp.MustCompile(`[0-9a-fA-F]{64}`)
 
 // Limits on what an AI run may save as a journey.
 const (
@@ -64,6 +69,9 @@ func (s *Service) SaveJourney(token string, in SaveJourney) (store.Revision, err
 	}
 	if strings.TrimSpace(in.Code) == "" {
 		return store.Revision{}, errors.New("code is required")
+	}
+	if tokenLike.MatchString(in.Code) {
+		return store.Revision{}, errors.New("the journey holds what looks like a run token or server URL; journeys replay unattended, so they never carry one")
 	}
 	kind := "recorded"
 	switch in.Kind {

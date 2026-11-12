@@ -145,3 +145,20 @@ func TestSavedRevisionDecidesTheRun(t *testing.T) {
 		t.Fatalf("confirm with a live journey: %v", err)
 	}
 }
+
+// A journey replays unattended with its run's credentials in reach, so code
+// that carries a run token (every director URL does) is refused.
+func TestSaveJourneyRefusesTokens(t *testing.T) {
+	svc, _ := newSvc(t)
+	r := startedRun(t, svc)
+	for name, code := range map[string]string{
+		"own token":   journeyCode + "\n// " + r.Token,
+		"upload url":  "await fetch('http://director:8080/artifacts/" + r.Token + "/x')",
+		"other token": "const t = '" + strings.Repeat("ab", 32) + "';",
+	} {
+		_, err := svc.SaveJourney(r.Token, SaveJourney{Kind: store.RevisionFull, Code: code, Reason: "x", SelfReplay: ReplayResult{Status: "passed"}})
+		if err == nil || !strings.Contains(err.Error(), "token") {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+}
