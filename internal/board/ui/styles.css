@@ -365,7 +365,7 @@ aside nav.leads .sublabel { color: var(--side-ink); opacity: .7; padding: 0 10px
 .runhead h1 { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; }
 .runhead h1 .muted { font-weight: 400; }
 .runhead h1 .tag { align-self: center; }
-.runverdict { font-size: 15px; line-height: 1.55; max-width: 74ch; margin: 6px 0 10px; overflow-wrap: anywhere; }
+.runverdict { font-size: 15px; line-height: 1.55; max-width: 74ch; margin: 6px 0 10px; overflow-wrap: anywhere; white-space: pre-line; }
 .page.runpage { max-width: 1440px; }
 .readout { list-style: none; display: flex; flex-wrap: wrap; gap: 4px 0; margin: 0; padding: 0; font-size: 13px; color: var(--muted); }
 .readout li { padding: 0 12px; border-left: 1px solid var(--line); }
@@ -546,4 +546,4 @@ dialog.shotbox::backdrop { background: rgba(10,14,20,.72); }
 /* Replay runs: what the journey drew and where it stopped. */
 .replaycard h3 { margin: 14px 0 6px; font-size: 13px; font-weight: 600; }
 .replaycard .inputs dd code { word-break: break-all; }
-.failedstep { display: block; width: 100%; border: 1px solid var(--line); border-radius: 6px; }
+.failedstep { display: block; width: 100%; max-height: 320px; object-fit: cover; object-position: top; border: 1px solid var(--line); border-radius: 6px; }
