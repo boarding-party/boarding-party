@@ -199,3 +199,22 @@ func TestNoWakeOverLeadBudget(t *testing.T) {
 		t.Fatalf("woke over budget: %+v", lr)
 	}
 }
+
+func TestReplayOfAChildWakesNoLead(t *testing.T) {
+	f := leadFix(t, "23:00")
+	f.pastLeadRun("l1", "Kate", "owner", now.Add(-time.Hour))
+	f.pastLeadRun("l2", "Lee", "clerk", now.Add(-time.Hour))
+	if err := f.st.CreateRun(store.Run{ID: "rp", Token: "tok-rp", Persona: "Ana", Role: "Ana", Story: "pay", State: store.RunRunning,
+		Started: f.clk.Now(), Chain: "rp", Kind: store.RunReplay}); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := f.st.FinishRun("rp", store.RunDone, "Passed", f.clk.Now()); err != nil || !ok {
+		t.Fatal(ok, err)
+	}
+	if err := f.s.wakeLeads(f.clk.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if q, ok := f.leadRuns()["Kate"]; ok {
+		t.Fatalf("a replay woke Kate: %+v", q)
+	}
+}

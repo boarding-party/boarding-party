@@ -89,7 +89,8 @@ func (s *Scheduler) wakeReason(p project.Project, l project.Persona, children []
 			kids[c] = true
 		}
 		for _, r := range rs {
-			if kids[r.Persona] && r.State.Final() && r.Finished.After(last.Started) {
+			// A replay is not news a lead plans from, and waking one costs a model run.
+			if kids[r.Persona] && r.Kind != store.RunReplay && r.State.Final() && r.Finished.After(last.Started) {
 				return "Children finished", nil
 			}
 		}

@@ -203,3 +203,17 @@ func TestSaveProjectChildNameOrEmailAnyCase(t *testing.T) {
 		t.Fatalf("child's address: %v", err)
 	}
 }
+
+func TestLeadUsageSkipsReplays(t *testing.T) {
+	svc := leadSvc(t, 2)
+	at := time.Now().Add(-time.Minute)
+	if err := svc.Store.CreateRun(store.Run{ID: "rp", Token: "rp", Persona: "Ana", Role: "Ana", Story: "pay",
+		State: store.RunDone, Started: at, Finished: at, Chain: "rp", Kind: store.RunReplay}); err != nil {
+		t.Fatal(err)
+	}
+	p, _ := svc.Store.Project()
+	u, err := svc.LeadUsage(p, "Kate", time.Now())
+	if err != nil || u.Runs != 0 {
+		t.Fatalf("usage %+v %v: a replay used up a lead's runs", u, err)
+	}
+}

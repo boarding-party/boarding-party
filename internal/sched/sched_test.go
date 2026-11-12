@@ -805,3 +805,25 @@ func TestDrainLogsAMissingKeyOnce(t *testing.T) {
 		t.Fatalf("logged %d times over three ticks, want once:\n%s", n, buf.String())
 	}
 }
+
+// A replay spends nothing and must never cause spend: a passed replay of a
+// story with hand-offs queues no AI run.
+func TestReplayQueuesNothing(t *testing.T) {
+	f := newFix(t, schedYAML)
+	r := store.Run{ID: "rp", Token: "tok-rp", Persona: "Ada", Role: "patient", Story: "book", State: store.RunRunning,
+		Started: f.clk.Now(), Chain: "rp", Kind: store.RunReplay, JourneyID: "j", Revision: 1, Seed: 3}
+	if err := f.st.CreateRun(r); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := f.st.FinishRun("rp", store.RunDone, "Passed", f.clk.Now()); err != nil || !ok {
+		t.Fatal(ok, err)
+	}
+	f.tick()
+	rs, err := f.st.Runs(10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if q := f.queue(); len(q) != 0 || len(rs) != 1 {
+		t.Fatalf("a replay queued %+v and started %d runs", q, len(rs)-1)
+	}
+}

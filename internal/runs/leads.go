@@ -50,7 +50,7 @@ func (s *Service) LeadUsage(p project.Project, lead string, now time.Time) (Lead
 		if !who[r.Persona] {
 			continue
 		}
-		if r.Persona != lead {
+		if r.Persona != lead && r.Kind != store.RunReplay { // replays cost nothing and use none of a lead's runs
 			u.Runs++
 		}
 		us, err := s.Usage(r.ID)

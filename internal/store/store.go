@@ -510,7 +510,8 @@ func (s *Store) RunsInChain(chain string) ([]Run, error) {
 // Unfollowed returns done or waiting runs the scheduler has not yet acted on,
 // oldest finished first.
 func (s *Store) Unfollowed() ([]Run, error) {
-	return s.queryRuns(`SELECT ` + runCols + ` FROM runs WHERE state IN ('done','waiting') AND followed = 0 ORDER BY finished, rowid`)
+	// Replays are never followed: they spend nothing and must cause no spend.
+	return s.queryRuns(`SELECT ` + runCols + ` FROM runs WHERE state IN ('done','waiting') AND followed = 0 AND kind = '' ORDER BY finished, rowid`)
 }
 
 // BugCounts returns how many bugs each of the runs reported; runs with none
