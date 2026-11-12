@@ -11,7 +11,7 @@
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; }
-body { background: var(--canvas); color: var(--ink); font: 14px/1.45 var(--font); font-variant-numeric: tabular-nums; }
+body { background: var(--canvas); color: var(--ink); font: 15px/1.5 var(--font); font-variant-numeric: tabular-nums; }
 a { color: var(--accent); text-decoration: none; }
 a:hover { text-decoration: underline; }
 button { font: inherit; cursor: pointer; }
@@ -51,7 +51,7 @@ main { min-width: 0; }
 .grow { flex: 1; }
 
 /* pages */
-.page { padding: 20px 24px 48px; max-width: 1180px; }
+.page { padding: 20px 28px 48px; max-width: 1320px; }
 h1 { font-size: 22px; margin: 0 0 4px; letter-spacing: -.015em; overflow-wrap: anywhere; }
 .lede { color: var(--muted); margin: 0 0 18px; }
 h2 { font-size: 15px; margin: 0 0 10px; }
@@ -294,7 +294,13 @@ fieldset.handoffs p { margin: 0; }
 .issue .when { white-space: nowrap; }
 .issue .meta { grid-column: 2 / 4; overflow-wrap: anywhere; }
 .reopened { display: inline-block; font-size: 12px; font-weight: 600; color: var(--bad); margin-right: 6px; }
-.issuepage { max-width: 880px; }
+/* Issue page: the reports take the width, the status and actions sit in a
+   column beside them; each report puts its screenshot next to its text. */
+.issuelayout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; align-items: start; }
+@media (min-width: 1100px) { .issuelayout { grid-template-columns: minmax(0, 1fr) 340px; } .issueside { order: 2; position: sticky; top: 16px; } }
+.report { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px 18px; padding: 6px 0 14px; }
+.report.with-shot { grid-template-columns: minmax(0, 1fr) minmax(320px, 460px); align-items: start; }
+@media (max-width: 900px) { .report.with-shot { grid-template-columns: minmax(0, 1fr); } }
 .verdict { display: block; font-size: 14px; border-left: 3px solid var(--line); background: var(--surface); padding: 10px 12px; border-radius: 0 6px 6px 0; overflow-wrap: anywhere; white-space: pre-wrap; }
 .verdict b { display: block; font-weight: 600; margin-bottom: 2px; }
 .verdict.ok { border-left-color: var(--ok); background: var(--ok-soft); }
@@ -399,7 +405,7 @@ ol.bugs > li.lit { background: var(--accent-soft); }
 .finding-meta dt { color: var(--muted); }
 .finding-meta dd { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 ol.bugs .con-before { margin-left: 22px; }
-.report-shot { margin: 0 8px 12px; max-width: 360px; }
+.report-shot { margin: 0 8px; min-width: 0; }
 .con.lit { background: var(--wait-soft); }
 .con { scroll-margin-top: 70px; transition: background-color .6s; }
 

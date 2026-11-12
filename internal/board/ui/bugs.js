@@ -160,14 +160,15 @@ export function IssuePage({ id }) {
   const verifying = st === 'verifying';
 
   return html`
-    <section class="page">
+    <section class="page wide">
       <p class="crumb"><a href="#/bugs">Bugs</a> / ${issue.id}</p>
       <h1>${issue.summary || 'No summary'}</h1>
       <p class="lede"><${StatusTag} status=${st} />
         ${parseTime(issue.reopened) ? html` <span class="reopened">Reopened ${fmtWhen(issue.reopened)}</span>` : null}
         ${' '}${plural(issue.reports, 'report', 'reports')}${issue.lastSeen ? `, last seen ${fmtWhen(issue.lastSeen)}` : ''}.</p>
       ${err ? html`<div class="note bad banner">Lost contact with the director: ${err}. Retrying.</div>` : null}
-      <div class="stack issuepage">
+      <div class="issuelayout">
+      <div class="stack issueside">
         ${verifying ? html`<div class="verdict run">A persona is checking the fix. This page updates when the check ends.</div>`
           : issue.checkNote ? html`<div class=${'verdict ' + checkLook(issue.checkNote)}><b>Last fix check</b>${issue.checkNote}</div>` : null}
         ${st === 'not_a_bug' && issue.reason ? html`<div class="verdict"><b>Not a bug</b>${issue.reason}</div>` : null}
@@ -194,6 +195,7 @@ export function IssuePage({ id }) {
           <p class="small muted" style="margin:10px 0 0">${verifying ? 'Changing the status now ignores the check under way.'
             : 'Mark fixed queues the story that found it, so a persona can look for it again.'}</p>
         </div>
+      </div>
         <div class="card">
           <h2>Reports</h2>
           <ul class="bugs">${reports.map((r) => html`<li key=${r.id}><${Report} r=${r} /></li>`)}</ul>
@@ -204,7 +206,7 @@ export function IssuePage({ id }) {
 
 function Report({ r }) {
   const tok = SHOT_TOKEN.exec(r.evidence || '');
-  return html`
+  return html`<div class=${'report' + (tok ? ' with-shot' : '')}>
     <div class="bug">
       <span class=${'tag ' + (SEVERITY_TAG.get((r.severity || '').toLowerCase()) || 'idle')}>${r.severity || 'unrated'}</span>
       <span class="sum">${r.summary}</span>
@@ -214,5 +216,6 @@ function Report({ r }) {
       ${r.evidence ? html`<span class="meta"><b>Evidence:</b> ${r.evidence}</span>` : null}
       ${r.note ? html`<span class="meta"><b>Note:</b> ${r.note}</span>` : null}
     </div>
-    ${tok ? html`<div class="report-shot"><${Shot} src=${artifactURL(r.run_id, tok[0])} alt=${'Screenshot for: ' + r.summary} height=${280} /></div>` : null}`;
+    ${tok ? html`<div class="report-shot"><${Shot} src=${artifactURL(r.run_id, tok[0])} alt=${'Screenshot for: ' + r.summary} height=${520} /></div>` : null}
+  </div>`;
 }
