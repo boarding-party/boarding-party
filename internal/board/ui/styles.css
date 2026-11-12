@@ -92,16 +92,19 @@ dialog.modal::backdrop { background: rgba(24,32,43,.45); }
 /* tables */
 table { width: 100%; border-collapse: collapse; }
 th { text-align: left; font-size: 12px; color: var(--muted); font-weight: 500; padding: 6px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
-td { padding: 8px; border-bottom: 1px solid var(--line-soft); vertical-align: top; }
+/* Type scale: page text 15px, rows of a list or table 14px, their meta
+   13px, labels and tags 12px. A row's title is 500, not bold: a page of
+   bold titles reads as shouting. */
+td { padding: 8px; border-bottom: 1px solid var(--line-soft); vertical-align: top; font-size: 14px; }
 tr:last-child td { border-bottom: 0; }
 tr.click { cursor: pointer; }
 tr.click:hover td { background: #F7F9FB; }
-td.when { white-space: nowrap; color: var(--muted); }
+td.when { white-space: nowrap; color: var(--muted); font-size: 13px; }
 td.outcome { max-width: 420px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 td.thumbcell { width: 96px; padding-right: 0; }
 a.thumb { display: flex; align-items: center; justify-content: center; width: 96px; height: 60px; background: var(--player); border-radius: 6px; overflow: hidden; color: #8C97A8; font-size: 11px; font-weight: 400; text-align: center; line-height: 1.2; }
 a.thumb img { width: 100%; height: 100%; object-fit: contain; display: block; }
-td a { color: var(--ink); font-weight: 600; }
+td a { color: var(--ink); font-weight: 500; }
 
 /* tags */
 .tag { display: inline-block; padding: 1px 8px; border-radius: 5px; font-size: 12px; font-weight: 600; white-space: nowrap; }
@@ -148,7 +151,7 @@ td a { color: var(--ink); font-weight: 600; }
 .bug.seek { cursor: pointer; }
 .bug.seek:hover { background: #F7F9FB; }
 .bug .tag { align-self: start; }
-.bug .sum { font-weight: 600; overflow-wrap: anywhere; }
+.bug .sum { font-size: 14px; font-weight: 500; overflow-wrap: anywhere; }
 .bug .meta { grid-column: 2 / 4; font-size: 13px; color: var(--muted); white-space: pre-wrap; overflow-wrap: anywhere; }
 .bug .meta b { color: var(--ink); font-weight: 500; }
 .stamp { font-family: var(--mono); font-size: 12px; color: var(--accent); background: var(--accent-soft); border: 0; border-radius: 4px; padding: 1px 6px; align-self: start; }
@@ -289,14 +292,14 @@ fieldset.handoffs p { margin: 0; }
 @media (max-width: 860px) { .mbform { grid-template-columns: minmax(0, 1fr); } .inboxbar .field { min-width: 0; flex: 1; } }
 
 /* Bugs page */
-.issuegroup { font-size: 14px; margin: 6px 8px 4px; display: flex; gap: 8px; align-items: center; }
+.issuegroup { font-size: 13px; font-weight: 600; margin: 6px 8px 4px; display: flex; gap: 8px; align-items: center; }
 .issuegroup .count, nav .count { font-weight: 500; }
 .issues { list-style: none; margin: 0; padding: 0; }
 .issues li + li { border-top: 1px solid var(--line-soft); }
-.issue { display: grid; grid-template-columns: 9.5em minmax(0, 1fr) auto; gap: 2px 10px; padding: 9px 8px; border-radius: 6px; color: inherit; }
+.issue { display: grid; grid-template-columns: 6.5rem minmax(0, 1fr) auto; gap: 2px 12px; padding: 10px 8px; font-size: 14px; border-radius: 6px; color: inherit; }
 .issue:hover { background: #F7F9FB; text-decoration: none; }
 .issue .tag { align-self: start; justify-self: start; }
-.issue .sum { font-weight: 600; overflow-wrap: anywhere; }
+.issue .sum { font-weight: 500; overflow-wrap: anywhere; }
 .issue .when { white-space: nowrap; }
 .issue .meta { grid-column: 2 / 4; overflow-wrap: anywhere; }
 .reopened { display: inline-block; font-size: 12px; font-weight: 600; color: var(--bad); margin-right: 6px; }
@@ -406,7 +409,7 @@ ol.bugs > li.lit { background: var(--accent-soft); }
 .finding-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .finding-n { font-size: 12px; font-weight: 700; color: var(--muted); min-width: 14px; }
 .finding-issue { margin-left: auto; }
-.finding-sum { font-weight: 600; font-size: 14.5px; line-height: 1.4; margin: 6px 0 6px 22px; overflow-wrap: anywhere; }
+.finding-sum { font-weight: 500; font-size: 15px; line-height: 1.4; margin: 6px 0 6px 22px; overflow-wrap: anywhere; }
 .finding-meta { display: grid; grid-template-columns: 70px minmax(0, 1fr); gap: 4px 10px; margin: 0 0 0 22px; font-size: 13px; }
 .finding-meta dt { color: var(--muted); }
 .finding-meta dd { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
@@ -483,7 +486,7 @@ dialog.shotbox::backdrop { background: rgba(10,14,20,.72); }
 .rc-tags { position: absolute; left: 8px; top: 8px; display: flex; flex-wrap: wrap; gap: 4px; pointer-events: none; }
 .rc-tags .tag { box-shadow: 0 1px 2px rgba(0,0,0,.25); }
 .rc-body { padding: 10px 12px 12px; display: flex; flex-direction: column; gap: 3px; min-width: 0; }
-.rc-who { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rc-who { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rc-who a { color: var(--ink); }
 .rc-who .muted { font-weight: 400; font-size: 12px; }
 .rc-meta { display: flex; gap: 10px; font-size: 12px; color: var(--muted); }
