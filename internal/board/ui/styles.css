@@ -528,7 +528,11 @@ dialog.shotbox::backdrop { background: rgba(10,14,20,.72); }
 .valuehead { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 10px 16px; margin-bottom: 12px; }
 .valuesum { margin: 0; max-width: 70ch; font-size: 15px; }
 .valuesum b { font-weight: 600; }
-.valuesum .perbug { color: var(--accent); }
+.valuesum .perbug, .valuebar .perbug { color: var(--accent); }
+.valuebar { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; margin-bottom: 14px; padding: 10px 16px; text-align: left; color: inherit; }
+.valuebar:hover { border-color: #C3CAD4; }
+.valuemore { flex: none; font-size: 13px; color: var(--accent); }
+.valuemore::after { content: ""; display: inline-block; width: 6px; height: 6px; margin: 0 2px 2px 7px; border: solid currentColor; border-width: 0 1.5px 1.5px 0; transform: rotate(45deg); }
 .valuetab { margin-top: 10px; }
 .valuetab th.num, .valuetab td.num { width: 1%; white-space: nowrap; }
 .valuetab .spent { display: flex; align-items: center; gap: 10px; white-space: nowrap; }

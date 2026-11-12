@@ -62,7 +62,7 @@ export function BugsPage() {
     <section class="page">
       <h1>Bugs</h1>
       <p class="lede">Problems your personas found, across all runs. A report of the same problem joins its issue. Mark an issue fixed and a persona checks it again.</p>
-      <${Value} days=${params.days === '30' ? 30 : 7} by=${params.by === 'story' ? 'story' : 'persona'} />
+      <${Value} days=${params.days === '30' ? 30 : 7} by=${params.by === 'story' ? 'story' : 'persona'} open=${params.spend === '1'} />
       ${err ? html`<div class="note bad" role="alert">Could not load the bugs: ${err}</div>` : null}
       ${issues === null && !err ? html`<p class="muted">Loading…</p>` : null}
       ${issues && issues.length === 0 ? html`<div class="empty"><b>No bugs yet.</b>Bugs your personas report show up here.</div>` : null}
@@ -86,10 +86,11 @@ export function BugsPage() {
 const VALUE_POLL_MS = 60000;
 const money = (n) => '$' + (Number(n) || 0).toFixed(2);
 
-// Value says what the cast spent lately and what it found for it, and where
-// the money went: the dearest personas or stories first, each with its share
-// of the spend, so one that spends and finds nothing stands out.
-function Value({ days, by }) {
+// Value says what the cast spent lately and what it found for it. Closed it
+// is one line; open it shows where the money went: the dearest personas or
+// stories first, each with its share of the spend, so one that spends and
+// finds nothing stands out.
+function Value({ days, by, open }) {
   const [v, setV] = useState(null);
   usePoll(async (stale) => {
     try {
@@ -101,15 +102,29 @@ function Value({ days, by }) {
   if (!v || !v.runs || v.spent < 0.01) return null; // nothing spent, nothing to weigh
   const rows = (by === 'story' ? v.stories : v.personas) || [];
   const top = rows.reduce((m, r) => Math.max(m, r.spent), 0);
+  const toggle = () => setParams({ spend: !open });
+  if (!open) return html`
+    <button type="button" class="card valuebar" aria-expanded="false" onClick=${toggle}>
+      <ul class="readout">
+        <li>Last ${days} days</li>
+        <li><b>${money(v.spent)}</b> on ${plural(v.runs, 'run', 'runs')}</li>
+        <li><b>${plural(v.bugs, 'new bug', 'new bugs')}</b></li>
+        ${v.bugs ? html`<li><b class="perbug">${money(v.perBug)}</b> a bug</li>` : null}
+      </ul>
+      <span class="valuemore">Where it went</span>
+    </button>`;
   return html`
     <div class="card value">
       <div class="valuehead">
         <p class="valuesum">
           In the last ${days} days your personas spent <b>${money(v.spent)}</b> on ${plural(v.runs, 'run', 'runs')} and found <b>${plural(v.bugs, 'new bug', 'new bugs')}</b>${v.bugs ? html`: <b class="perbug">${money(v.perBug)}</b> a bug` : ''}.
         </p>
-        <div class="viewtoggle" role="group" aria-label="Period">
-          ${[7, 30].map((n) => html`<button type="button" key=${n} class=${days === n ? 'on' : ''} aria-pressed=${days === n}
-            onClick=${() => setParams({ days: n === 7 ? null : n })}>${n} days</button>`)}
+        <div class="row">
+          <div class="viewtoggle" role="group" aria-label="Period">
+            ${[7, 30].map((n) => html`<button type="button" key=${n} class=${days === n ? 'on' : ''} aria-pressed=${days === n}
+              onClick=${() => setParams({ days: n === 7 ? null : n })}>${n} days</button>`)}
+          </div>
+          <button type="button" class="btn ghost small" aria-expanded="true" onClick=${toggle}>Hide</button>
         </div>
       </div>
       <div class="viewtoggle" role="group" aria-label="Split by">
