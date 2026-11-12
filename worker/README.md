@@ -101,3 +101,26 @@ downloads every file it lists into `/workspace/files/` (30 s in total, best effo
 (mapped to Playwright `--device`); unknown values are ignored.
 
 Smoke test: `docker run --rm bp-worker:dev node /opt/bp/smoke/screen-smoke.mjs` (expects `ok N frames`).
+
+## Journeys (`bp-replay`)
+
+`bp-replay` runs a recorded journey (an ES module exporting `async function journey({ page, data, bp, expect })`)
+with Playwright and no model. Two modes:
+
+- `bp-replay --journey <file> --self [--seed N] [--expect-fail-step N] [--device KEY]`: an AI run proves the
+  journey it wrote. A fresh browser (no CDP port, so it never clashes with the run's own browser), one JSON line on
+  stdout (`{"status":"passed"|"failed","step","stepName","error","seed","inputs","durationMs"}`), exit 0 only when
+  the result proves the revision: passed, or failed exactly at `--expect-fail-step`.
+- `bp-replay --journey-url URL --report-url URL --upload-url URL --profile-url URL [--live-url URL] [--console-url URL] [--seed N] [--device KEY]`:
+  a replay run (a tiny `command` session). Fetches the code, restores the persona's browser profile, starts
+  `bp-screen` and `bp-console` (Chromium gets the `pw-config.json` flags, CDP on 9222), runs, uploads `trace.zip`,
+  `replay-N.webm` and `failed-step.png`, saves the profile back and PUTs the result to the report URL.
+
+The journey runs in a child process whose argv and environment carry none of the URLs (they hold the run token).
+Playwright comes from the Playwright MCP install, so `locator.fill` types at the same human pace as `browser_type`.
+`expect` is Playwright Test's. Helpers: `bp.step(name, fn)` (numbered from 1; a failure records the step, its name
+and a screenshot), `bp.money(n)` (`£1,234.56`), `data.int(min, max)`, `data.pick(list)`, `data.plusEmail(address)`
+(`info+megan@x` becomes `info+megan-<seed>@x`). Every drawn value is recorded in `inputs`; the same seed draws the
+same values. `bp.waitFor` is not available yet. A journey has 10 minutes (`BP_REPLAY_TIMEOUT_MS`), each action 15 s.
+
+Smoke tests: `node /opt/bp/smoke/journey-lib-smoke.mjs` and `node /opt/bp/smoke/replay-smoke.mjs` (expect `ok …`).

@@ -40,6 +40,10 @@ jobs:
         run: docker run --rm --user 1000 bp-worker:smoke node /opt/bp/smoke/console-smoke.mjs
       - name: Smoke test the no-browser MCP server of lead runs
         run: docker run --rm --user 1000 bp-worker:smoke node /opt/bp/smoke/null-mcp-smoke.mjs
+      - name: Smoke test journey replays
+        run: |
+          docker run --rm --user 1000 bp-worker:smoke node /opt/bp/smoke/journey-lib-smoke.mjs
+          docker run --rm --user 1000 --tmpfs /workspace:rw,mode=1777 bp-worker:smoke node /opt/bp/smoke/replay-smoke.mjs
 
   images:
     needs: [test, worker-smoke]
