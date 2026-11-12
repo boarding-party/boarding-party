@@ -344,28 +344,57 @@ function RunStrip({ director, active, status, onChange }) {
 // ---- runs page ----------------------------------------------------------
 
 function RunsPage({ project, projectErr, runs, runsErr, queue, status, active, onStarted }) {
+  const start = useParams().start === '1'; // in the address, so #/runs?start=1 opens the dialog
+  const canStart = !!project && allPersonas(project).length > 0;
   return html`
     <section class="page wide">
-      <h1>Runs</h1>
-      <p class="lede">One persona working through one story on your staging site. Runs go one at a time.</p>
+      <div class="pagehead">
+        <div>
+          <h1>Runs</h1>
+          <p class="lede">One persona working through one story on your staging site. Runs go one at a time.</p>
+        </div>
+        ${canStart ? html`<button class="btn primary" type="button" onClick=${() => setParams({ start: true })}>Start run</button>` : null}
+      </div>
+      ${canStart ? html`<${StartRunDialog} open=${start} project=${project} active=${active} status=${status} onStarted=${onStarted} />` : null}
       <div class="stack">
         ${projectErr ? html`<div class="note bad">Could not load the project: ${projectErr}</div>` : null}
         ${project === null
           ? html`<div class="empty"><b>Set up your project first</b>Runs need a site, a role, a persona and a story.
               <div style="margin-top:12px"><a class="btn primary" href="#/project">Set up your project</a></div></div>`
           : project ? html`<div class="runs-top">
-              <${StartRun} project=${project} active=${active} status=${status} onStarted=${onStarted} />
+              ${canStart ? null : html`<div class="empty"><b>Add a persona to start a run</b>
+                Your project has no personas yet. <a href="#/project">Edit the project</a>.</div>`}
               ${queue.length || (status && status.due.length) ? html`<${UpNext} queue=${queue} due=${status ? status.due : []} zone=${status && status.timezone} onChange=${onStarted} />` : null}
             </div>` : null}
         ${runsErr ? html`<div class="note bad">Could not load runs: ${runsErr}</div>` : null}
         ${runs && runs.length === 0 && project !== null
-          ? html`<div class="empty"><b>No runs yet.</b>Start one above.</div>` : null}
+          ? html`<div class="empty"><b>No runs yet.</b>Choose Start run to send the first persona in.</div>` : null}
         ${runs && runs.length > 0 ? html`<${RunsBoard} runs=${runs} project=${project} />` : null}
       </div>
     </section>`;
 }
 
-function StartRun({ project, active, status, onStarted }) {
+// StartRunDialog picks a persona and a story in a modal opened from the
+// page head. Closing it, or starting a run, takes start=1 out of the address.
+function StartRunDialog({ open, project, active, status, onStarted }) {
+  const ref = useRef(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    if (open && !el.open) { el.showModal(); el.querySelector('select')?.focus(); }
+    if (!open && el.open) el.close();
+  }, [open]);
+  // Every way out goes through the address; the effect above closes it.
+  const close = () => setParams({ start: null });
+  return html`
+    <dialog ref=${ref} class="modal" aria-labelledby="sr-title"
+        onCancel=${(e) => { e.preventDefault(); close(); }}
+        onClick=${(e) => { if (e.target === ref.current) close(); }}>
+      ${open ? html`<${StartRun} project=${project} active=${active} status=${status} onStarted=${onStarted} onClose=${close} />` : null}
+    </dialog>`;
+}
+
+function StartRun({ project, active, status, onStarted, onClose }) {
   const personas = allPersonas(project);
   const [persona, setPersona] = useState('');
   const [story, setStory] = useState('');
@@ -396,6 +425,7 @@ function StartRun({ project, active, status, onStarted }) {
         body: JSON.stringify({ persona: p, story: s }),
       });
       await onStarted();
+      onClose();
       if (run && run.id) location.hash = runHref(run.id); // a queued run has no id yet
     } catch (e2) {
       setErr(e2.message); // 400 invalid is shown verbatim
@@ -405,37 +435,33 @@ function StartRun({ project, active, status, onStarted }) {
     }
   };
 
-  if (!personas.length) {
-    return html`<div class="empty"><b>Add a persona to start a run</b>
-      Your project has no personas yet. <a href="#/project">Edit the project</a>.</div>`;
-  }
-
   return html`
-    <form class="card" onSubmit=${submit}>
-      <h2>Start run</h2>
-      <div class="startform">
-        <div class="field">
-          <label for="sr-persona">Persona</label>
-          <select id="sr-persona" value=${p} disabled=${busy}
-              onChange=${(e) => { setPersona(e.currentTarget.value); setStory(''); setErr(''); }}>
-            ${roles.map((r) => html`<optgroup label=${r.name}>
-              ${r.personas.map((x) => html`<option value=${x.name}>${x.name}</option>`)}
-            </optgroup>`)}
-          </select>
-        </div>
-        <div class="field">
-          <label for="sr-story">Story</label>
-          <select id="sr-story" value=${s} disabled=${busy || !stories.length}
-              onChange=${(e) => { setStory(e.currentTarget.value); setErr(''); }}>
-            ${stories.length ? stories.map((x) => html`<option value=${x.name}>${x.name}</option>`)
-              : html`<option value="">No stories for this role</option>`}
-          </select>
-        </div>
-        <button class="btn primary" type="submit" disabled=${disabled}>${busy ? (active ? 'Adding…' : 'Starting…') : (active ? 'Add to queue' : 'Start run')}</button>
+    <form class="startrun" onSubmit=${submit}>
+      <h2 id="sr-title">Start run</h2>
+      <div class="field">
+        <label for="sr-persona">Persona</label>
+        <select id="sr-persona" value=${p} disabled=${busy}
+            onChange=${(e) => { setPersona(e.currentTarget.value); setStory(''); setErr(''); }}>
+          ${roles.map((r) => html`<optgroup label=${r.name}>
+            ${r.personas.map((x) => html`<option value=${x.name}>${x.name}</option>`)}
+          </optgroup>`)}
+        </select>
+      </div>
+      <div class="field">
+        <label for="sr-story">Story</label>
+        <select id="sr-story" value=${s} disabled=${busy || !stories.length}
+            onChange=${(e) => { setStory(e.currentTarget.value); setErr(''); }}>
+          ${stories.length ? stories.map((x) => html`<option value=${x.name}>${x.name}</option>`)
+            : html`<option value="">No stories for this role</option>`}
+        </select>
       </div>
       ${goal ? html`<p class="goal">${goal}</p>` : null}
       ${active ? html`<div class="note">A run is active (<a href=${runHref(active.id)}>${active.persona} · ${active.story}</a>). A new run waits in Up next and starts when it finishes.</div>` : null}
       ${err ? html`<div class="note bad" role="alert">${err.charAt(0).toUpperCase() + err.slice(1)}</div>` : null}
+      <div class="row end">
+        <button class="btn" type="button" onClick=${onClose}>Cancel</button>
+        <button class="btn primary" type="submit" disabled=${disabled}>${busy ? (active ? 'Adding…' : 'Starting…') : (active ? 'Add to queue' : 'Start run')}</button>
+      </div>
     </form>`;
 }
 

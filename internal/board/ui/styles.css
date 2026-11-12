@@ -76,8 +76,14 @@ h2 { font-size: 15px; margin: 0 0 10px; }
 .field label { font-size: 13px; font-weight: 500; }
 input, select, textarea { font: inherit; font-size: 13px; border: 1px solid var(--line); border-radius: 6px; padding: 7px 10px; background: #fff; color: var(--ink); width: 100%; }
 select:disabled { background: var(--idle-soft); color: var(--muted); }
-.startform { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr) auto; gap: 10px; align-items: end; }
-.goal { margin: 10px 0 0; font-size: 13px; color: var(--muted); }
+.pagehead { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.pagehead .btn { margin-top: 4px; }
+dialog.modal { border: 1px solid var(--line); border-radius: 10px; padding: 20px; width: min(520px, calc(100% - 32px)); background: var(--surface); color: var(--ink); box-shadow: 0 12px 40px rgba(24,32,43,.25); }
+dialog.modal::backdrop { background: rgba(24,32,43,.45); }
+.startrun { display: flex; flex-direction: column; gap: 14px; }
+.startrun h2 { margin: 0; }
+.startrun .row.end { margin-top: 4px; }
+.goal { margin: 0; padding: 10px 12px; border-radius: 6px; background: var(--line-soft); font-size: 13px; color: var(--muted); }
 .note { margin-top: 10px; padding: 8px 10px; border-radius: 6px; font-size: 13px; background: var(--wait-soft); color: var(--wait); }
 .note.bad { background: var(--bad-soft); color: var(--bad); }
 .note.ok { background: var(--ok-soft); color: var(--ok); }
@@ -234,7 +240,7 @@ fieldset.handoffs p { margin: 0; }
   aside { position: static; height: auto; }
   aside nav { flex-direction: row; }
   aside .foot { display: none; }
-  .g-side, .startform, .fields, .cols { grid-template-columns: minmax(0, 1fr); }
+  .g-side, .fields, .cols { grid-template-columns: minmax(0, 1fr); }
   .projgrid { grid-template-columns: minmax(0, 1fr); gap: 12px; }
   .subnav { position: static; flex-direction: row; flex-wrap: wrap; gap: 4px; }
   .subnav a.child { display: none; }
