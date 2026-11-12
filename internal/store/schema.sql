@@ -180,3 +180,49 @@ CREATE TABLE IF NOT EXISTS audit (
   action  TEXT NOT NULL,
   subject TEXT NOT NULL DEFAULT ''
 );
+-- A journey is what a persona does for a story, recorded by an AI run as
+-- Playwright code and replayed without a model. One per persona and story.
+CREATE TABLE IF NOT EXISTS journeys (
+  id            TEXT PRIMARY KEY,
+  persona       TEXT NOT NULL,
+  story         TEXT NOT NULL,
+  state         TEXT NOT NULL,
+  live_rev      INTEGER NOT NULL DEFAULT 0,
+  created       INTEGER NOT NULL,
+  passed        INTEGER NOT NULL DEFAULT 0,
+  failed        INTEGER NOT NULL DEFAULT 0,
+  last_replay   INTEGER NOT NULL DEFAULT 0,
+  last_explored INTEGER NOT NULL DEFAULT 0,
+  UNIQUE(persona, story)
+);
+-- Every version of a journey's code. Numbers only grow; a bug revision
+-- reproduces one bug and never goes live. The code is agent-written and
+-- untrusted: shown only as text.
+CREATE TABLE IF NOT EXISTS journey_revisions (
+  journey_id TEXT NOT NULL,
+  n          INTEGER NOT NULL,
+  kind       TEXT NOT NULL,
+  code       TEXT NOT NULL,
+  reason     TEXT NOT NULL DEFAULT '',
+  run_id     TEXT NOT NULL DEFAULT '',
+  parent     INTEGER NOT NULL DEFAULT 0,
+  bug_id     TEXT NOT NULL DEFAULT '',
+  bug_step   INTEGER NOT NULL DEFAULT 0,
+  created    INTEGER NOT NULL,
+  PRIMARY KEY (journey_id, n)
+);
+-- Why anything about a journey changed or did not: one row per decision,
+-- the model's and people's alike, kept for good.
+CREATE TABLE IF NOT EXISTS journey_decisions (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  journey_id TEXT NOT NULL,
+  run_id     TEXT NOT NULL DEFAULT '',
+  kind       TEXT NOT NULL,
+  reason     TEXT NOT NULL DEFAULT '',
+  actor      TEXT NOT NULL,
+  evidence   TEXT NOT NULL DEFAULT '[]',
+  rev_before INTEGER NOT NULL DEFAULT 0,
+  rev_after  INTEGER NOT NULL DEFAULT 0,
+  created    INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS journey_decisions_journey ON journey_decisions(journey_id, created);
