@@ -86,6 +86,7 @@ func admin(svc *runs.Service, maxBytes int64, token string, hub *live.Hub, mail 
 	mux.HandleFunc("GET /api/runs/{id}", s.getRun)
 	mux.HandleFunc("POST /api/runs/{id}/stop", s.stopRun)
 	mux.HandleFunc("GET /api/status", s.getStatus)
+	mux.HandleFunc("GET /api/value", s.getValue)
 	mux.HandleFunc("PUT /api/pause", s.putPause)
 	mux.HandleFunc("GET /api/runs/{id}/artifacts/{name}", s.getArtifact)
 	mux.HandleFunc("GET /api/runs/{id}/live", s.streamLive)
@@ -284,6 +285,7 @@ func (s *server) listRuns(w http.ResponseWriter, r *http.Request) {
 		Blocked     int       `json:"blocked,omitempty"` // hosts the egress fence refused
 		Bugs        int       `json:"bugs,omitempty"`
 		Wait        *waitView `json:"wait,omitempty"`
+		Cost        *float64  `json:"cost,omitempty"` // absent until the worker reports usage
 	}
 	out := make([]item, len(rs))
 	ids := make([]string, len(rs))
@@ -306,6 +308,10 @@ func (s *server) listRuns(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	for i, x := range rs {
 		out[i] = item{Run: redact(x), Bugs: bugs[x.ID]}
+		if u, err := s.svc.Usage(x.ID); err == nil && u != nil {
+			c := runs.Cost(*u)
+			out[i].Cost = &c
+		}
 		if wt, ok := waits[x.ID]; ok {
 			out[i].Wait = newWaitView(wt)
 		}
@@ -754,6 +760,26 @@ func (s *server) getStatus(w http.ResponseWriter, _ *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, st)
+}
+
+// getValue reports spend and new bugs over the last days (default 7, at
+// most 90), by persona and by story.
+func (s *server) getValue(w http.ResponseWriter, r *http.Request) {
+	days := 7
+	if q := r.URL.Query().Get("days"); q != "" {
+		n, err := strconv.Atoi(q)
+		if err != nil || n < 1 || n > 90 {
+			http.Error(w, "days must be 1 to 90", http.StatusBadRequest)
+			return
+		}
+		days = n
+	}
+	v, err := s.svc.Value(time.Now().Add(-time.Duration(days) * 24 * time.Hour))
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, v)
 }
 
 // putPause flips the pause switch. Pausing stops nothing: it only gates new

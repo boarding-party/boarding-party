@@ -42,7 +42,8 @@ export const openCount = (issues) => (issues || []).filter((i) => i.status === '
 export function BugsPage() {
   const [issues, setIssues] = useState(null);
   const [err, setErr] = useState('');
-  const showDone = useParams().done === '1'; // in the address, so a link keeps it
+  const params = useParams();
+  const showDone = params.done === '1'; // in the address, so a link keeps it
 
   usePoll(async (stale) => {
     try {
@@ -61,6 +62,7 @@ export function BugsPage() {
     <section class="page">
       <h1>Bugs</h1>
       <p class="lede">Problems your personas found, across all runs. A report of the same problem joins its issue. Mark an issue fixed and a persona checks it again.</p>
+      <${Value} days=${params.days === '30' ? 30 : 7} by=${params.by === 'story' ? 'story' : 'persona'} />
       ${err ? html`<div class="note bad" role="alert">Could not load the bugs: ${err}</div>` : null}
       ${issues === null && !err ? html`<p class="muted">Loading…</p>` : null}
       ${issues && issues.length === 0 ? html`<div class="empty"><b>No bugs yet.</b>Bugs your personas report show up here.</div>` : null}
@@ -79,6 +81,57 @@ export function BugsPage() {
             ${showDone ? html`<${IssueGroup} title="Closed and not a bug" list=${done} />` : null}` : null}
         </div>` : null}
     </section>`;
+}
+
+const VALUE_POLL_MS = 60000;
+const money = (n) => '$' + (Number(n) || 0).toFixed(2);
+
+// Value says what the cast spent lately and what it found for it, and where
+// the money went: the dearest personas or stories first, each with its share
+// of the spend, so one that spends and finds nothing stands out.
+function Value({ days, by }) {
+  const [v, setV] = useState(null);
+  usePoll(async (stale) => {
+    try {
+      const d = await api(`api/value?days=${days}`);
+      if (!stale()) setV(d);
+    } catch (_) { /* the bugs list reports a dead board; this panel just stays away */ }
+    return VALUE_POLL_MS;
+  }, [days]);
+  if (!v || !v.runs || v.spent < 0.01) return null; // nothing spent, nothing to weigh
+  const rows = (by === 'story' ? v.stories : v.personas) || [];
+  const top = rows.reduce((m, r) => Math.max(m, r.spent), 0);
+  return html`
+    <div class="card value">
+      <div class="valuehead">
+        <p class="valuesum">
+          In the last ${days} days your personas spent <b>${money(v.spent)}</b> on ${plural(v.runs, 'run', 'runs')} and found <b>${plural(v.bugs, 'new bug', 'new bugs')}</b>${v.bugs ? html`: <b class="perbug">${money(v.perBug)}</b> a bug` : ''}.
+        </p>
+        <div class="viewtoggle" role="group" aria-label="Period">
+          ${[7, 30].map((n) => html`<button type="button" key=${n} class=${days === n ? 'on' : ''} aria-pressed=${days === n}
+            onClick=${() => setParams({ days: n === 7 ? null : n })}>${n} days</button>`)}
+        </div>
+      </div>
+      <div class="viewtoggle" role="group" aria-label="Split by">
+        ${['persona', 'story'].map((k) => html`<button type="button" key=${k} class=${by === k ? 'on' : ''} aria-pressed=${by === k}
+          onClick=${() => setParams({ by: k === 'persona' ? null : k })}>By ${k}</button>`)}
+      </div>
+      <div class="tablewrap">
+        <table class="valuetab">
+          <thead><tr><th>${by === 'story' ? 'Story' : 'Persona'}</th><th class="num">Runs</th><th>Spent</th><th class="num">New bugs</th><th class="num">Per bug</th></tr></thead>
+          <tbody>
+            ${rows.slice(0, 10).map((r) => html`<tr key=${r.name}>
+              <td>${r.name || html`<span class="muted">${by === 'story' ? 'No story' : 'No persona'}</span>`}</td>
+              <td class="num">${r.runs}</td>
+              <td><div class="spent"><span class="share" aria-hidden="true"><i style=${{ width: (top ? (r.spent / top) * 100 : 0) + '%' }}></i></span>${money(r.spent)}</div></td>
+              <td class="num">${r.bugs || html`<span class="muted">0</span>`}</td>
+              <td class="num">${r.bugs ? money(r.spent / r.bugs) : r.spent >= 0.01 ? html`<span class="nofind">None found</span>` : html`<span class="muted">—</span>`}</td>
+            </tr>`)}
+          </tbody>
+        </table>
+      </div>
+      ${rows.length > 10 ? html`<p class="hint">The 10 dearest of ${rows.length}.</p>` : null}
+    </div>`;
 }
 
 function IssueGroup({ title, list }) {

@@ -188,6 +188,35 @@ func (s *Store) KnownIssues(now time.Time, limit int) ([]Issue, error) {
 		ORDER BY (i.status = 'not_a_bug') DESC, i.updated DESC, i.rowid DESC LIMIT ?`, ts(now.Add(-KnownIssuesClosedFor)), limit)
 }
 
+// Find is an issue and the run whose report first found it.
+type Find struct {
+	IssueID string
+	RunID   string
+}
+
+// FirstFinds lists the issues first reported at or after since, each with
+// the run of its earliest report. Issues marked not a bug are left out:
+// they found nothing.
+func (s *Store) FirstFinds(since time.Time) ([]Find, error) {
+	rows, err := s.db.Query(`SELECT i.id, (SELECT b.run_id FROM bugs b WHERE b.issue_id = i.id ORDER BY b.created, b.rowid LIMIT 1)
+		FROM issues i
+		WHERE i.status != 'not_a_bug' AND (SELECT MIN(b.created) FROM bugs b WHERE b.issue_id = i.id) >= ?
+		ORDER BY i.rowid`, ts(since))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Find
+	for rows.Next() {
+		var f Find
+		if err := rows.Scan(&f.IssueID, &f.RunID); err != nil {
+			return nil, err
+		}
+		out = append(out, f)
+	}
+	return out, rows.Err()
+}
+
 // SetIssueStatus records the user's triage. The reason is kept only for not
 // a bug. Any check under way no longer counts, and one still queued is
 // dropped so it does not spend a run.

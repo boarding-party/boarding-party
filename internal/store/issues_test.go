@@ -362,3 +362,27 @@ func TestStatusChangeDropsQueuedCheck(t *testing.T) {
 		t.Fatalf("issue %+v", is)
 	}
 }
+
+func TestFirstFindsCreditsTheEarliestReport(t *testing.T) {
+	s := open(t)
+	withRun(t, s, "r1", "Ada", "todos")
+	withRun(t, s, "r2", "Bob", "signup")
+	withRun(t, s, "r3", "Cy", "todos")
+	withRun(t, s, "r4", "Ada", "todos")
+	addBug(t, s, Bug{ID: "b1", RunID: "r1", Summary: "old", Created: t0.Add(-48 * time.Hour)})
+	old := onlyIssue(t, s)
+	addBug(t, s, Bug{ID: "b2", RunID: "r2", Summary: "old again", Created: t0.Add(time.Hour), IssueID: old.ID})
+	addBug(t, s, Bug{ID: "b3", RunID: "r3", Summary: "new", Created: t0.Add(2 * time.Hour)})
+	addBug(t, s, Bug{ID: "b4", RunID: "r4", Summary: "noise", Created: t0.Add(3 * time.Hour)})
+	bugs, _ := s.Bugs("r4")
+	if err := s.SetIssueStatus(bugs[0].IssueID, IssueNotABug, "fine", t0.Add(4*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	finds, err := s.FirstFinds(t0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(finds) != 1 || finds[0].RunID != "r3" {
+		t.Fatalf("finds %+v, want only r3's: the old issue was found before t0, the noise is not a bug", finds)
+	}
+}

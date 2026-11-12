@@ -672,7 +672,7 @@ function RunCard({ r, madeBy }) {
       </div>
       <div class="rc-body">
         <div class="rc-who"><a href=${runHref(r.id)} onClick=${(e) => e.stopPropagation()}>${r.persona}</a>${who ? html` <span class="muted">${who}</span>` : null}</div>
-        <div class="rc-meta"><span class="rc-story">${lead ? 'Lead run' : r.story}</span><span title=${fmtFull(r.started)}>${started ? started.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) : ''}</span>${took ? html`<span>${took}</span>` : null}</div>
+        <div class="rc-meta"><span class="rc-story">${lead ? 'Lead run' : r.story}</span><span title=${fmtFull(r.started)}>${started ? started.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) : ''}</span>${took ? html`<span>${took}</span>` : null}${typeof r.cost === 'number' ? html`<span>${fmtCost(r.cost)}</span>` : null}</div>
         ${r.state === 'waiting' && r.wait && r.wait.status === 'open'
           ? html`<p class="rc-out wait">Waiting for ${r.wait.waitingFor}, gives up ${fmtWhen(r.wait.deadline)}</p>`
           : html`<p class="rc-out" title=${out}>${out || html`<span class="muted">${active ? 'In progress' : 'No outcome recorded'}</span>`}</p>`}
@@ -685,7 +685,7 @@ function RunsTable({ runs }) {
   return html`
     <div class="card flush tablewrap">
       <table>
-        <thead><tr><th></th><th>Persona</th><th>Story</th><th>State</th><th>Started</th><th>Outcome</th></tr></thead>
+        <thead><tr><th></th><th>Persona</th><th>Story</th><th>State</th><th>Started</th><th class="num">Cost</th><th>Outcome</th></tr></thead>
         <tbody>
           ${runs.map((r) => html`
             <tr class="click" key=${r.id} onClick=${open(r.id)}>
@@ -697,6 +697,7 @@ function RunsTable({ runs }) {
                 ${r.state === 'waiting' && r.wait && r.wait.status === 'open'
                   ? html`<div class="waitline small muted">Waiting for ${r.wait.waitingFor} · gives up ${fmtWhen(r.wait.deadline)}</div>` : null}</td>
               <td class="when" title=${fmtFull(r.started)}>${fmtWhen(r.started)}</td>
+              <td class="when num">${typeof r.cost === 'number' ? fmtCost(r.cost) : '—'}</td>
               <td class="outcome" title=${firstLine(r.outcome)}>${firstLine(r.outcome) || html`<span class="muted">${ACTIVE.has(r.state) ? 'In progress' : '—'}</span>`}</td>
             </tr>`)}
         </tbody>
