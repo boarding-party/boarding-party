@@ -29,7 +29,11 @@ CREATE TABLE IF NOT EXISTS runs (
   follows  TEXT NOT NULL DEFAULT '',
   via      TEXT NOT NULL DEFAULT '',
   context  TEXT NOT NULL DEFAULT '',
-  followed INTEGER NOT NULL DEFAULT 0
+  followed INTEGER NOT NULL DEFAULT 0,
+  kind       TEXT NOT NULL DEFAULT '',
+  journey_id TEXT NOT NULL DEFAULT '',
+  revision   INTEGER NOT NULL DEFAULT 0,
+  seed       INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS runs_started ON runs(started);
 CREATE TABLE IF NOT EXISTS bugs (

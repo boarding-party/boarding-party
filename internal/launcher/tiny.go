@@ -3,7 +3,9 @@ package launcher
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -109,6 +111,12 @@ func (t *Tiny) Start(ctx context.Context, r store.Run, p project.Project) (strin
 		s.Spec.Tolerations = []corev1.Toleration{{Key: k, Operator: corev1.TolerationOpEqual, Value: v, Effect: corev1.TaintEffectNoSchedule}}
 	}
 	s.Spec.RuntimeClassName = p.RuntimeClass
+	if r.Kind == store.RunReplay {
+		// A replay runs a recorded journey with no model: a command session
+		// running bp-replay, with no agent credentials and no MCP servers.
+		s.Spec.Task, s.Spec.Model, s.Spec.MCPServers = "", "", nil
+		s.Spec.Agent, s.Spec.Command = "command", t.replayCommand(r, p)
+	}
 	if r.Story == project.LeadStory {
 		// A lead run has no browser; bp-browser only reports usage.
 		s.Spec.Task = LeadPrompt(r)
@@ -119,6 +127,9 @@ func (t *Tiny) Start(ctx context.Context, r store.Run, p project.Project) (strin
 		s.OwnerReferences = []metav1.OwnerReference{*t.Owner}
 	}
 	if err := session.Create(ctx, t.Client, s); err != nil {
+		if r.Kind == store.RunReplay && strings.Contains(err.Error(), `Unsupported value: "command"`) {
+			return "", errOldTinyReplay
+		}
 		return "", fmt.Errorf("create session %s: %w", name, err)
 	}
 	// A Session CRD from before tiny v0.12 drops placement without an error,
@@ -307,6 +318,26 @@ func (t *Tiny) browserArgs(r store.Run, p project.Project) []string {
 		args = append(args, "--viewport-size="+viewport)
 	}
 	return append(args, "--caps=devtools,storage")
+}
+
+var errOldTinyReplay = errors.New("tiny on this cluster is older than v0.15 and cannot run replays; update it with tiny init, then start the replay again")
+
+// replayCommand is the bp-replay invocation of a replay run. Every URL
+// carries the run's token and works only while the run is active.
+func (t *Tiny) replayCommand(r store.Run, p project.Project) []string {
+	cmd := []string{"bp-replay",
+		"--journey-url=" + t.DirectorURL + "/journey/" + r.Token,
+		"--report-url=" + t.DirectorURL + "/replay/" + r.Token,
+		"--upload-url=" + t.DirectorURL + "/artifacts/" + r.Token + "/",
+		"--profile-url=" + t.DirectorURL + "/profile/" + r.Token,
+		"--live-url=" + t.DirectorURL + "/live/" + r.Token,
+		"--console-url=" + t.DirectorURL + "/console/" + r.Token,
+		"--seed=" + strconv.FormatInt(r.Seed, 10)}
+	device := personaDevice(r, p)
+	if pd, _ := project.DeviceLaunch(device); pd != "" {
+		cmd = append(cmd, "--device="+device)
+	}
+	return cmd
 }
 
 func personaDevice(r store.Run, p project.Project) string {

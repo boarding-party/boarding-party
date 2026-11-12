@@ -20,6 +20,9 @@ var schema string
 
 var ErrNotFound = errors.New("not found")
 
+// RunReplay is the Kind of a run that replays a journey revision.
+const RunReplay = "replay"
+
 type RunState string // "pending","running","done","stuck","failed","waiting"
 
 const (
@@ -53,10 +56,16 @@ type Run struct {
 	Started  time.Time `json:"started"`
 	Finished time.Time `json:"finished"`
 
-	Chain   string          `json:"chainId"`
-	Follows string          `json:"follows,omitempty"` // run that caused this one
-	Via     string          `json:"via,omitempty"`     // "" new, "continue", "handoff"
-	Context json.RawMessage `json:"context,omitempty"`
+	Chain string `json:"chainId"`
+	// Kind is "" for an AI run and RunReplay for a replay of a journey
+	// revision, which runs with no model.
+	Kind      string          `json:"kind,omitempty"`
+	JourneyID string          `json:"journeyId,omitempty"`
+	Revision  int             `json:"revision,omitempty"`
+	Seed      int64           `json:"seed,omitempty"`
+	Follows   string          `json:"follows,omitempty"` // run that caused this one
+	Via       string          `json:"via,omitempty"`     // "" new, "continue", "handoff"
+	Context   json.RawMessage `json:"context,omitempty"`
 }
 
 // RunContext is what a chained run is told about the run before it.
@@ -211,6 +220,10 @@ var runsAddedColumns = []addedColumn{
 	{"via", "via TEXT NOT NULL DEFAULT ''"},
 	{"context", "context TEXT NOT NULL DEFAULT ''"},
 	{"followed", "followed INTEGER NOT NULL DEFAULT 0"},
+	{"kind", "kind TEXT NOT NULL DEFAULT ''"},
+	{"journey_id", "journey_id TEXT NOT NULL DEFAULT ''"},
+	{"revision", "revision INTEGER NOT NULL DEFAULT 0"},
+	{"seed", "seed INTEGER NOT NULL DEFAULT 0"},
 }
 
 // waitsAddedColumns are the waits columns added after the table first shipped.
@@ -347,7 +360,8 @@ func fromTS(n int64) time.Time {
 	return time.Unix(0, n).UTC()
 }
 
-const runCols = `id, token, persona, role, story, state, outcome, session, started, finished, chain, follows, via, context`
+const runCols = `id, token, persona, role, story, state, outcome, session, started, finished, chain, follows, via, context,
+	kind, journey_id, revision, seed`
 
 func scanRun(sc interface{ Scan(...any) error }) (Run, error) {
 	var r Run
@@ -355,7 +369,7 @@ func scanRun(sc interface{ Scan(...any) error }) (Run, error) {
 	var started, finished int64
 	var ctx string
 	if err := sc.Scan(&r.ID, &r.Token, &r.Persona, &r.Role, &r.Story, &st, &r.Outcome, &r.Session, &started, &finished,
-		&r.Chain, &r.Follows, &r.Via, &ctx); err != nil {
+		&r.Chain, &r.Follows, &r.Via, &ctx, &r.Kind, &r.JourneyID, &r.Revision, &r.Seed); err != nil {
 		return Run{}, err
 	}
 	if ctx != "" {
@@ -386,9 +400,9 @@ func (s *Store) CreateRunFrom(r Run, queueID string) error {
 			return ErrNotFound
 		}
 	}
-	if _, err := tx.Exec(`INSERT INTO runs(`+runCols+`) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+	if _, err := tx.Exec(`INSERT INTO runs(`+runCols+`) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		r.ID, r.Token, r.Persona, r.Role, r.Story, string(r.State), r.Outcome, r.Session, ts(r.Started), ts(r.Finished),
-		r.Chain, r.Follows, r.Via, string(r.Context)); err != nil {
+		r.Chain, r.Follows, r.Via, string(r.Context), r.Kind, r.JourneyID, r.Revision, r.Seed); err != nil {
 		return err
 	}
 	return tx.Commit()

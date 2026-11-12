@@ -99,12 +99,8 @@ var (
 // Gate is the single check every run start passes: nil, ErrPaused, or a
 // wrapped ErrOverBudget. Paused is checked first: it is cheaper and clearer.
 func (s *Service) Gate(now time.Time) error {
-	paused, err := s.Store.Paused()
-	if err != nil {
+	if err := s.pauseGate(); err != nil {
 		return err
-	}
-	if paused {
-		return ErrPaused
 	}
 	p, err := s.Store.Project()
 	if err != nil {
@@ -117,6 +113,19 @@ func (s *Service) Gate(now time.Time) error {
 	}
 	if spent >= budget {
 		return fmt.Errorf("%w: $%.2f of $%.2f; runs start again at midnight (%s) or when you raise the budget", ErrOverBudget, spent, budget, loc)
+	}
+	return nil
+}
+
+// pauseGate is ErrPaused while the cast is paused. Replays pass only this
+// gate: they spend nothing, so the budget does not hold them back.
+func (s *Service) pauseGate() error {
+	paused, err := s.Store.Paused()
+	if err != nil {
+		return err
+	}
+	if paused {
+		return ErrPaused
 	}
 	return nil
 }

@@ -45,12 +45,20 @@ func (s *Service) Reconcile(ctx context.Context, now time.Time, timeout time.Dur
 		if reason == "" {
 			continue
 		}
+		if r.Kind == store.RunReplay {
+			reason = replayNoResult
+		}
 		won, err := s.Store.FinishRun(r.ID, store.RunFailed, reason, now)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("run %s: %w", r.ID, err))
 			continue
 		}
 		if won {
+			if r.Kind == store.RunReplay {
+				if err := s.Store.CountReplay(r.JourneyID, false, now); err != nil && !errors.Is(err, store.ErrNotFound) {
+					errs = append(errs, fmt.Errorf("run %s: count replay: %w", r.ID, err))
+				}
+			}
 			s.keepLastFrame(r.ID)
 			s.keepBlocked(ctx, r, now)
 			session := r.Session

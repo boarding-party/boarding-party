@@ -219,7 +219,7 @@ func randHex(n int) (string, error) {
 
 // Start creates a run for persona doing story and launches its session.
 func (s *Service) Start(ctx context.Context, persona, story string) (store.Run, error) {
-	return s.start(ctx, persona, story, nil)
+	return s.start(ctx, persona, story, nil, nil)
 }
 
 // StartQueued starts the run a queue item asks for. The run continues the
@@ -227,7 +227,7 @@ func (s *Service) Start(ctx context.Context, persona, story string) (store.Run, 
 // the run, so a refused start (busy, no fence) leaves it queued. It returns
 // store.ErrNotFound if the item was already taken.
 func (s *Service) StartQueued(ctx context.Context, q store.Queued) (store.Run, error) {
-	return s.start(ctx, q.Persona, q.Story, &q)
+	return s.start(ctx, q.Persona, q.Story, &q, nil)
 }
 
 // Enqueue queues a fresh run of persona doing story for the scheduler to
@@ -255,7 +255,9 @@ func (s *Service) finished() {
 	}
 }
 
-func (s *Service) start(ctx context.Context, persona, story string, q *store.Queued) (store.Run, error) {
+// start creates and launches a run. replay, when set, makes it a replay of
+// that journey revision: no model, so no agent key and no budget check.
+func (s *Service) start(ctx context.Context, persona, story string, q *store.Queued, replay *store.Run) (store.Run, error) {
 	p, err := s.Store.Project()
 	if err != nil {
 		return store.Run{}, fmt.Errorf("load project: %w", err)
@@ -264,11 +266,17 @@ func (s *Service) start(ctx context.Context, persona, story string, q *store.Que
 	if err != nil {
 		return store.Run{}, err
 	}
-	if err := s.Gate(time.Now()); err != nil {
-		return store.Run{}, err
-	}
-	if err := s.LeadGate(p, persona, time.Now()); err != nil {
-		return store.Run{}, err
+	if replay != nil {
+		if err := s.pauseGate(); err != nil {
+			return store.Run{}, err
+		}
+	} else {
+		if err := s.Gate(time.Now()); err != nil {
+			return store.Run{}, err
+		}
+		if err := s.LeadGate(p, persona, time.Now()); err != nil {
+			return store.Run{}, err
+		}
 	}
 	id, err := randHex(16)
 	if err != nil {
@@ -278,7 +286,7 @@ func (s *Service) start(ctx context.Context, persona, story string, q *store.Que
 	if err != nil {
 		return store.Run{}, err
 	}
-	if s.AgentKey != nil {
+	if s.AgentKey != nil && replay == nil {
 		st, err := s.AgentKey.Status(ctx)
 		if err != nil {
 			return store.Run{}, fmt.Errorf("check the agent key: %w", err)
@@ -301,6 +309,9 @@ func (s *Service) start(ctx context.Context, persona, story string, q *store.Que
 			r.Chain = q.Chain
 		}
 		queueID = q.ID
+	}
+	if replay != nil {
+		r.Kind, r.JourneyID, r.Revision, r.Seed = store.RunReplay, replay.JourneyID, replay.Revision, replay.Seed
 	}
 	s.startMu.Lock()
 	active, err := s.Store.ActiveRuns()

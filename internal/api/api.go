@@ -131,6 +131,8 @@ func Worker(svc *runs.Service, maxBytes int64, hub *live.Hub) http.Handler {
 	mux.HandleFunc("GET /files/{token}/{name}", s.workerFile)
 	mux.HandleFunc("GET /profile/{token}", s.getProfile)
 	mux.HandleFunc("PUT /profile/{token}", s.putProfile)
+	mux.HandleFunc("GET /journey/{token}", s.getReplayCode)
+	mux.HandleFunc("PUT /replay/{token}", s.putReplay)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
 	return mux
 }
@@ -145,7 +147,8 @@ func fail(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, store.ErrNotFound), errors.Is(err, artifacts.ErrNotFound), errors.Is(err, runs.ErrNotActive):
 		http.Error(w, "not found", http.StatusNotFound)
-	case errors.Is(err, runs.ErrBadUsage), errors.Is(err, runs.ErrBadProfile), errors.Is(err, runs.ErrInvalid):
+	case errors.Is(err, runs.ErrBadUsage), errors.Is(err, runs.ErrBadProfile), errors.Is(err, runs.ErrInvalid),
+		errors.Is(err, runs.ErrBadReplay):
 		http.Error(w, err.Error(), http.StatusBadRequest)
 	case errors.Is(err, runs.ErrBusy):
 		http.Error(w, runs.ErrBusy.Error(), http.StatusConflict)
