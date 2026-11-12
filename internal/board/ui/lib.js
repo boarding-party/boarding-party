@@ -113,6 +113,42 @@ export function fmtWhen(s) {
 export const artifactURL = (runID, name) => `api/runs/${encodeURIComponent(runID)}/artifacts/${encodeURIComponent(name)}`;
 export const runHref = (id) => `#/runs/${encodeURIComponent(id)}`;
 
+// A page keeps its view (filters, the open item, a moment in a run) in the
+// hash after "?", as in #/runs?view=coverage&persona=Ann, so a link opens
+// the same view. Changing it replaces the address rather than adding
+// history: Back still goes to the previous page.
+export const PARAMS_EVENT = 'bp:params';
+
+export function routeParams() {
+  const h = location.hash, i = h.indexOf('?');
+  return Object.fromEntries(new URLSearchParams(i < 0 ? '' : h.slice(i + 1)));
+}
+
+// setParams sets the named params; '', null, undefined and false remove one.
+export function setParams(patch) {
+  const h = location.hash || '#/', i = h.indexOf('?');
+  const q = new URLSearchParams(i < 0 ? '' : h.slice(i + 1));
+  for (const [k, v] of Object.entries(patch)) {
+    if (v === '' || v == null || v === false) q.delete(k); else q.set(k, v === true ? '1' : String(v));
+  }
+  const next = (i < 0 ? h : h.slice(0, i)) + (q.size ? '?' + q : '');
+  if (next === location.hash) return;
+  history.replaceState(null, '', next);
+  dispatchEvent(new Event(PARAMS_EVENT));
+}
+
+// useParams follows the hash query.
+export function useParams() {
+  const [p, setP] = useState(routeParams);
+  useEffect(() => {
+    const on = () => setP(routeParams());
+    addEventListener('hashchange', on);
+    addEventListener(PARAMS_EVENT, on);
+    return () => { removeEventListener('hashchange', on); removeEventListener(PARAMS_EVENT, on); };
+  }, []);
+  return p;
+}
+
 // usePoll calls fn now, then again after however many ms fn returns, until
 // fn returns null or the component unmounts or deps change. fn gets a
 // stale() check: after each await it must bail out (return null) if stale()

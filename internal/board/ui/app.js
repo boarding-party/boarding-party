@@ -5,7 +5,7 @@
 // Never use innerHTML or dangerouslySetInnerHTML here.
 import { render } from './vendor/preact.module.js';
 import { useState, useEffect, useRef, useCallback } from './vendor/hooks.module.js';
-import { html, api, directorDown, confirmDialog, DialogHost, parseTime, sameDay, fmtWhen, artifactURL, runHref, usePoll, SEVERITY_TAG, SHOT_TOKEN } from './lib.js';
+import { html, api, directorDown, confirmDialog, DialogHost, parseTime, sameDay, fmtWhen, artifactURL, runHref, usePoll, useParams, routeParams, setParams, PARAMS_EVENT, SEVERITY_TAG, SHOT_TOKEN } from './lib.js';
 import { BugsPage, IssuePage, issueHref, openCount } from './bugs.js';
 import { ProjectPage } from './project.js';
 import { LeadPage, leadHref } from './leads.js';
@@ -24,6 +24,7 @@ const LOCAL = ['127.0.0.1', 'localhost', '[::1]'].includes(location.hostname);
 if (window.parent !== window) {
   const tell = () => window.parent.postMessage({ type: 'bp:route', hash: location.hash }, '*');
   addEventListener('hashchange', tell);
+  addEventListener(PARAMS_EVENT, tell);
   tell();
 }
 const STATE_TAG = new Map([['pending', 'idle'], ['running', 'run'], ['done', 'ok'], ['stuck', 'wait'], ['failed', 'bad'], ['waiting', 'hold'], ['continued', 'idle']]);
@@ -89,7 +90,7 @@ function storiesFor(project, personaName) {
 // ---- routing ------------------------------------------------------------
 
 function parseRoute(hash) {
-  const parts = (hash || '').replace(/^#\/?/, '').split('/');
+  const parts = (hash || '').replace(/^#\/?/, '').split('?')[0].split('/');
   if (parts[0] === 'project') {
     const section = ['general', 'sites', 'agent', 'inbox', 'files', 'roles'].includes(parts[1]) ? parts[1] : 'general';
     return { page: 'project', section, roleN: section === 'roles' && /^[1-9][0-9]*$/.test(parts[2] || '') ? parts[2] : '' };
@@ -538,8 +539,8 @@ const STATE_FILTERS = [
   ['done', 'Done', (r) => r.state === 'done'],
   ['problem', 'Failed or stuck', (r) => r.state === 'failed' || r.state === 'stuck'],
 ];
-const FILTER_KEY = 'bp.runs.filter';
 const VIEW_KEY = 'bp.runs.view';
+const VIEWS = ['cards', 'list', 'coverage'];
 const NO_FILTER = { state: 'all', persona: '', story: '', bugs: false, q: '' };
 
 function stored(store, key, fallback) {
@@ -557,10 +558,14 @@ function dayLabel(d) {
 }
 
 function RunsBoard({ runs, project }) {
-  const [f, setF] = useState(() => ({ ...NO_FILTER, ...stored(sessionStorage, FILTER_KEY, {}) }));
-  const [view, setView] = useState(() => stored(localStorage, VIEW_KEY, 'cards'));
-  const set = (patch) => setF((cur) => { const next = { ...cur, ...patch }; keep(sessionStorage, FILTER_KEY, next); return next; });
-  const pickView = (v) => { setView(v); keep(localStorage, VIEW_KEY, v); };
+  // Filters and view live in the address; the view also stays the
+  // browser's default.
+  const p = useParams();
+  const f = { state: STATE_FILTERS.some(([k]) => k === p.state) ? p.state : 'all',
+    persona: p.persona || '', story: p.story || '', bugs: p.bugs === '1', q: p.q || '' };
+  const view = VIEWS.includes(p.view) ? p.view : (VIEWS.includes(stored(localStorage, VIEW_KEY, '')) ? stored(localStorage, VIEW_KEY, '') : 'cards');
+  const set = (patch) => setParams({ ...patch, ...('state' in patch ? { state: patch.state === 'all' ? '' : patch.state } : {}) });
+  const pickView = (v) => { keep(localStorage, VIEW_KEY, v); setParams({ view: v }); };
 
   const personas = [...new Set(runs.map((r) => r.persona))].sort();
   const stories = [...new Set(runs.filter((r) => !f.persona || r.persona === f.persona).map((r) => r.story))].sort();
@@ -610,7 +615,7 @@ function RunsBoard({ runs, project }) {
         </div>
       </div>
       ${coverage ? html`<${Coverage} project=${project} runs=${runs}
-            onPick=${(persona, story) => { set({ ...NO_FILTER, persona, story }); pickView('cards'); }} />`
+            onPick=${(persona, story) => set({ ...NO_FILTER, persona, story, view: 'cards' })} />`
         : !shown.length ? html`<div class="empty"><b>No runs match.</b>${filtered ? html`<button type="button" class="link" onClick=${() => set(NO_FILTER)}>Clear the filters</button>` : null}</div>`
         : view === 'list' ? html`<${RunsTable} runs=${shown} />`
         : groups.map((g) => html`<section key=${g.label} class="daygroup">
@@ -682,11 +687,14 @@ const INBOX_POLL_MS = 10000;
 const INBOX_LIMIT = 100;
 
 function InboxPage({ project }) {
-  const [persona, setPersona] = useState('');
-  const [tab, setTab] = useState('received'); // received | kept
+  // Persona, tab and the open message live in the address.
+  const p = useParams();
+  const persona = p.persona || '';
+  const tab = p.tab === 'kept' ? 'kept' : 'received';
+  const openID = p.m || '';
+  const setOpenID = (id) => setParams({ m: id });
   const [msgs, setMsgs] = useState(null);
   const [err, setErr] = useState('');
-  const [openID, setOpenID] = useState('');
   const names = [...new Set(allPersonas(project).map((p) => p.name))];
   const loaded = useRef(false); // the first load for this view has happened
 
@@ -706,7 +714,7 @@ function InboxPage({ project }) {
     return INBOX_POLL_MS;
   }, [persona, tab]);
 
-  const pick = (fn) => { loaded.current = false; setMsgs(null); setOpenID(''); fn(); };
+  const pick = (patch) => { loaded.current = false; setMsgs(null); setParams({ ...patch, m: '' }); };
 
   return html`
     <section class="page">
@@ -716,14 +724,14 @@ function InboxPage({ project }) {
         <div class="row inboxbar">
           <div class="field">
             <label for="ib-persona">Persona</label>
-            <select id="ib-persona" value=${persona} onChange=${(e) => { const v = e.currentTarget.value; pick(() => setPersona(v)); }}>
+            <select id="ib-persona" value=${persona} onChange=${(e) => pick({ persona: e.currentTarget.value })}>
               <option value="" selected=${!persona}>All</option>
               ${names.map((n) => html`<option key=${n} value=${n} selected=${persona === n}>${n}</option>`)}
             </select>
           </div>
           <div class="tabs" role="tablist">
-            <button type="button" role="tab" aria-selected=${tab === 'received'} class=${tab === 'received' ? 'on' : ''} onClick=${() => pick(() => setTab('received'))}>Received</button>
-            <button type="button" role="tab" aria-selected=${tab === 'kept'} class=${tab === 'kept' ? 'on' : ''} onClick=${() => pick(() => setTab('kept'))}>Kept out</button>
+            <button type="button" role="tab" aria-selected=${tab === 'received'} class=${tab === 'received' ? 'on' : ''} onClick=${() => pick({ tab: '' })}>Received</button>
+            <button type="button" role="tab" aria-selected=${tab === 'kept'} class=${tab === 'kept' ? 'on' : ''} onClick=${() => pick({ tab: 'kept' })}>Kept out</button>
           </div>
         </div>
         ${err ? html`<div class="note bad" role="alert">Could not load the mail: ${err}</div>` : null}
@@ -880,6 +888,29 @@ function RunPage({ id, onChange }) {
   const [scrub, setScrub] = useState(null); // Unix ms shown instead of live/end; null = live
   const [playing, setPlaying] = useState(false);
   const runActive = !!(data && data.run && ACTIVE.has(data.run.state));
+  // ?t= is seconds into the run: a link opens there once, and scrubbing or
+  // pausing the video writes it back so the address can be shared.
+  const wantT = useRef(routeParams().t);
+  useEffect(() => {
+    const t = Number(wantT.current);
+    if (wantT.current == null || !data) return;
+    if (!(t >= 0)) { wantT.current = null; return; }
+    const st = parseTime(data.run.started);
+    const hasVideo = (data.artifacts || []).some((n) => n.toLowerCase().endsWith('.webm'));
+    if (st && frames.length && (runActive || !hasVideo)) {
+      wantT.current = null;
+      setScrub(frames[frameAt(frames, st.getTime() + t * 1000)]);
+    } else if (hasVideo && !runActive && video.current && duration) {
+      wantT.current = null;
+      video.current.currentTime = Math.min(t, duration);
+    }
+  }, [data, frames, duration, runActive]);
+  useEffect(() => {
+    if (wantT.current != null || playing || !data) return;
+    const st = parseTime(data.run.started);
+    if (scrub === null) setParams({ t: '' });
+    else if (st) setParams({ t: Math.max(0, Math.round((scrub - st.getTime()) / 1000)) });
+  }, [scrub, playing]);
   // The kept frames grow while the run is live; a finished run's are fixed.
   useEffect(() => {
     let live = true, t = 0;
@@ -1008,7 +1039,8 @@ function RunPage({ id, onChange }) {
               ${framesMode && (scrub !== null || !active) ? html`<${FrameView} id=${run.id} frames=${frames} at=${scrub} started=${run.started}
                   active=${active} playing=${playing} onPlay=${setPlaying} onLive=${() => { setPlaying(false); setScrub(null); }} />`
               : active ? html`<${LiveView} key=${run.id} id=${run.id} stage=${data.stage} reason=${data.stageReason} started=${run.started} />` : webm ? html`<video ref=${video} key=${webm} src=${artifactURL(run.id, webm)} controls preload="metadata" playsinline
-                  onLoadedMetadata=${(e) => { const d = e.currentTarget.duration; setDuration(d > 0 ? d : 0); }}></video>`
+                  onLoadedMetadata=${(e) => { const d = e.currentTarget.duration; setDuration(d > 0 ? d : 0); }}
+                  onPause=${(e) => { if (wantT.current == null) setParams({ t: Math.round(e.currentTarget.currentTime) }); }}></video>`
                 : html`<p>This run has no recording.</p>`}
             </div>
             <${Timeline} run=${run} bugs=${bugs} events=${run.story !== LEAD_STORY ? events : null} blocked=${blocked}

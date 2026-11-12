@@ -4,7 +4,7 @@
 // Issue and report text is agent-written and untrusted: render it only as
 // text through htm/Preact.
 import { useState } from './vendor/hooks.module.js';
-import { html, api, fmtWhen, parseTime, artifactURL, runHref, usePoll, SEVERITY_TAG, SHOT_TOKEN } from './lib.js';
+import { html, api, fmtWhen, parseTime, artifactURL, runHref, usePoll, useParams, setParams, SEVERITY_TAG, SHOT_TOKEN } from './lib.js';
 import { Shot } from './shot.js';
 
 const POLL_MS = 15000;
@@ -42,7 +42,7 @@ export const openCount = (issues) => (issues || []).filter((i) => i.status === '
 export function BugsPage() {
   const [issues, setIssues] = useState(null);
   const [err, setErr] = useState('');
-  const [showDone, setShowDone] = useState(false);
+  const showDone = useParams().done === '1'; // in the address, so a link keeps it
 
   usePoll(async (stale) => {
     try {
@@ -73,7 +73,7 @@ export function BugsPage() {
           })}
           ${done.length ? html`
             <div>
-              <button type="button" class="btn ghost small" aria-expanded=${showDone} onClick=${() => setShowDone(!showDone)}>
+              <button type="button" class="btn ghost small" aria-expanded=${showDone} onClick=${() => setParams({ done: !showDone })}>
                 ${showDone ? 'Hide' : 'Show'} closed and not a bug (${done.length})</button>
             </div>
             ${showDone ? html`<${IssueGroup} title="Closed and not a bug" list=${done} />` : null}` : null}
