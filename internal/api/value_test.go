@@ -13,7 +13,7 @@ func TestValueAndRunCost(t *testing.T) {
 	srv, svc := setup(t, 1024)
 	now := time.Now().UTC()
 	if err := svc.Store.CreateRun(store.Run{ID: "r1", Token: "tok-r1", Persona: "ann", Role: "buyer", Story: "checkout",
-		State: store.RunRunning, Started: now.Add(-time.Hour), Journey: "r1"}); err != nil {
+		State: store.RunRunning, Started: now.Add(-time.Hour), Chain: "r1"}); err != nil {
 		t.Fatal(err)
 	}
 	spend(t, svc, "tok-r1")

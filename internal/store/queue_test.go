@@ -50,7 +50,7 @@ INSERT INTO runs(id, token, state, finished) VALUES('old', 'tok', 'done', 5)`)
 			t.Fatalf("open %d: unfollowed %v err %v", i, u, err)
 		}
 		r, err := s.RunByID("old")
-		if err != nil || r.Journey != "old" {
+		if err != nil || r.Chain != "old" {
 			t.Fatalf("open %d: %+v err %v", i, r, err)
 		}
 		s.Close()
@@ -60,10 +60,10 @@ INSERT INTO runs(id, token, state, finished) VALUES('old', 'tok', 'done', 5)`)
 func TestRunChainFieldsRoundTrip(t *testing.T) {
 	s := open(t)
 	t0 := time.Now().UTC().Truncate(time.Second)
-	a := Run{ID: "a", Token: "ta", State: RunDone, Started: t0, Journey: "j1"}
-	b := Run{ID: "b", Token: "tb", State: RunPending, Started: t0.Add(time.Second), Journey: "j1",
+	a := Run{ID: "a", Token: "ta", State: RunDone, Started: t0, Chain: "j1"}
+	b := Run{ID: "b", Token: "tb", State: RunPending, Started: t0.Add(time.Second), Chain: "j1",
 		Follows: "a", Via: "handoff", Context: []byte(`{"kind":"handoff"}`)}
-	c := Run{ID: "c", Token: "tc", State: RunPending, Started: t0, Journey: "j2"}
+	c := Run{ID: "c", Token: "tc", State: RunPending, Started: t0, Chain: "j2"}
 	for _, r := range []Run{b, a, c} {
 		if err := s.CreateRun(r); err != nil {
 			t.Fatal(err)
@@ -73,9 +73,9 @@ func TestRunChainFieldsRoundTrip(t *testing.T) {
 	if err != nil || !reflect.DeepEqual(got, b) {
 		t.Fatalf("got %+v err %v want %+v", got, err, b)
 	}
-	list, err := s.RunsInJourney("j1")
+	list, err := s.RunsInChain("j1")
 	if err != nil || len(list) != 2 || list[0].ID != "a" || list[1].ID != "b" {
-		t.Fatalf("journey: %+v err %v", list, err)
+		t.Fatalf("chain: %+v err %v", list, err)
 	}
 }
 
@@ -194,9 +194,9 @@ INSERT INTO runs VALUES('old','t','done')`); err != nil {
 		t.Fatalf("first: %v %v", added, err)
 	}
 	var followed int
-	var journey string
-	if err := db.QueryRow(`SELECT followed, journey FROM runs`).Scan(&followed, &journey); err != nil || followed != 1 || journey != "old" {
-		t.Fatalf("%d %q %v", followed, journey, err)
+	var chain string
+	if err := db.QueryRow(`SELECT followed, chain FROM runs`).Scan(&followed, &chain); err != nil || followed != 1 || chain != "old" {
+		t.Fatalf("%d %q %v", followed, chain, err)
 	}
 	if added, err := addColumns(db); err != nil || added {
 		t.Fatalf("second: %v %v", added, err)

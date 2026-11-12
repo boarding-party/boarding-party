@@ -14,7 +14,7 @@ var t0 = time.Date(2026, 11, 8, 12, 0, 0, 0, time.UTC)
 func withRun(t *testing.T, s *Store, id, persona, story string) {
 	t.Helper()
 	if err := s.CreateRun(Run{ID: id, Token: "tok-" + id, Persona: persona, Role: "visitor", Story: story,
-		State: RunDone, Started: t0, Journey: id}); err != nil {
+		State: RunDone, Started: t0, Chain: id}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -208,24 +208,24 @@ func TestBugsBackfill(t *testing.T) {
 	}
 }
 
-// verifyRun creates a running fix-check run for issue in journey.
-func verifyRun(t *testing.T, s *Store, id, journey, issue string) {
+// verifyRun creates a running fix-check run for issue in chain.
+func verifyRun(t *testing.T, s *Store, id, chain, issue string) {
 	t.Helper()
 	ctx, _ := json.Marshal(RunContext{Kind: "verify", Verify: &ContextVerify{IssueID: issue, Summary: "x"}})
 	if err := s.CreateRun(Run{ID: id, Token: "tok-" + id, Persona: "Ada", Role: "visitor", Story: "todos",
-		State: RunRunning, Started: t0, Journey: journey, Context: ctx}); err != nil {
+		State: RunRunning, Started: t0, Chain: chain, Context: ctx}); err != nil {
 		t.Fatal(err)
 	}
 }
 
-// checking returns an issue whose fix check (queue item q1, journey q1) is under way.
+// checking returns an issue whose fix check (queue item q1, chain q1) is under way.
 func checking(t *testing.T, s *Store) string {
 	t.Helper()
 	withRun(t, s, "r0", "Ada", "todos")
 	addBug(t, s, Bug{ID: "b0", RunID: "r0", Summary: "x", Created: t0})
 	id := onlyIssue(t, s).ID
 	ctx, _ := json.Marshal(RunContext{Kind: "verify", Verify: &ContextVerify{IssueID: id, Summary: "x"}})
-	ok, err := s.StartCheck(id, Queued{ID: "q1", Journey: "q1", Persona: "Ada", Role: "visitor", Story: "todos",
+	ok, err := s.StartCheck(id, Queued{ID: "q1", Chain: "q1", Persona: "Ada", Role: "visitor", Story: "todos",
 		Context: ctx, Created: t0}, t0)
 	if err != nil || !ok {
 		t.Fatalf("start check %v %v", ok, err)
@@ -257,27 +257,27 @@ func TestCheckVerdicts(t *testing.T) {
 				t.Fatalf("finish %v %v", won, err)
 			}
 			is, _ := s.Issue(id)
-			if is.Status != c.status || is.CheckNote != c.note || is.CheckJourney != "" || is.Reopened.Equal(at) != c.reopen {
+			if is.Status != c.status || is.CheckNote != c.note || is.CheckChain != "" || is.Reopened.Equal(at) != c.reopen {
 				t.Fatalf("issue %+v", is)
 			}
 		})
 	}
 }
 
-func TestCheckIgnoresOtherJourney(t *testing.T) {
+func TestCheckIgnoresOtherChain(t *testing.T) {
 	s := open(t)
 	id := checking(t, s)
 	verifyRun(t, s, "v1", "q1", id)
 	if err := s.SetIssueStatus(id, IssueConfirmed, "", t0); err != nil {
 		t.Fatal(err)
 	}
-	if ok, err := s.StartCheck(id, Queued{ID: "q2", Journey: "q2", Persona: "Ada", Created: t0}, t0); err != nil || !ok {
+	if ok, err := s.StartCheck(id, Queued{ID: "q2", Chain: "q2", Persona: "Ada", Created: t0}, t0); err != nil || !ok {
 		t.Fatalf("second check %v %v", ok, err)
 	}
 	if _, err := s.FinishRunChecked("v1", RunDone, "out", t0, &Verdict{Reached: true}); err != nil {
 		t.Fatal(err)
 	}
-	if is, _ := s.Issue(id); is.Status != IssueVerifying || is.CheckJourney != "q2" {
+	if is, _ := s.Issue(id); is.Status != IssueVerifying || is.CheckChain != "q2" {
 		t.Fatalf("issue %+v", is)
 	}
 }
@@ -285,7 +285,7 @@ func TestCheckIgnoresOtherJourney(t *testing.T) {
 func TestCheckIgnoresHandoffRun(t *testing.T) {
 	s := open(t)
 	id := checking(t, s)
-	if err := s.CreateRun(Run{ID: "h1", Token: "tok-h1", Persona: "Bob", State: RunRunning, Started: t0, Journey: "q1"}); err != nil {
+	if err := s.CreateRun(Run{ID: "h1", Token: "tok-h1", Persona: "Bob", State: RunRunning, Started: t0, Chain: "q1"}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.FinishRun("h1", RunFailed, "out", t0); err != nil {
@@ -317,7 +317,7 @@ func TestCheckWaitingDoesNotSettle(t *testing.T) {
 func TestStartCheckOnce(t *testing.T) {
 	s := open(t)
 	id := checking(t, s)
-	if ok, err := s.StartCheck(id, Queued{ID: "q2", Journey: "q2", Created: t0}, t0); err != nil || ok {
+	if ok, err := s.StartCheck(id, Queued{ID: "q2", Chain: "q2", Created: t0}, t0); err != nil || ok {
 		t.Fatalf("second %v %v", ok, err)
 	}
 	if q, _ := s.Queue(); len(q) != 1 {

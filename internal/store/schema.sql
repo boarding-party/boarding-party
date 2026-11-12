@@ -25,7 +25,7 @@ CREATE TABLE IF NOT EXISTS runs (
   session  TEXT NOT NULL DEFAULT '',
   started  INTEGER NOT NULL DEFAULT 0,
   finished INTEGER NOT NULL DEFAULT 0,
-  journey  TEXT NOT NULL DEFAULT '',
+  chain  TEXT NOT NULL DEFAULT '',
   follows  TEXT NOT NULL DEFAULT '',
   via      TEXT NOT NULL DEFAULT '',
   context  TEXT NOT NULL DEFAULT '',
@@ -45,7 +45,7 @@ CREATE TABLE IF NOT EXISTS bugs (
 );
 CREATE INDEX IF NOT EXISTS bugs_run ON bugs(run_id);
 -- An issue is one problem on the site; each bugs row (a report) belongs to
--- one. check_journey is the journey of the fix check under way, if any.
+-- one. check_chain is the chain of the fix check under way, if any.
 CREATE TABLE IF NOT EXISTS issues (
   id            TEXT PRIMARY KEY,
   summary       TEXT NOT NULL DEFAULT '',
@@ -54,7 +54,7 @@ CREATE TABLE IF NOT EXISTS issues (
   created       INTEGER NOT NULL DEFAULT 0,
   updated       INTEGER NOT NULL DEFAULT 0,
   reopened      INTEGER NOT NULL DEFAULT 0,
-  check_journey TEXT NOT NULL DEFAULT '',
+  check_chain TEXT NOT NULL DEFAULT '',
   check_note    TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS issues_updated ON issues(updated);
@@ -85,7 +85,7 @@ CREATE TABLE IF NOT EXISTS queue (
   persona TEXT NOT NULL DEFAULT '',
   role    TEXT NOT NULL DEFAULT '',
   story   TEXT NOT NULL DEFAULT '',
-  journey TEXT NOT NULL DEFAULT '',
+  chain TEXT NOT NULL DEFAULT '',
   follows TEXT NOT NULL DEFAULT '',
   via     TEXT NOT NULL DEFAULT '',
   context TEXT NOT NULL DEFAULT '',

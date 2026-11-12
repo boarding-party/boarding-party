@@ -15,7 +15,7 @@ var at = time.Date(2026, 11, 8, 12, 0, 0, 0, time.UTC)
 func report(t *testing.T, svc *Service, run, persona, story, issue string, when time.Time) string {
 	t.Helper()
 	if err := svc.Store.CreateRun(store.Run{ID: run, Token: "tok-" + run, Persona: persona, Role: "buyer", Story: story,
-		State: store.RunDone, Started: when, Journey: run}); err != nil {
+		State: store.RunDone, Started: when, Chain: run}); err != nil {
 		t.Fatal(err)
 	}
 	if err := svc.Store.AddBug(store.Bug{ID: "b-" + run, RunID: run, Summary: "total wrong", Step: "basket",
@@ -41,7 +41,7 @@ func TestMarkFixedQueuesCheck(t *testing.T) {
 	if err := json.Unmarshal(q[0].Context, &c); err != nil {
 		t.Fatal(err)
 	}
-	if q[0].Persona != "ann" || q[0].Story != "checkout" || q[0].Role != "buyer" || q[0].Journey != q[0].ID ||
+	if q[0].Persona != "ann" || q[0].Story != "checkout" || q[0].Role != "buyer" || q[0].Chain != q[0].ID ||
 		c.Kind != "verify" || c.Verify == nil || c.Verify.IssueID != id || c.Verify.Summary != "total wrong" ||
 		c.Verify.Step != "basket" || c.Verify.Evidence != "bug-1.png: says £0" || !strings.HasPrefix(q[0].Reason, "Checks the fix: ") {
 		t.Fatalf("queued %+v context %+v", q[0], c)
@@ -99,7 +99,7 @@ func TestSetIssueStatusRejects(t *testing.T) {
 func TestMarkFixedClipsContext(t *testing.T) {
 	svc, _ := newSvc(t)
 	if err := svc.Store.CreateRun(store.Run{ID: "r1", Token: "tok-r1", Persona: "ann", Role: "buyer", Story: "checkout",
-		State: store.RunDone, Started: at, Journey: "r1"}); err != nil {
+		State: store.RunDone, Started: at, Chain: "r1"}); err != nil {
 		t.Fatal(err)
 	}
 	long := strings.Repeat("y", 5000)

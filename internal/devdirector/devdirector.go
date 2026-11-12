@@ -376,7 +376,7 @@ func seedChain(st *store.Store, p project.Project, now time.Time) error {
 	run := func(state store.RunState, outcome string, started, finished time.Time) store.Run {
 		r := store.Run{ID: id(), Token: id() + id(), Persona: persona, Role: role.Name, Story: story,
 			State: state, Outcome: outcome, Started: started, Finished: finished}
-		r.Journey = r.ID
+		r.Chain = r.ID
 		return r
 	}
 
@@ -384,7 +384,7 @@ func seedChain(st *store.Store, p project.Project, now time.Time) error {
 		now.Add(-3*time.Hour), now.Add(-3*time.Hour+4*time.Minute))
 	next := run(store.RunDone, "Came back, completed one todo and checked the counter (sample run).",
 		now.Add(-2*time.Hour), now.Add(-2*time.Hour+3*time.Minute))
-	next.Journey, next.Follows, next.Via = first.Journey, first.ID, "continue"
+	next.Chain, next.Follows, next.Via = first.Chain, first.ID, "continue"
 	ctxJSON, e := json.Marshal(store.RunContext{Kind: "continue", PreviousRun: first.ID, Previous: first.Outcome})
 	if e != nil {
 		return e
@@ -407,7 +407,7 @@ func seedChain(st *store.Store, p project.Project, now time.Time) error {
 	if !ok {
 		return fmt.Errorf("sample waiting run %s was not active", waiting.ID)
 	}
-	q := store.Queued{ID: id(), Persona: persona, Role: role.Name, Story: story, Journey: waiting.Journey,
+	q := store.Queued{ID: id(), Persona: persona, Role: role.Name, Story: story, Chain: waiting.Chain,
 		Follows: waiting.ID, Via: "handoff", Reason: fmt.Sprintf("Handed off by %s (%s)", persona, story),
 		Created: now.Add(-30 * time.Minute)}
 	if err != nil {

@@ -30,7 +30,7 @@ func withLead(t *testing.T, svc *runs.Service) {
 		}
 	}
 	if err := svc.Store.CreateRun(store.Run{ID: "c1", Token: "tok-c1", Persona: "Ana", Role: "Ana", Story: "pay",
-		State: store.RunDone, Started: time.Now(), Journey: "c1"}); err != nil {
+		State: store.RunDone, Started: time.Now(), Chain: "c1"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := svc.Store.LogLead(store.LeadAction{Lead: "Kate", RunID: "l1", Action: "create", Subject: "Ana", Reason: "phones", Created: time.Now()}); err != nil {

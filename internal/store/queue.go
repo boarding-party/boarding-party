@@ -13,7 +13,7 @@ type Queued struct {
 	Persona string          `json:"persona"`
 	Role    string          `json:"role"`
 	Story   string          `json:"story"`
-	Journey string          `json:"journey"`
+	Chain   string          `json:"chainId"`
 	Follows string          `json:"follows"`
 	Via     string          `json:"via"`
 	Context json.RawMessage `json:"context,omitempty"`
@@ -21,7 +21,7 @@ type Queued struct {
 	Created time.Time       `json:"created"`
 }
 
-const queueCols = `id, persona, role, story, journey, follows, via, context, reason, created`
+const queueCols = `id, persona, role, story, chain, follows, via, context, reason, created`
 
 type execer interface {
 	Exec(query string, args ...any) (sql.Result, error)
@@ -32,7 +32,7 @@ func insertQueued(x execer, q Queued) error {
 		return errors.New("queued run needs an id")
 	}
 	_, err := x.Exec(`INSERT INTO queue(`+queueCols+`) VALUES(?,?,?,?,?,?,?,?,?,?)`,
-		q.ID, q.Persona, q.Role, q.Story, q.Journey, q.Follows, q.Via, string(q.Context), q.Reason, ts(q.Created))
+		q.ID, q.Persona, q.Role, q.Story, q.Chain, q.Follows, q.Via, string(q.Context), q.Reason, ts(q.Created))
 	return err
 }
 
@@ -51,7 +51,7 @@ func (s *Store) Queue() ([]Queued, error) {
 		var q Queued
 		var ctx string
 		var created int64
-		if err := rows.Scan(&q.ID, &q.Persona, &q.Role, &q.Story, &q.Journey, &q.Follows, &q.Via, &ctx, &q.Reason, &created); err != nil {
+		if err := rows.Scan(&q.ID, &q.Persona, &q.Role, &q.Story, &q.Chain, &q.Follows, &q.Via, &ctx, &q.Reason, &created); err != nil {
 			return nil, err
 		}
 		if ctx != "" {
@@ -71,8 +71,8 @@ func (s *Store) DeleteQueued(id string) error {
 		return err
 	}
 	defer tx.Rollback()
-	var ctx, journey string
-	err = tx.QueryRow(`SELECT context, journey FROM queue WHERE id = ?`, id).Scan(&ctx, &journey)
+	var ctx, chain string
+	err = tx.QueryRow(`SELECT context, chain FROM queue WHERE id = ?`, id).Scan(&ctx, &chain)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ErrNotFound
 	}
@@ -82,7 +82,7 @@ func (s *Store) DeleteQueued(id string) error {
 	if _, err := tx.Exec(`DELETE FROM queue WHERE id = ?`, id); err != nil {
 		return err
 	}
-	if err := settle(tx, ctx, journey, IssueFixed, checkOffQueue, false, time.Now().UTC()); err != nil {
+	if err := settle(tx, ctx, chain, IssueFixed, checkOffQueue, false, time.Now().UTC()); err != nil {
 		return err
 	}
 	return tx.Commit()

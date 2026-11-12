@@ -27,7 +27,7 @@ func TestIssuesAPI(t *testing.T) {
 	srv, wsrv, svc := setupBoth(t, 1024)
 	now := time.Now().UTC()
 	if err := svc.Store.CreateRun(store.Run{ID: "r1", Token: "tok", Persona: "ann", Role: "buyer", Story: "checkout",
-		State: store.RunDone, Started: now, Journey: "r1"}); err != nil {
+		State: store.RunDone, Started: now, Chain: "r1"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := svc.Store.AddBug(store.Bug{ID: "b1", RunID: "r1", Summary: "total wrong", Created: now}); err != nil {

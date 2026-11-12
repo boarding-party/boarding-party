@@ -223,7 +223,7 @@ func (s *Service) Start(ctx context.Context, persona, story string) (store.Run, 
 }
 
 // StartQueued starts the run a queue item asks for. The run continues the
-// item's journey and the item is taken in the same transaction that creates
+// item's chain and the item is taken in the same transaction that creates
 // the run, so a refused start (busy, no fence) leaves it queued. It returns
 // store.ErrNotFound if the item was already taken.
 func (s *Service) StartQueued(ctx context.Context, q store.Queued) (store.Run, error) {
@@ -231,7 +231,7 @@ func (s *Service) StartQueued(ctx context.Context, q store.Queued) (store.Run, e
 }
 
 // Enqueue queues a fresh run of persona doing story for the scheduler to
-// start when nothing else runs. The run starts its own journey.
+// start when nothing else runs. The run starts its own chain.
 func (s *Service) Enqueue(persona, story string, now time.Time) (store.Queued, error) {
 	p, err := s.Store.Project()
 	if err != nil {
@@ -293,12 +293,12 @@ func (s *Service) start(ctx context.Context, persona, story string, q *store.Que
 		}
 	}
 	r := store.Run{ID: id, Token: token, Persona: persona, Role: role, Story: st,
-		State: store.RunPending, Started: time.Now().UTC(), Journey: id}
+		State: store.RunPending, Started: time.Now().UTC(), Chain: id}
 	queueID := ""
 	if q != nil {
 		r.Follows, r.Via, r.Context = q.Follows, q.Via, q.Context
-		if q.Journey != "" {
-			r.Journey = q.Journey
+		if q.Chain != "" {
+			r.Chain = q.Chain
 		}
 		queueID = q.ID
 	}

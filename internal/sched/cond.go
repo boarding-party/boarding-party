@@ -184,7 +184,7 @@ func Met(st *store.Store, w store.Wait, r store.Run, now time.Time) (Arrival, bo
 			}
 		}
 	case "handoff":
-		runs, err := st.RunsInJourney(r.Journey)
+		runs, err := st.RunsInChain(r.Chain)
 		if err != nil {
 			return Arrival{}, false, err
 		}

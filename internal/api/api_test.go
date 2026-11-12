@@ -258,7 +258,7 @@ func TestStartRunBusyQueuesAndTokenRedacted(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(q) != 1 || q[0].ID != got.Queued.ID || q[0].Persona != "ann" || q[0].Story != "checkout" ||
-		q[0].Reason != "Started from the board" || q[0].Journey != "" || q[0].Follows != "" {
+		q[0].Reason != "Started from the board" || q[0].Chain != "" || q[0].Follows != "" {
 		t.Fatalf("queue = %+v, response %+v", q, got.Queued)
 	}
 	// An invalid run is refused, not queued.
@@ -937,10 +937,10 @@ func TestAdminFilesTooLargeWithoutContentLength(t *testing.T) {
 	}
 }
 
-func mkRun(t *testing.T, svc *runs.Service, id, journey, follows, via string, at time.Time) {
+func mkRun(t *testing.T, svc *runs.Service, id, chain, follows, via string, at time.Time) {
 	t.Helper()
 	err := svc.Store.CreateRun(store.Run{ID: id, Token: "tok-" + id, Persona: "ann", Role: "buyer", Story: "s-" + id,
-		State: store.RunDone, Started: at, Journey: journey, Follows: follows, Via: via})
+		State: store.RunDone, Started: at, Chain: chain, Follows: follows, Via: via})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -952,7 +952,7 @@ func TestRunsListShowsWait(t *testing.T) {
 	mkRun(t, svc, "r1", "r1", "", "", t0)
 	mkRun(t, svc, "r2", "r2", "", "", t0.Add(time.Minute))
 	w := store.Wait{Kind: "email", From: "shop@x.test", Subject: "Receipt", Deadline: t0.Add(8 * time.Hour)}
-	if err := svc.Store.CreateRun(store.Run{ID: "r3", Token: "tok-r3", Persona: "ann", Role: "buyer", Story: "s3", State: store.RunRunning, Started: t0.Add(2 * time.Minute), Journey: "r3"}); err != nil {
+	if err := svc.Store.CreateRun(store.Run{ID: "r3", Token: "tok-r3", Persona: "ann", Role: "buyer", Story: "s3", State: store.RunRunning, Started: t0.Add(2 * time.Minute), Chain: "r3"}); err != nil {
 		t.Fatal(err)
 	}
 	if ok, err := svc.Store.FinishRunWaiting("r3", "waiting", t0.Add(3*time.Minute), w); err != nil || !ok {
@@ -990,7 +990,7 @@ func TestRunDetailChain(t *testing.T) {
 	mkRun(t, svc, "a", "a", "", "", t0)
 	mkRun(t, svc, "b", "a", "a", "handoff", t0.Add(time.Minute))
 	mkRun(t, svc, "lone", "lone", "", "", t0.Add(2*time.Minute))
-	if err := svc.Store.Enqueue(store.Queued{ID: "q1", Persona: "bob", Role: "ops", Story: "next", Journey: "a", Follows: "b", Via: "handoff", Reason: "Handed off", Created: t0}); err != nil {
+	if err := svc.Store.Enqueue(store.Queued{ID: "q1", Persona: "bob", Role: "ops", Story: "next", Chain: "a", Follows: "b", Via: "handoff", Reason: "Handed off", Created: t0}); err != nil {
 		t.Fatal(err)
 	}
 	var d struct {
@@ -1030,7 +1030,7 @@ func TestQueueListAndDelete(t *testing.T) {
 	}
 	t0 := time.Now().UTC()
 	for i, id := range []string{"q1", "q2"} {
-		if err := svc.Store.Enqueue(store.Queued{ID: id, Persona: "bob", Role: "ops", Story: "s", Journey: "j", Follows: "r", Via: "handoff", Reason: "why", Created: t0.Add(time.Duration(i) * time.Second)}); err != nil {
+		if err := svc.Store.Enqueue(store.Queued{ID: id, Persona: "bob", Role: "ops", Story: "s", Chain: "j", Follows: "r", Via: "handoff", Reason: "why", Created: t0.Add(time.Duration(i) * time.Second)}); err != nil {
 			t.Fatal(err)
 		}
 	}

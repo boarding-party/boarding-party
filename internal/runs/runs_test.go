@@ -451,7 +451,7 @@ func TestFinishRejectsWaiting(t *testing.T) {
 
 func queueItem(t *testing.T, svc *Service) store.Queued {
 	t.Helper()
-	q := store.Queued{ID: "q1", Persona: "ann", Role: "buyer", Story: "checkout", Journey: "j1",
+	q := store.Queued{ID: "q1", Persona: "ann", Role: "buyer", Story: "checkout", Chain: "j1",
 		Follows: "r0", Via: "continue", Context: []byte(`{"kind":"continue"}`), Created: time.Now().UTC()}
 	if err := svc.Store.Enqueue(q); err != nil {
 		t.Fatal(err)
@@ -467,7 +467,7 @@ func TestStartQueuedCarriesChain(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, _ := svc.Store.RunByID(r.ID)
-	if got.Journey != "j1" || got.Follows != "r0" || got.Via != "continue" || string(got.Context) != `{"kind":"continue"}` || got.State != store.RunRunning {
+	if got.Chain != "j1" || got.Follows != "r0" || got.Via != "continue" || string(got.Context) != `{"kind":"continue"}` || got.State != store.RunRunning {
 		t.Fatalf("run: %+v", got)
 	}
 	if left, _ := svc.Store.Queue(); len(left) != 0 {
@@ -480,7 +480,7 @@ func TestStartQueuedCarriesChain(t *testing.T) {
 
 func TestStartQueuedTakenItem(t *testing.T) {
 	svc, fl := newSvc(t)
-	q := store.Queued{ID: "gone", Persona: "ann", Story: "checkout", Journey: "j1"}
+	q := store.Queued{ID: "gone", Persona: "ann", Story: "checkout", Chain: "j1"}
 	if _, err := svc.StartQueued(context.Background(), q); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("got %v, want ErrNotFound", err)
 	}
@@ -515,19 +515,19 @@ func TestStartQueuedFenceKeepsItem(t *testing.T) {
 	}
 }
 
-func TestManualStartNewJourney(t *testing.T) {
+func TestManualStartNewChain(t *testing.T) {
 	svc, _ := newSvc(t)
 	r, err := svc.Start(context.Background(), "ann", "checkout")
 	if err != nil {
 		t.Fatal(err)
 	}
 	got, _ := svc.Store.RunByID(r.ID)
-	if got.Journey != r.ID || got.Via != "" || got.Follows != "" {
+	if got.Chain != r.ID || got.Via != "" || got.Follows != "" {
 		t.Fatalf("run: %+v", got)
 	}
 }
 
-func TestQueuedStartWithoutJourneyStartsOne(t *testing.T) {
+func TestQueuedStartWithoutChainStartsOne(t *testing.T) {
 	svc, _ := newSvc(t)
 	q, err := svc.Enqueue("ann", "checkout", time.Now().UTC())
 	if err != nil {
@@ -537,8 +537,8 @@ func TestQueuedStartWithoutJourneyStartsOne(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if r.Journey != r.ID || r.Follows != "" {
-		t.Fatalf("run = %+v, want its own journey", r)
+	if r.Chain != r.ID || r.Follows != "" {
+		t.Fatalf("run = %+v, want its own chain", r)
 	}
 	if _, err := svc.Enqueue("nobody", "checkout", time.Now().UTC()); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("unknown persona: %v, want ErrInvalid", err)

@@ -109,7 +109,7 @@ func (f *fakeStarter) StartQueued(ctx context.Context, q store.Queued) (store.Ru
 	f.n++
 	id := fmt.Sprintf("s%d", f.n)
 	r := store.Run{ID: id, Token: "tok-" + id, Persona: q.Persona, Role: q.Role, Story: q.Story,
-		State: store.RunRunning, Started: f.now(), Journey: q.Journey, Follows: q.Follows, Via: q.Via, Context: q.Context}
+		State: store.RunRunning, Started: f.now(), Chain: q.Chain, Follows: q.Follows, Via: q.Via, Context: q.Context}
 	if err := f.st.CreateRunFrom(r, q.ID); err != nil {
 		return store.Run{}, err
 	}
@@ -184,19 +184,19 @@ func (f *fix) tick() {
 	}
 }
 
-func (f *fix) running(id, persona, role, story, journey string) store.Run {
+func (f *fix) running(id, persona, role, story, chain string) store.Run {
 	f.t.Helper()
 	r := store.Run{ID: id, Token: "tok-" + id, Persona: persona, Role: role, Story: story,
-		State: store.RunRunning, Started: f.clk.Now(), Journey: journey}
+		State: store.RunRunning, Started: f.clk.Now(), Chain: chain}
 	if err := f.st.CreateRun(r); err != nil {
 		f.t.Fatal(err)
 	}
 	return r
 }
 
-func (f *fix) waiting(id, persona, role, story, journey string, w store.Wait) store.Run {
+func (f *fix) waiting(id, persona, role, story, chain string, w store.Wait) store.Run {
 	f.t.Helper()
-	r := f.running(id, persona, role, story, journey)
+	r := f.running(id, persona, role, story, chain)
 	if ok, err := f.st.FinishRunWaiting(id, "outcome of "+id, f.clk.Now(), w); err != nil || !ok {
 		f.t.Fatal(ok, err)
 	}
@@ -204,9 +204,9 @@ func (f *fix) waiting(id, persona, role, story, journey string, w store.Wait) st
 	return r
 }
 
-func (f *fix) done(id, persona, role, story, journey, outcome string) {
+func (f *fix) done(id, persona, role, story, chain, outcome string) {
 	f.t.Helper()
-	f.running(id, persona, role, story, journey)
+	f.running(id, persona, role, story, chain)
 	if ok, err := f.st.FinishRun(id, store.RunDone, outcome, f.clk.Now()); err != nil || !ok {
 		f.t.Fatal(ok, err)
 	}
@@ -272,7 +272,7 @@ func TestTickContinuesWhenEmailArrives(t *testing.T) {
 		t.Fatalf("calls = %+v", calls)
 	}
 	q := calls[0]
-	if q.Via != "continue" || q.Persona != "Ada" || q.Role != "patient" || q.Story != "lone" || q.Journey != "j1" || q.Follows != "p1" {
+	if q.Via != "continue" || q.Persona != "Ada" || q.Role != "patient" || q.Story != "lone" || q.Chain != "j1" || q.Follows != "p1" {
 		t.Fatalf("item = %+v", q)
 	}
 	c := ctxOf(t, q)
@@ -352,7 +352,7 @@ func TestHandoffFanOutAndBack(t *testing.T) {
 	}
 	h := calls[0]
 	if h.Persona != "Cleo" || h.Role != "clinician" || h.Story != "approve" || h.Via != "handoff" ||
-		h.Follows != "p1" || h.Journey != "j1" || h.Reason != "Handed off by Ada (book)" {
+		h.Follows != "p1" || h.Chain != "j1" || h.Reason != "Handed off by Ada (book)" {
 		t.Fatalf("handoff item = %+v", h)
 	}
 	c := ctxOf(t, h)
@@ -370,7 +370,7 @@ func TestHandoffFanOutAndBack(t *testing.T) {
 		t.Fatalf("calls = %+v", calls)
 	}
 	back := calls[1]
-	if back.Persona != "Ada" || back.Story != "book" || back.Via != "continue" || back.Journey != "j1" || back.Follows != "p1" {
+	if back.Persona != "Ada" || back.Story != "book" || back.Via != "continue" || back.Chain != "j1" || back.Follows != "p1" {
 		t.Fatalf("continuation = %+v", back)
 	}
 	if bc := ctxOf(t, back); !strings.Contains(bc.Arrived, "Cleo") || !strings.Contains(bc.Arrived, "approved the booking") {
@@ -391,7 +391,7 @@ func TestDoneFansOutDeclaredHandoffs(t *testing.T) {
 		t.Fatalf("queue order = %+v", q)
 	}
 	for _, it := range q {
-		if it.Via != "handoff" || it.Follows != "p1" || it.Journey != "j1" || it.Reason != "Handed off by Ada (refer)" {
+		if it.Via != "handoff" || it.Follows != "p1" || it.Chain != "j1" || it.Reason != "Handed off by Ada (refer)" {
 			t.Fatalf("item = %+v", it)
 		}
 		if c := ctxOf(t, it); c.From == nil || c.From.Summary != "referred Bob" || c.Previous != "referred Bob" {
@@ -511,7 +511,7 @@ func TestTickDropsInvalidQueued(t *testing.T) {
 	f := newFix(t, schedYAML)
 	for i, p := range []string{"Gone", "Ada"} {
 		if err := f.st.Enqueue(store.Queued{ID: fmt.Sprintf("q%d", i), Persona: p, Role: "patient", Story: "lone",
-			Journey: "j1", Via: "continue", Created: now.Add(time.Duration(i) * time.Second)}); err != nil {
+			Chain: "j1", Via: "continue", Created: now.Add(time.Duration(i) * time.Second)}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -575,7 +575,7 @@ func TestPokeRunsTick(t *testing.T) {
 	f.starter.called = make(chan struct{}, 1)
 	f.starter.errs = []error{runs.ErrBusy}
 	if err := f.st.Enqueue(store.Queued{ID: "q0", Persona: "Ada", Role: "patient", Story: "lone",
-		Journey: "j1", Via: "continue", Created: now}); err != nil {
+		Chain: "j1", Via: "continue", Created: now}); err != nil {
 		t.Fatal(err)
 	}
 	f.s.Every = time.Hour
@@ -744,7 +744,7 @@ func TestDrainLogsNoFence(t *testing.T) {
 	f := newFix(t, schedYAML)
 	f.starter.SetErr(fmt.Errorf("%w: no NetworkPolicy", runs.ErrNoFence))
 	if err := f.st.Enqueue(store.Queued{ID: "q0", Persona: "Ada", Role: "patient", Story: "lone",
-		Journey: "j1", Via: "continue", Created: now}); err != nil {
+		Chain: "j1", Via: "continue", Created: now}); err != nil {
 		t.Fatal(err)
 	}
 	f.tick()
@@ -757,7 +757,7 @@ func TestContinueKeepsVerify(t *testing.T) {
 	f := newFix(t, schedYAML)
 	ctx, _ := json.Marshal(store.RunContext{Kind: "verify", Verify: &store.ContextVerify{IssueID: "i1", Summary: "total wrong", Step: "basket"}})
 	if err := f.st.CreateRun(store.Run{ID: "p1", Token: "tok-p1", Persona: "Ada", Role: "patient", Story: "lone",
-		State: store.RunRunning, Started: f.clk.Now(), Journey: "j1", Context: ctx}); err != nil {
+		State: store.RunRunning, Started: f.clk.Now(), Chain: "j1", Context: ctx}); err != nil {
 		t.Fatal(err)
 	}
 	if ok, err := f.st.FinishRunWaiting("p1", "outcome of p1", f.clk.Now(), timeWait(f.clk.Now().Add(time.Minute))); err != nil || !ok {
@@ -779,7 +779,7 @@ func TestDrainKeepsItemWithoutAgentKey(t *testing.T) {
 	f := newFix(t, schedYAML)
 	f.starter.SetErr(fmt.Errorf("%w: set the Anthropic key in Project → Agent key", runs.ErrNoAgentKey))
 	if err := f.st.Enqueue(store.Queued{ID: "q0", Persona: "Ada", Role: "patient", Story: "lone",
-		Journey: "j1", Via: "continue", Created: now}); err != nil {
+		Chain: "j1", Via: "continue", Created: now}); err != nil {
 		t.Fatal(err)
 	}
 	f.tick()
@@ -792,7 +792,7 @@ func TestDrainLogsAMissingKeyOnce(t *testing.T) {
 	f := newFix(t, schedYAML)
 	f.starter.SetErr(fmt.Errorf("%w: set the Anthropic key in Project → Agent key", runs.ErrNoAgentKey))
 	if err := f.st.Enqueue(store.Queued{ID: "q0", Persona: "Ada", Role: "patient", Story: "lone",
-		Journey: "j1", Via: "continue", Created: now}); err != nil {
+		Chain: "j1", Via: "continue", Created: now}); err != nil {
 		t.Fatal(err)
 	}
 	var buf bytes.Buffer

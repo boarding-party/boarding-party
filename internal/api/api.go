@@ -382,8 +382,8 @@ func (s *server) getRun(w http.ResponseWriter, r *http.Request) {
 		fail(w, err)
 		return
 	}
-	if run.Journey != "" {
-		chain, err := s.svc.Store.RunsInJourney(run.Journey)
+	if run.Chain != "" {
+		chain, err := s.svc.Store.RunsInChain(run.Chain)
 		if err != nil {
 			fail(w, err)
 			return
@@ -402,7 +402,7 @@ func (s *server) getRun(w http.ResponseWriter, r *http.Request) {
 		}
 		var mine []queueView
 		for _, q := range queue {
-			if q.Journey == run.Journey {
+			if q.Chain == run.Chain {
 				mine = append(mine, newQueueView(q))
 			}
 		}
@@ -421,7 +421,7 @@ type waitView struct {
 
 func newWaitView(w store.Wait) *waitView { return &waitView{Wait: w, WaitingFor: sched.Describe(w)} }
 
-// chainLink is one run of a journey.
+// chainLink is one run of a chain.
 type chainLink struct {
 	ID      string         `json:"id"`
 	Persona string         `json:"persona"`

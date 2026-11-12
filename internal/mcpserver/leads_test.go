@@ -55,7 +55,7 @@ func (f leadFix) run(t *testing.T, id, persona, role, story string, state store.
 	t.Helper()
 	at := time.Now().Add(-time.Minute)
 	if err := f.st.CreateRun(store.Run{ID: id, Token: "tok-" + id, Persona: persona, Role: role, Story: story,
-		State: store.RunRunning, Started: at, Journey: id}); err != nil {
+		State: store.RunRunning, Started: at, Chain: id}); err != nil {
 		t.Fatal(err)
 	}
 	if state != store.RunRunning {

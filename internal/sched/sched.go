@@ -17,7 +17,7 @@ import (
 )
 
 const (
-	// MaxChainRuns caps the runs (started and queued) in one journey, so
+	// MaxChainRuns caps the runs (started and queued) in one chain, so
 	// stories that hand off to each other cannot loop forever.
 	MaxChainRuns = 10
 	DefaultEvery = 30 * time.Second
@@ -170,7 +170,7 @@ func (s *Scheduler) handoffs(p project.Project, r store.Run, targets []project.H
 	if len(targets) == 0 {
 		return nil, "", nil
 	}
-	chainRuns, chainQueued, err := s.chain(r.Journey)
+	chainRuns, chainQueued, err := s.chain(r.Chain)
 	if err != nil {
 		return nil, "", err
 	}
@@ -203,7 +203,7 @@ func (s *Scheduler) handoffs(p project.Project, r store.Run, targets []project.H
 			break
 		}
 		items = append(items, store.Queued{ID: s.newID(), Persona: to, Role: h.Role, Story: h.Story,
-			Journey: r.Journey, Follows: r.ID, Via: "handoff", Context: ctxJSON,
+			Chain: r.Chain, Follows: r.ID, Via: "handoff", Context: ctxJSON,
 			Reason: fmt.Sprintf("Handed off by %s (%s)", r.Persona, r.Story), Created: now})
 	}
 	return items, "", nil
@@ -236,9 +236,9 @@ func handedOff(h project.Handoff, rs []store.Run, qs, pending []store.Queued) bo
 	return false
 }
 
-// chain returns the runs and queued items of a journey.
-func (s *Scheduler) chain(journey string) ([]store.Run, []store.Queued, error) {
-	rs, err := s.Store.RunsInJourney(journey)
+// chain returns the runs and queued items of a chain.
+func (s *Scheduler) chain(chain string) ([]store.Run, []store.Queued, error) {
+	rs, err := s.Store.RunsInChain(chain)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -248,7 +248,7 @@ func (s *Scheduler) chain(journey string) ([]store.Run, []store.Queued, error) {
 	}
 	var qs []store.Queued
 	for _, q := range all {
-		if q.Journey == journey {
+		if q.Chain == chain {
 			qs = append(qs, q)
 		}
 	}
@@ -313,7 +313,7 @@ func (s *Scheduler) resolve(w store.Wait, followed bool, now time.Time) error {
 		_, err := s.Store.ResolveWait(r.ID, s.stuck(r, StuckText(w), now))
 		return err
 	}
-	rs, qs, err := s.chain(r.Journey)
+	rs, qs, err := s.chain(r.Chain)
 	if err != nil {
 		return err
 	}
@@ -335,7 +335,7 @@ func (s *Scheduler) resolve(w store.Wait, followed bool, now time.Time) error {
 			return err
 		}
 	}
-	next := store.Queued{ID: s.newID(), Persona: r.Persona, Role: r.Role, Story: r.Story, Journey: r.Journey,
+	next := store.Queued{ID: s.newID(), Persona: r.Persona, Role: r.Role, Story: r.Story, Chain: r.Chain,
 		Follows: r.ID, Via: "continue", Context: ctxJSON, Reason: "Continues after " + a.Detail, Created: now}
 	_, err = s.Store.ResolveWait(r.ID, store.Resolution{Status: store.WaitMet, Detail: a.Detail, Ended: now, Next: &next})
 	return err
@@ -345,7 +345,7 @@ func (s *Scheduler) resolve(w store.Wait, followed bool, now time.Time) error {
 // still can: the hand-off is queued, its run is active or still waiting, or
 // nothing decisive has happened yet.
 func (s *Scheduler) handoffLost(w store.Wait, r store.Run) (string, error) {
-	rs, qs, err := s.chain(r.Journey)
+	rs, qs, err := s.chain(r.Chain)
 	if err != nil {
 		return "", err
 	}

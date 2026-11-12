@@ -37,7 +37,7 @@ func pastRun(t *testing.T, svc *Service, id, persona, role, story string) {
 	t.Helper()
 	at := time.Now().Add(-time.Minute)
 	if err := svc.Store.CreateRun(store.Run{ID: id, Token: id, Persona: persona, Role: role, Story: story,
-		State: store.RunRunning, Started: at, Journey: id}); err != nil {
+		State: store.RunRunning, Started: at, Chain: id}); err != nil {
 		t.Fatal(err)
 	}
 	u := Usage{ByModel: map[string]Counts{"claude-opus-5-5": {Output: 300_000}}}

@@ -63,7 +63,7 @@ func (s *Service) markFixed(id string, now time.Time) error {
 		if err != nil {
 			return err
 		}
-		q := store.Queued{ID: qid, Journey: qid, Persona: rp.Persona, Role: role, Story: story, Context: ctx,
+		q := store.Queued{ID: qid, Chain: qid, Persona: rp.Persona, Role: role, Story: story, Context: ctx,
 			Reason: "Checks the fix: " + store.Clip(is.Summary, maxCheckReason), Created: now}
 		_, err = s.Store.StartCheck(id, q, now)
 		return err

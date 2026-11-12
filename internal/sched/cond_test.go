@@ -46,7 +46,7 @@ func openStore(t *testing.T) *store.Store {
 	return s
 }
 
-var run = store.Run{ID: "r1", Persona: "pat", Role: "patient", Story: "book", Journey: "j1"}
+var run = store.Run{ID: "r1", Persona: "pat", Role: "patient", Story: "book", Chain: "j1"}
 
 func wantErr(t *testing.T, u Until, want string) {
 	t.Helper()
@@ -187,10 +187,10 @@ func TestMetEmail(t *testing.T) {
 func TestMetHandoff(t *testing.T) {
 	s := openStore(t)
 	began := now
-	mk := func(id, journey string, state store.RunState, fin time.Time) {
+	mk := func(id, chain string, state store.RunState, fin time.Time) {
 		t.Helper()
 		err := s.CreateRun(store.Run{ID: id, Token: "t" + id, Persona: "doc", Role: "clinician", Story: "approve",
-			State: state, Outcome: "approved it\nsecond line", Started: began.Add(-time.Hour), Finished: fin, Journey: journey})
+			State: state, Outcome: "approved it\nsecond line", Started: began.Add(-time.Hour), Finished: fin, Chain: chain})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -304,7 +304,7 @@ func TestMetEmailAfterID(t *testing.T) {
 func TestMetHandoffDetailPlain(t *testing.T) {
 	s := openStore(t)
 	if err := s.CreateRun(store.Run{ID: "d", Token: "td", Persona: "doc\x1b[31m", Role: "clinician", Story: "approve",
-		State: store.RunDone, Outcome: "ok\rfake\x1b[2J " + strings.Repeat("y", 300), Started: now, Finished: now.Add(time.Minute), Journey: "j1"}); err != nil {
+		State: store.RunDone, Outcome: "ok\rfake\x1b[2J " + strings.Repeat("y", 300), Started: now, Finished: now.Add(time.Minute), Chain: "j1"}); err != nil {
 		t.Fatal(err)
 	}
 	w := store.Wait{RunID: "r1", Kind: "handoff", Role: "clinician", Story: "approve", Began: now}

@@ -26,18 +26,18 @@ const (
 // Issue is one problem on the site. Reports, LastSeen and Personas are worked
 // out from its reports.
 type Issue struct {
-	ID           string      `json:"id"`
-	Summary      string      `json:"summary"`
-	Status       IssueStatus `json:"status"`
-	Reason       string      `json:"reason,omitempty"`
-	Created      time.Time   `json:"created"`
-	Updated      time.Time   `json:"updated"`
-	Reopened     time.Time   `json:"reopened,omitzero"`
-	CheckJourney string      `json:"-"`
-	CheckNote    string      `json:"checkNote,omitempty"`
-	Reports      int         `json:"reports"`
-	LastSeen     time.Time   `json:"lastSeen,omitzero"`
-	Personas     []string    `json:"personas"`
+	ID         string      `json:"id"`
+	Summary    string      `json:"summary"`
+	Status     IssueStatus `json:"status"`
+	Reason     string      `json:"reason,omitempty"`
+	Created    time.Time   `json:"created"`
+	Updated    time.Time   `json:"updated"`
+	Reopened   time.Time   `json:"reopened,omitzero"`
+	CheckChain string      `json:"-"`
+	CheckNote  string      `json:"checkNote,omitempty"`
+	Reports    int         `json:"reports"`
+	LastSeen   time.Time   `json:"lastSeen,omitzero"`
+	Personas   []string    `json:"personas"`
 }
 
 // Report is a bug with the run that reported it.
@@ -104,7 +104,7 @@ func insertBug(tx *sql.Tx, b Bug) error {
 
 // issueSelect reads issues with their report aggregates; the caller adds
 // WHERE, ORDER BY and LIMIT.
-const issueSelect = `SELECT i.id, i.summary, i.status, i.reason, i.created, i.updated, i.reopened, i.check_journey, i.check_note,
+const issueSelect = `SELECT i.id, i.summary, i.status, i.reason, i.created, i.updated, i.reopened, i.check_chain, i.check_note,
 	(SELECT COUNT(*) FROM bugs b WHERE b.issue_id = i.id),
 	(SELECT COALESCE(MAX(b.created), 0) FROM bugs b WHERE b.issue_id = i.id),
 	(SELECT COALESCE(GROUP_CONCAT(p, char(31)), '') FROM (SELECT DISTINCT r.persona AS p FROM bugs b JOIN runs r ON r.id = b.run_id
@@ -122,7 +122,7 @@ func (s *Store) queryIssues(tail string, args ...any) ([]Issue, error) {
 		var i Issue
 		var status, personas string
 		var created, updated, reopened, last int64
-		if err := rows.Scan(&i.ID, &i.Summary, &status, &i.Reason, &created, &updated, &reopened, &i.CheckJourney, &i.CheckNote,
+		if err := rows.Scan(&i.ID, &i.Summary, &status, &i.Reason, &created, &updated, &reopened, &i.CheckChain, &i.CheckNote,
 			&i.Reports, &last, &personas); err != nil {
 			return nil, err
 		}
@@ -229,20 +229,20 @@ func (s *Store) SetIssueStatus(id string, st IssueStatus, reason string, now tim
 		return err
 	}
 	defer tx.Rollback()
-	var journey string
-	err = tx.QueryRow(`SELECT check_journey FROM issues WHERE id=?`, id).Scan(&journey)
+	var chain string
+	err = tx.QueryRow(`SELECT check_chain FROM issues WHERE id=?`, id).Scan(&chain)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ErrNotFound
 	}
 	if err != nil {
 		return err
 	}
-	if journey != "" {
-		if _, err := tx.Exec(`DELETE FROM queue WHERE journey=?`, journey); err != nil {
+	if chain != "" {
+		if _, err := tx.Exec(`DELETE FROM queue WHERE chain=?`, chain); err != nil {
 			return err
 		}
 	}
-	if _, err := tx.Exec(`UPDATE issues SET status=?, reason=?, updated=?, check_journey='' WHERE id=?`,
+	if _, err := tx.Exec(`UPDATE issues SET status=?, reason=?, updated=?, check_chain='' WHERE id=?`,
 		string(st), reason, ts(now), id); err != nil {
 		return err
 	}
@@ -272,8 +272,8 @@ func (s *Store) StartCheck(issueID string, q Queued, now time.Time) (bool, error
 		return false, err
 	}
 	defer tx.Rollback()
-	res, err := tx.Exec(`UPDATE issues SET status='verifying', check_journey=?, check_note='', reason='', updated=?
-		WHERE id=? AND status != 'verifying'`, q.Journey, ts(now), issueID)
+	res, err := tx.Exec(`UPDATE issues SET status='verifying', check_chain=?, check_note='', reason='', updated=?
+		WHERE id=? AND status != 'verifying'`, q.Chain, ts(now), issueID)
 	if err != nil {
 		return false, err
 	}
@@ -288,7 +288,7 @@ func (s *Store) StartCheck(issueID string, q Queued, now time.Time) (bool, error
 
 // NoCheck marks an issue fixed without a check, saying why in note.
 func (s *Store) NoCheck(issueID, note string, now time.Time) error {
-	res, err := s.db.Exec(`UPDATE issues SET status='fixed', check_note=?, check_journey='', reason='', updated=? WHERE id=?`,
+	res, err := s.db.Exec(`UPDATE issues SET status='fixed', check_note=?, check_chain='', reason='', updated=? WHERE id=?`,
 		note, ts(now), issueID)
 	if err != nil {
 		return err
@@ -305,8 +305,8 @@ func (s *Store) NoCheck(issueID, note string, now time.Time) error {
 // is one and its issue is still waiting for this check. A waiting run settles
 // nothing: its continuation carries the check.
 func settleCheck(tx *sql.Tx, runID string, state RunState, v *Verdict, now time.Time) error {
-	var ctx, journey string
-	if err := tx.QueryRow(`SELECT context, journey FROM runs WHERE id = ?`, runID).Scan(&ctx, &journey); err != nil {
+	var ctx, chain string
+	if err := tx.QueryRow(`SELECT context, chain FROM runs WHERE id = ?`, runID).Scan(&ctx, &chain); err != nil {
 		return err
 	}
 	st, note, reopen := IssueFixed, fmt.Sprintf("Could not check: the run ended %s.", state), false
@@ -321,22 +321,22 @@ func settleCheck(tx *sql.Tx, runID string, state RunState, v *Verdict, now time.
 	default:
 		st, note = IssueClosed, "Gone: "+Clip(v.Note, MaxCheckNote)
 	}
-	return settle(tx, ctx, journey, st, note, reopen, now)
+	return settle(tx, ctx, chain, st, note, reopen, now)
 }
 
 // settle moves the issue named by a verify context to st, if that issue is
-// still verifying under journey.
-func settle(tx *sql.Tx, ctxJSON, journey string, st IssueStatus, note string, reopen bool, now time.Time) error {
+// still verifying under chain.
+func settle(tx *sql.Tx, ctxJSON, chain string, st IssueStatus, note string, reopen bool, now time.Time) error {
 	if ctxJSON == "" {
 		return nil
 	}
 	var c RunContext
-	if json.Unmarshal([]byte(ctxJSON), &c) != nil || c.Verify == nil || c.Verify.IssueID == "" || journey == "" {
+	if json.Unmarshal([]byte(ctxJSON), &c) != nil || c.Verify == nil || c.Verify.IssueID == "" || chain == "" {
 		return nil
 	}
-	_, err := tx.Exec(`UPDATE issues SET status=?, check_note=?, check_journey='', updated=?,
+	_, err := tx.Exec(`UPDATE issues SET status=?, check_note=?, check_chain='', updated=?,
 		reopened = CASE WHEN ? THEN ? ELSE reopened END
-		WHERE id=? AND status='verifying' AND check_journey=?`,
-		string(st), note, ts(now), reopen, ts(now), c.Verify.IssueID, journey)
+		WHERE id=? AND status='verifying' AND check_chain=?`,
+		string(st), note, ts(now), reopen, ts(now), c.Verify.IssueID, chain)
 	return err
 }

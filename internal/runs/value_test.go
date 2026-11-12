@@ -12,7 +12,7 @@ import (
 func paid(t *testing.T, svc *Service, id, persona, story string, when time.Time) {
 	t.Helper()
 	if err := svc.Store.CreateRun(store.Run{ID: id, Token: "tok-" + id, Persona: persona, Role: "buyer", Story: story,
-		State: store.RunRunning, Started: when, Journey: id}); err != nil {
+		State: store.RunRunning, Started: when, Chain: id}); err != nil {
 		t.Fatal(err)
 	}
 	u := Usage{Counts: Counts{Input: 1_000_000}, ByModel: map[string]Counts{"claude-sonnet-5-5": {Input: 1_000_000}}}

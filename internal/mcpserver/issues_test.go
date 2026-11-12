@@ -81,13 +81,13 @@ func TestReportBugSameAs(t *testing.T) {
 // checkRun adds an active fix-check run for issue and returns its token.
 func checkRun(t *testing.T, st *store.Store, issue string) string {
 	t.Helper()
-	ok, err := st.StartCheck(issue, store.Queued{ID: "q1", Journey: "q1", Created: time.Now().UTC()}, time.Now().UTC())
+	ok, err := st.StartCheck(issue, store.Queued{ID: "q1", Chain: "q1", Created: time.Now().UTC()}, time.Now().UTC())
 	if err != nil || !ok {
 		t.Fatal(ok, err)
 	}
 	ctx, _ := json.Marshal(store.RunContext{Kind: "verify", Verify: &store.ContextVerify{IssueID: issue, Summary: "x"}})
 	if err := st.CreateRun(store.Run{ID: "v1", Token: "tok-v1", Persona: "ann", Role: "buyer", Story: "checkout",
-		State: store.RunRunning, Started: time.Now().UTC(), Journey: "q1", Context: ctx}); err != nil {
+		State: store.RunRunning, Started: time.Now().UTC(), Chain: "q1", Context: ctx}); err != nil {
 		t.Fatal(err)
 	}
 	return "tok-v1"

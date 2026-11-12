@@ -57,7 +57,7 @@ func (f *fix) leadRuns() map[string]store.Queued {
 func (f *fix) pastLeadRun(id, lead, role string, t time.Time) {
 	f.t.Helper()
 	if err := f.st.CreateRun(store.Run{ID: id, Token: "tok-" + id, Persona: lead, Role: role, Story: project.LeadStory,
-		State: store.RunRunning, Started: t, Journey: id}); err != nil {
+		State: store.RunRunning, Started: t, Chain: id}); err != nil {
 		f.t.Fatal(err)
 	}
 	if _, err := f.st.FinishRun(id, store.RunDone, "ok", t.Add(time.Minute)); err != nil {
