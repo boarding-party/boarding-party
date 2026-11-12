@@ -123,18 +123,8 @@ func (s *Store) AddRevision(persona, story string, r Revision, d Decision) (Jour
 		return Journey{}, Revision{}, err
 	}
 	defer tx.Rollback()
-	j, err := scanJourney(tx.QueryRow(`SELECT `+journeyCols+` FROM journeys WHERE persona = ? AND story = ?`, persona, story))
-	if errors.Is(err, ErrNotFound) {
-		id, idErr := newIssueID()
-		if idErr != nil {
-			return Journey{}, Revision{}, idErr
-		}
-		j = Journey{ID: id, Persona: persona, Story: story, State: JourneyLive, Created: r.Created}
-		if _, err = tx.Exec(`INSERT INTO journeys(id, persona, story, state, created) VALUES(?,?,?,?,?)`,
-			j.ID, persona, story, string(j.State), ts(j.Created)); err != nil {
-			return Journey{}, Revision{}, err
-		}
-	} else if err != nil {
+	j, err := ensureJourney(tx, persona, story, r.Created)
+	if err != nil {
 		return Journey{}, Revision{}, err
 	}
 	if err := tx.QueryRow(`SELECT COALESCE(MAX(n), 0) + 1 FROM journey_revisions WHERE journey_id = ?`, j.ID).Scan(&r.N); err != nil {
@@ -161,6 +151,43 @@ func (s *Store) AddRevision(persona, story string, r Revision, d Decision) (Jour
 		return Journey{}, Revision{}, err
 	}
 	return j, r, tx.Commit()
+}
+
+// EnsureJourney returns persona's journey for story, creating it with no
+// revisions when there is none: a decision needs a journey to belong to.
+func (s *Store) EnsureJourney(persona, story string, at time.Time) (Journey, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return Journey{}, err
+	}
+	defer tx.Rollback()
+	j, err := ensureJourney(tx, persona, story, at)
+	if err != nil {
+		return Journey{}, err
+	}
+	return j, tx.Commit()
+}
+
+func ensureJourney(tx *sql.Tx, persona, story string, at time.Time) (Journey, error) {
+	j, err := scanJourney(tx.QueryRow(`SELECT `+journeyCols+` FROM journeys WHERE persona = ? AND story = ?`, persona, story))
+	if !errors.Is(err, ErrNotFound) {
+		return j, err
+	}
+	id, err := newIssueID()
+	if err != nil {
+		return Journey{}, err
+	}
+	j = Journey{ID: id, Persona: persona, Story: story, State: JourneyLive, Created: at}
+	_, err = tx.Exec(`INSERT INTO journeys(id, persona, story, state, created) VALUES(?,?,?,?,?)`,
+		j.ID, persona, story, string(j.State), ts(at))
+	return j, err
+}
+
+// RunDecided reports whether a run has left any decision about a journey.
+func (s *Store) RunDecided(runID string) (bool, error) {
+	var n int
+	err := s.db.QueryRow(`SELECT count(*) FROM journey_decisions WHERE run_id = ?`, runID).Scan(&n)
+	return n > 0, err
 }
 
 const revisionCols = `journey_id, n, kind, code, reason, run_id, parent, bug_id, bug_step, created`

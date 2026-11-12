@@ -172,6 +172,7 @@ func TestUnknownTokenEveryToolErrors(t *testing.T) {
 func TestFinishThenToolsError(t *testing.T) {
 	_, st, srv, run := setup(t)
 	cs := connect(t, srv, run.Token)
+	decided(t, cs)
 	if text, isErr := call(t, cs, "finish_run", map[string]any{"outcome": "stuck", "summary": "blocked"}); isErr || text != "finished" {
 		t.Fatalf("finish: %q %v", text, isErr)
 	}
@@ -261,6 +262,7 @@ func TestCrossRunIsolation(t *testing.T) {
 		"summary": "bug for A", "step": "1", "evidence": "e", "severity_guess": "low", "note": "n"}); isErr {
 		t.Fatalf("report_bug: %s", text)
 	}
+	decided(t, cs)
 	if text, isErr := call(t, cs, "finish_run", map[string]any{"outcome": "done", "summary": "A done"}); isErr {
 		t.Fatalf("finish_run: %s", text)
 	}

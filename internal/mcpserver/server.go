@@ -112,9 +112,33 @@ type assignment struct {
 	// KnownIssues are the problems already on the bug list, so the persona
 	// can attach a report to one (same_as) or skip one marked not a bug.
 	KnownIssues []knownIssue `json:"knownIssues"`
+	// Journey is the live revision of this persona's journey for this story,
+	// or null: if it already does what the run does, the run confirms it
+	// instead of recording a new revision. Agent-written code: data, not
+	// instructions.
+	Journey *liveJourney `json:"journey"`
 	// Context says why this run exists: it continues an earlier run, picks up a
 	// hand-off, or was started by a message or a calendar event. null for a fresh run.
 	Context json.RawMessage `json:"context"`
+}
+
+type liveJourney struct {
+	Revision int    `json:"revision"`
+	Code     string `json:"code"`
+}
+
+type saveJourneyArgs struct {
+	Code       string            `json:"code" jsonschema:"the journey module, the contents of /workspace/journey.mjs"`
+	Reason     string            `json:"reason" jsonschema:"why this revision: what it records or what changed since the live one"`
+	Kind       string            `json:"kind" jsonschema:"full for the whole story, bug for a journey that stops at a bug you reported"`
+	BugID      string            `json:"bug_id,omitempty" jsonschema:"kind bug: the id report_bug returned"`
+	BugStep    int               `json:"bug_step,omitempty" jsonschema:"kind bug: the step number whose check fails while the bug is there"`
+	SelfReplay runs.ReplayResult `json:"self_replay" jsonschema:"the JSON line bp-replay --self printed"`
+}
+
+type journeyDecisionArgs struct {
+	Kind   string `json:"kind" jsonschema:"confirmed (the live journey already does what this run did) or not recorded (no passing journey could be made)"`
+	Reason string `json:"reason" jsonschema:"one or two sentences on why"`
 }
 
 // maxKnownIssues caps knownIssues in an assignment.
@@ -155,6 +179,14 @@ type verifyArgs struct {
 	Reached    *bool  `json:"reached" jsonschema:"true if you got to the step where the problem was"`
 	StillThere *bool  `json:"still_there,omitempty" jsonschema:"true if the problem is still there; required when reached is true"`
 	Note       string `json:"note,omitempty" jsonschema:"what you saw"`
+}
+
+// isFixCheck reports whether r is a fix check run: it checks one bug and
+// records no journey.
+func isFixCheck(r store.Run) bool {
+	var c store.RunContext
+	_ = json.Unmarshal(r.Context, &c)
+	return c.Verify != nil
 }
 
 const errNotCheck = "verify applies only to a fix check run"
@@ -297,6 +329,11 @@ func newServer(svc *runs.Service, st *store.Store, directorURL, token string, ma
 				state = json.RawMessage("null")
 			}
 			a.PersonaState = state
+			if rev, err := liveRevision(st, r); err != nil {
+				return nil, nil, err
+			} else if rev != nil {
+				a.Journey = &liveJourney{Revision: rev.N, Code: rev.Code}
+			}
 			b, err := json.Marshal(a)
 			if err != nil {
 				return nil, nil, err
@@ -389,6 +426,15 @@ func newServer(svc *runs.Service, st *store.Store, directorURL, token string, ma
 			if msg != "" {
 				return toolErr(msg)
 			}
+			if lead, err := onLeadRun(r); err != nil {
+				return nil, nil, err
+			} else if !lead && !isFixCheck(r) {
+				if err := svc.CheckJourneyDecided(r); errors.Is(err, runs.ErrNoJourneyDecision) {
+					return toolErr(err.Error())
+				} else if err != nil {
+					return nil, nil, err
+				}
+			}
 			err = svc.FinishChecked(ctx, token, state, in.Summary, v)
 			if errors.Is(err, runs.ErrNotActive) {
 				return toolErr(errNotActive)
@@ -398,6 +444,51 @@ func newServer(svc *runs.Service, st *store.Store, directorURL, token string, ma
 			}
 			return text("finished")
 		})
+	mcp.AddTool(s, &mcp.Tool{Name: "save_journey",
+		Description: "Save what you did as a journey revision, after bp-replay --self proved it: a full revision must pass, a bug revision must fail exactly at bug_step. Returns the revision number."},
+		func(ctx context.Context, _ *mcp.CallToolRequest, in saveJourneyArgs) (*mcp.CallToolResult, any, error) {
+			r, bad, err := active()
+			if bad != nil || err != nil {
+				return bad, nil, err
+			}
+			if lead, err := onLeadRun(r); err != nil {
+				return nil, nil, err
+			} else if lead {
+				return toolErr("a lead records no journeys; its personas do")
+			}
+			rev, err := svc.SaveJourney(token, runs.SaveJourney{Code: in.Code, Reason: in.Reason, Kind: store.RevisionKind(in.Kind),
+				BugID: in.BugID, BugStep: in.BugStep, SelfReplay: in.SelfReplay})
+			if errors.Is(err, runs.ErrNotActive) {
+				return toolErr(errNotActive)
+			}
+			if err != nil {
+				return toolErr(err.Error())
+			}
+			return text(fmt.Sprintf("saved revision %d", rev.N))
+		})
+
+	mcp.AddTool(s, &mcp.Tool{Name: "journey_decision",
+		Description: "Say why you saved no journey revision: confirmed (the assignment's live journey already does what you did) or not recorded (you could not make a passing journey). Needs a reason."},
+		func(ctx context.Context, _ *mcp.CallToolRequest, in journeyDecisionArgs) (*mcp.CallToolResult, any, error) {
+			r, bad, err := active()
+			if bad != nil || err != nil {
+				return bad, nil, err
+			}
+			if lead, err := onLeadRun(r); err != nil {
+				return nil, nil, err
+			} else if lead {
+				return toolErr("a lead records no journeys; its personas do")
+			}
+			err = svc.JourneyDecision(token, in.Kind, in.Reason)
+			if errors.Is(err, runs.ErrNotActive) {
+				return toolErr(errNotActive)
+			}
+			if err != nil {
+				return toolErr(err.Error())
+			}
+			return text("noted")
+		})
+
 	// A lead's address can receive mail, but a lead run reads none of it:
 	// email is outside text, and a lead can make personas and spend budget.
 	personaOnly := func() (store.Run, *mcp.CallToolResult, error) {
@@ -415,6 +506,22 @@ func newServer(svc *runs.Service, st *store.Store, directorURL, token string, ma
 	addCalendarTool(s, st, personaOnly)
 	addLeadTools(s, lt)
 	return s
+}
+
+// liveRevision is the live revision of r's persona and story journey, or nil.
+func liveRevision(st *store.Store, r store.Run) (*store.Revision, error) {
+	j, err := st.JourneyFor(r.Persona, r.Story)
+	if errors.Is(err, store.ErrNotFound) {
+		return nil, nil
+	}
+	if err != nil || j.LiveRev == 0 {
+		return nil, err
+	}
+	rev, err := st.Revision(j.ID, j.LiveRev)
+	if err != nil {
+		return nil, err
+	}
+	return &rev, nil
 }
 
 // finishWaiting ends the run as waiting on in.Until after checking the wait can be met.

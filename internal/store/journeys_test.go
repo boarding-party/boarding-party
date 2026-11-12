@@ -143,3 +143,24 @@ func TestCountReplay(t *testing.T) {
 		t.Fatalf("missing: %v", err)
 	}
 }
+
+func TestEnsureJourneyAndRunDecided(t *testing.T) {
+	s := open(t)
+	j, err := s.EnsureJourney("megan", "invoice", t0)
+	if err != nil || j.ID == "" || j.LiveRev != 0 || j.State != JourneyLive {
+		t.Fatalf("%+v %v", j, err)
+	}
+	again, err := s.EnsureJourney("megan", "invoice", t0.Add(time.Hour))
+	if err != nil || again.ID != j.ID || !again.Created.Equal(t0) {
+		t.Fatalf("second ensure %+v %v", again, err)
+	}
+	if ok, err := s.RunDecided("r1"); err != nil || ok {
+		t.Fatalf("undecided: %v %v", ok, err)
+	}
+	if err := s.AddDecision(Decision{JourneyID: j.ID, RunID: "r1", Kind: "not recorded", Reason: "x", Actor: ActorModel, Created: t0}); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := s.RunDecided("r1"); err != nil || !ok {
+		t.Fatalf("decided: %v %v", ok, err)
+	}
+}
