@@ -199,3 +199,28 @@ func TestFinishReplayKeepsTheResult(t *testing.T) {
 		t.Fatalf("%+v %v", got, err)
 	}
 }
+
+// A replay pod idles after bp-replay exits, so a replay that never reports is
+// caught by its own timeout: the journey's 10 minutes plus start-up, well
+// before an AI run's.
+func TestReplayTimesOutSooner(t *testing.T) {
+	svc, fl := newSvc(t)
+	j := recorded(t, svc, 1)
+	r, err := svc.StartReplay(context.Background(), j.ID, 0, 0, "owner")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fl.phases = map[string]phaseInfo{r.Session: {phase: "Running"}} // the pod idles after bp-replay
+	if err := svc.Reconcile(context.Background(), r.Started.Add(ReplayTimeout-time.Second), time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := svc.Store.RunByID(r.ID); got.State != store.RunRunning {
+		t.Fatalf("ended early: %+v", got)
+	}
+	if err := svc.Reconcile(context.Background(), r.Started.Add(ReplayTimeout+time.Second), time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := svc.Store.RunByID(r.ID); got.State != store.RunFailed || got.Outcome != "The replay stopped without a result" {
+		t.Fatalf("after the replay timeout: %+v", got)
+	}
+}

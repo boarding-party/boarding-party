@@ -177,3 +177,19 @@ func TestReplayTokenGetsNoUsageOrFiles(t *testing.T) {
 		t.Errorf("a file with a replay token = %d, want 404", got)
 	}
 }
+
+func TestReplayRouteRefusesHugeSeed(t *testing.T) {
+	srv, svc := setup(t, 1<<20)
+	j := withJourney(t, svc)
+	req, _ := http.NewRequest("POST", srv.URL+"/api/journeys/"+j.ID+"/replay", strings.NewReader(`{"seed":9007199254740993}`))
+	req.Header.Set("Authorization", "Bearer "+testToken)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 400 {
+		t.Fatalf("seed past 2^31 = %d, want 400", resp.StatusCode)
+	}
+}

@@ -118,6 +118,9 @@ func (s *Service) verdict(ctx context.Context, r store.Run, now time.Time, timeo
 			return "session ended without finish_run", nil
 		}
 	}
+	if r.Kind == store.RunReplay && timeout > ReplayTimeout {
+		timeout = ReplayTimeout
+	}
 	if now.Sub(r.Started) > timeout {
 		return "no finish within " + timeout.String(), nil
 	}

@@ -22,6 +22,16 @@ var ErrStaleJourney = errors.New("this journey cannot be replayed")
 // or the result is not one bp-replay sends.
 var ErrBadReplay = errors.New("bad replay result")
 
+// ReplayTimeout is how long a replay run may take before it fails without a
+// result: bp-replay's 10 minutes for the journey plus starting the pod. A
+// replay's pod idles once bp-replay exits, so its session never ends on its
+// own; this is what catches a replay that died without reporting.
+const ReplayTimeout = 13 * time.Minute
+
+// MaxSeed is the largest replay seed: seeds stay exact in JavaScript and
+// in bp-replay's generator.
+const MaxSeed = 1<<31 - 1
+
 // ReplayResultName is the artifact keeping a replay run's result: its seed
 // and drawn inputs, which the run page shows.
 const ReplayResultName = "replay-result.json"
@@ -55,12 +65,15 @@ func (s *Service) StartReplay(ctx context.Context, journeyID string, revision in
 	if err != nil {
 		return store.Run{}, err
 	}
+	if seed < 0 || seed > MaxSeed {
+		return store.Run{}, fmt.Errorf("%w: seed must be 1 to %d", ErrInvalid, MaxSeed)
+	}
 	if seed == 0 {
 		var b [8]byte
 		if _, err := rand.Read(b[:]); err != nil {
 			return store.Run{}, err
 		}
-		seed = int64(binary.BigEndian.Uint64(b[:])>>33) + 1 // positive, and exact as a JSON number
+		seed = int64(binary.BigEndian.Uint64(b[:])%MaxSeed) + 1
 	}
 	r, err := s.start(ctx, j.Persona, j.Story, nil, &store.Run{JourneyID: j.ID, Revision: rev.N, Seed: seed})
 	if r.ID == "" {
