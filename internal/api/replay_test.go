@@ -157,3 +157,23 @@ func TestReplayRouteRefusesStale(t *testing.T) {
 		t.Fatalf("runs made: %+v", runs)
 	}
 }
+
+// A replay's token reaches only what a replay needs: no usage (a replay
+// cannot add spend) and no test files.
+func TestReplayTokenGetsNoUsageOrFiles(t *testing.T) {
+	_, wsrv, svc := setupBoth(t, 1<<20)
+	j := withJourney(t, svc)
+	r, err := svc.StartReplay(context.Background(), j.ID, 0, 5, "owner")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := do(t, "PUT", wsrv.URL+"/usage/"+r.Token, `{"byModel":{"claude-opus-5-5":{"output":1000000}}}`).StatusCode; got != 404 {
+		t.Errorf("usage with a replay token = %d, want 404", got)
+	}
+	if got := do(t, "GET", wsrv.URL+"/files/"+r.Token+"/", "").StatusCode; got != 404 {
+		t.Errorf("files with a replay token = %d, want 404", got)
+	}
+	if got := do(t, "GET", wsrv.URL+"/files/"+r.Token+"/a.pdf", "").StatusCode; got != 404 {
+		t.Errorf("a file with a replay token = %d, want 404", got)
+	}
+}

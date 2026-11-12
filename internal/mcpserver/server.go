@@ -229,6 +229,11 @@ func newServer(svc *runs.Service, st *store.Store, directorURL, token string, ma
 	// active resolves the run, mapping an inactive token to the tool-visible error.
 	active := func() (store.Run, *mcp.CallToolResult, error) {
 		r, err := svc.Active(token)
+		if err == nil && r.Kind == store.RunReplay {
+			// A replay runs untrusted journey code that can read its token;
+			// the token opens none of the agent tools.
+			err = runs.ErrNotActive
+		}
 		if errors.Is(err, runs.ErrNotActive) {
 			res, _, _ := toolErr(errNotActive)
 			return store.Run{}, res, nil

@@ -59,6 +59,9 @@ func (s *Service) SaveUsage(token string, u Usage, now time.Time) error {
 	if err != nil {
 		return err
 	}
+	if r.Kind == store.RunReplay {
+		return ErrNotActive // a replay has no model, so nothing to bill
+	}
 	if r.State != store.RunPending && r.State != store.RunRunning &&
 		(r.Finished.IsZero() || now.Sub(r.Finished) > usageGrace) {
 		return ErrNotActive

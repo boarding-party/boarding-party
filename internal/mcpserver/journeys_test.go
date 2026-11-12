@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -84,5 +85,30 @@ func TestNextAssignmentCarriesLiveJourney(t *testing.T) {
 	text, _ = call(t, cs, "next_assignment", nil)
 	if err := json.Unmarshal([]byte(text), &a); err != nil || a.Journey == nil || a.Journey.Revision != 1 || a.Journey.Code != testJourney {
 		t.Fatalf("live journey: %s %v", text, err)
+	}
+}
+
+// A replay runs untrusted journey code with its token in reach: the token
+// opens none of the agent tools.
+func TestReplayTokenOpensNoTools(t *testing.T) {
+	_, st, srv, run := setup(t)
+	if _, err := st.FinishRun(run.ID, store.RunDone, "x", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	rp := store.Run{ID: "rp", Token: "tok-replay", Persona: "ann", Role: "buyer", Story: "checkout", State: store.RunRunning,
+		Started: time.Now(), Chain: "rp", Kind: store.RunReplay}
+	if err := st.CreateRun(rp); err != nil {
+		t.Fatal(err)
+	}
+	cs := connect(t, srv, rp.Token)
+	for name, args := range map[string]map[string]any{
+		"next_assignment": nil, "persona_save": {"state": map[string]any{}},
+		"save_journey":     {"code": testJourney, "reason": "r", "kind": "full", "self_replay": map[string]any{"status": "passed"}},
+		"journey_decision": {"kind": "not recorded", "reason": "r"},
+		"finish_run":       {"outcome": "done", "summary": "x"},
+	} {
+		if text, isErr := call(t, cs, name, args); !isErr || text != errNotActive {
+			t.Errorf("%s with a replay token: %q", name, text)
+		}
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/boarding-party/boardingparty/internal/files"
+	"github.com/boarding-party/boardingparty/internal/runs"
 	"github.com/boarding-party/boardingparty/internal/store"
 )
 
@@ -122,6 +123,9 @@ func (s *server) deleteFile(w http.ResponseWriter, r *http.Request) {
 // workerFiles lists the names the run's persona may use.
 func (s *server) workerFiles(w http.ResponseWriter, r *http.Request) {
 	run, err := s.svc.Active(r.PathValue("token"))
+	if err == nil && run.Kind == store.RunReplay {
+		err = runs.ErrNotActive // a replay uploads no test files; its journey never sees them
+	}
 	if err != nil {
 		fail(w, err)
 		return
@@ -143,6 +147,9 @@ func (s *server) workerFiles(w http.ResponseWriter, r *http.Request) {
 // workerFile serves one file to the run's persona; 404 when not allowed.
 func (s *server) workerFile(w http.ResponseWriter, r *http.Request) {
 	run, err := s.svc.Active(r.PathValue("token"))
+	if err == nil && run.Kind == store.RunReplay {
+		err = runs.ErrNotActive // a replay uploads no test files; its journey never sees them
+	}
 	if err != nil {
 		fail(w, err)
 		return
