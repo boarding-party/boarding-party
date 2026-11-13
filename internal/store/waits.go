@@ -135,6 +135,9 @@ type Resolution struct {
 	Ended   time.Time
 	Next    *Queued
 	Finding *Bug
+	// Verdict is a fix-check replay's verdict on a missed wait: it hands
+	// the check over instead of ending it unchecked.
+	Verdict *Verdict
 }
 
 // ResolveWait closes an open wait at most once. It returns false, doing
@@ -167,7 +170,7 @@ func (s *Store) ResolveWait(runID string, res Resolution) (bool, error) {
 		if _, err := tx.Exec(`UPDATE runs SET state='stuck' WHERE id=? AND state='waiting'`, runID); err != nil {
 			return false, err
 		}
-		if err := settleCheck(tx, runID, RunStuck, nil, res.Ended); err != nil {
+		if err := settleCheck(tx, runID, RunStuck, res.Verdict, res.Ended); err != nil {
 			return false, err
 		}
 	}

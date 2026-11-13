@@ -313,8 +313,21 @@ func (s *Scheduler) resolve(w store.Wait, followed bool, now time.Time) error {
 		res := s.stuck(r, StuckText(w), now)
 		if r.Kind == store.RunReplay {
 			res.Finding = nil // a missed wait in a replay goes to the copilot, not the bug list
+			// A fix-check replay hands its check to an AI run instead.
+			var rr runs.ReplayResult
+			_ = json.Unmarshal(r.ReplayResult, &rr)
+			v, err := runs.FixCheckVerdict(r, rr, now)
+			if err != nil {
+				return err
+			}
+			res.Verdict = v
 		}
-		_, err := s.Store.ResolveWait(r.ID, res)
+		won, err := s.Store.ResolveWait(r.ID, res)
+		if err == nil && won && res.Verdict != nil {
+			if derr := runs.FixCheckDecided(s.Store, r, res.Verdict, now); derr != nil {
+				log.Printf("scheduler: record fix check of %s: %v", r.ID, derr)
+			}
+		}
 		return err
 	}
 	rs, qs, err := s.chain(r.Chain)

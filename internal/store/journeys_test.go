@@ -288,9 +288,9 @@ func TestFollowReplayIsOneStep(t *testing.T) {
 	streak := 2
 	at := t0.Add(time.Hour)
 	err = s.FollowReplay("rp", ReplayFollow{
-		Next:     []Queued{{ID: "q", Persona: "megan", Story: "invoice", Kind: RunReplay, JourneyID: j.ID, Seed: 5, Created: at}},
+		Next:      []Queued{{ID: "q", Persona: "megan", Story: "invoice", Kind: RunReplay, JourneyID: j.ID, Seed: 5, Created: at}},
 		Decisions: []Decision{{JourneyID: j.ID, Kind: "copilot called", Reason: "r", Actor: ActorDirector, Created: at}},
-		State:    JourneyRepairing, FlakyStreak: &streak, CopilotAt: at,
+		State:     JourneyRepairing, FlakyStreak: &streak, CopilotAt: at,
 	})
 	if err != nil {
 		t.Fatal(err)

@@ -656,3 +656,37 @@ func TestFixCheckReplayContinuationCarriesVerify(t *testing.T) {
 		t.Fatalf("context %+v", c)
 	}
 }
+
+func TestMissedWaitInFixCheckReplayHandsOver(t *testing.T) {
+	f := newFix(t, exploreYAML)
+	j := f.journey("book", now)
+	if err := f.st.AddBug(store.Bug{ID: "b1", RunID: "found", Summary: "total wrong", Created: now}); err != nil {
+		t.Fatal(err)
+	}
+	bugs, _ := f.st.Bugs("found")
+	issue := bugs[0].IssueID
+	if ok, err := f.st.StartCheck(issue, store.Queued{ID: "check", Chain: "c", Persona: j.Persona, Role: "patient", Story: j.Story, Created: now}, now); err != nil || !ok {
+		t.Fatal(ok, err)
+	}
+	ctx, _ := json.Marshal(store.RunContext{Kind: "verify", Verify: &store.ContextVerify{IssueID: issue, Summary: "total wrong", JourneyID: j.ID, Revision: 1, JourneyStep: 3}})
+	f.parked("w1", j, 1, store.Wait{Kind: "email", Subject: "Confirm", Deadline: now.Add(time.Hour)}, ctx)
+	f.clk.Add(2 * time.Hour)
+	if err := f.s.resolveAll(f.clk.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if is, _ := f.st.Issue(issue); is.Status != store.IssueVerifying {
+		t.Fatalf("issue %+v", is)
+	}
+	var next *store.Queued
+	for _, q := range f.queue() {
+		if q.Follows == "w1" {
+			next = &q
+		}
+	}
+	if next == nil || next.Kind == store.RunReplay || next.Chain != "c" {
+		t.Fatalf("queue %+v", f.queue())
+	}
+	if c := ctxOf(t, *next); c.Verify == nil || !strings.Contains(c.Verify.ReplayNote, "wait") {
+		t.Fatalf("context %+v", c.Verify)
+	}
+}

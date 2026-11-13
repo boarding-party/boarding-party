@@ -29,6 +29,9 @@ const maxArrivalLinks = 50
 type journeyFetch struct {
 	Code   string       `json:"code"`
 	Resume *resumeFetch `json:"resume,omitempty"`
+	// Today is the day in London the replay's chain began: dates drawn
+	// relative to today stay the same when a replay resumes after a wait.
+	Today string `json:"today"`
 }
 
 type resumeFetch struct {
@@ -64,7 +67,7 @@ func (s *server) getReplayCode(w http.ResponseWriter, r *http.Request) {
 		fail(w, err)
 		return
 	}
-	out := journeyFetch{Code: code}
+	out := journeyFetch{Code: code, Today: s.chainDay(run)}
 	var c store.RunContext
 	if json.Unmarshal(run.Context, &c) == nil && c.Resume != nil {
 		out.Resume = &resumeFetch{After: c.Resume.After, Arrivals: []arrivalFetch{}}
@@ -85,6 +88,25 @@ func (s *server) getReplayCode(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, http.StatusOK, out)
+}
+
+// london is the zone generated dates are relative to.
+var london = func() *time.Location {
+	if l, err := time.LoadLocation("Europe/London"); err == nil {
+		return l
+	}
+	return time.UTC
+}()
+
+// chainDay is the London date the run's chain began: its first run's start.
+func (s *server) chainDay(run store.Run) string {
+	began := run.Started
+	if run.Chain != "" {
+		if rs, err := s.svc.Store.RunsInChain(run.Chain); err == nil && len(rs) > 0 && rs[0].Started.Before(began) {
+			began = rs[0].Started
+		}
+	}
+	return began.In(london).Format(time.DateOnly)
 }
 
 // postClaim spends a replay run's one-time claim and gives its pod the

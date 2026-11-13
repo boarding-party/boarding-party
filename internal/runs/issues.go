@@ -124,7 +124,7 @@ func replayVerdict(v store.ContextVerify, res ReplayResult) (verdict store.Verdi
 	case res.Status == "failed" && res.Step == n:
 		return store.Verdict{Reached: true, StillThere: true, ByReplay: true,
 			Note: fmt.Sprintf("The replay failed at step %d again: %s", n, store.Clip(res.StepName, 200))}, false
-	case res.Status == "passed" || (res.Status == "failed" && res.Step > n):
+	case res.Status == "passed" || ((res.Status == "failed" || res.Status == "waiting") && res.Step > n):
 		return store.Verdict{Reached: true, ByReplay: true, Note: fmt.Sprintf("The replay got past step %d.", n)}, false
 	}
 	return store.Verdict{ByReplay: true}, true
@@ -139,14 +139,16 @@ func replayNote(rev int, v store.ContextVerify, res ReplayResult) string {
 			rev, res.Step, store.Clip(res.StepName, 200), v.JourneyStep, store.Clip(res.Error, 300))
 	case res.Status == "failed":
 		return fmt.Sprintf("A replay of revision %d failed before its first step: %s", rev, store.Clip(res.Error, 300))
+	case res.Status == "waiting":
+		return fmt.Sprintf("A replay of revision %d stopped at a wait after step %d, before step %d, and the wait was never met.", rev, res.Step, v.JourneyStep)
 	}
 	return fmt.Sprintf("A replay of revision %d stopped without a result.", rev)
 }
 
-// fixCheckVerdict is the verdict of replay run r on the fix it checks, with
+// FixCheckVerdict is the verdict of replay run r on the fix it checks, with
 // the AI run that takes over when the replay cannot tell; nil when r checks
 // no fix.
-func (s *Service) fixCheckVerdict(r store.Run, res ReplayResult, now time.Time) (*store.Verdict, error) {
+func FixCheckVerdict(r store.Run, res ReplayResult, now time.Time) (*store.Verdict, error) {
 	var c store.RunContext
 	if json.Unmarshal(r.Context, &c) != nil || c.Verify == nil || c.Verify.JourneyStep < 1 {
 		return nil, nil
@@ -171,8 +173,8 @@ func (s *Service) fixCheckVerdict(r store.Run, res ReplayResult, now time.Time) 
 	return &v, nil
 }
 
-// fixCheckDecided records on the journey what a fix-check replay decided.
-func (s *Service) fixCheckDecided(r store.Run, v *store.Verdict, now time.Time) error {
+// FixCheckDecided records on the journey what a fix-check replay decided.
+func FixCheckDecided(st *store.Store, r store.Run, v *store.Verdict, now time.Time) error {
 	var c store.RunContext
 	_ = json.Unmarshal(r.Context, &c)
 	what := "Gone"
@@ -182,14 +184,14 @@ func (s *Service) fixCheckDecided(r store.Run, v *store.Verdict, now time.Time) 
 	case v.StillThere:
 		what = "Still there"
 	}
-	j, err := s.Store.Journey(r.JourneyID)
+	j, err := st.Journey(r.JourneyID)
 	if errors.Is(err, store.ErrNotFound) {
 		return nil
 	}
 	if err != nil {
 		return err
 	}
-	return s.Store.AddDecision(store.Decision{JourneyID: j.ID, RunID: r.ID, Kind: "fix check", Actor: store.ActorDirector,
+	return st.AddDecision(store.Decision{JourneyID: j.ID, RunID: r.ID, Kind: "fix check", Actor: store.ActorDirector,
 		Reason: "Issue " + c.Verify.IssueID + ": " + what, RevBefore: j.LiveRev, RevAfter: j.LiveRev, Created: now})
 }
 

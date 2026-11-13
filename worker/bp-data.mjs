@@ -55,8 +55,11 @@ function nearestLeapDay(today) {
 
 // generators returns the data.* generators. nextNormal and nextEdge are the
 // two streams; keep(name, v) records a value and returns it; edgeKeep(name,
-// id) records the edge case the value just kept carries.
-export function generators(nextNormal, nextEdge, keep, edgeKeep) {
+// id) records the edge case the value just kept carries. fixedToday
+// (YYYY-MM-DD) is the day dates are relative to, so a replay resumed after
+// a wait draws the dates it drew before; empty is today in London.
+export function generators(nextNormal, nextEdge, keep, edgeKeep, fixedToday = '') {
+  const today = () => fixedToday || londonToday();
   const int = (min, max) => min + Math.floor(nextNormal() * (max - min + 1));
   const pick = (list) => list[Math.floor(nextNormal() * list.length)];
 
@@ -141,16 +144,16 @@ export function generators(nextNormal, nextEdge, keep, edgeKeep) {
   const date = (o) => {
     const { from = -30, to = 30 } = o || {};
     if (!Number.isInteger(from) || !Number.isInteger(to) || to < from) throw new Error('data.date needs whole days with from <= to');
-    const today = londonToday();
-    const v = addDays(today, int(from, to));
+    const day = today();
+    const v = addDays(day, int(from, to));
     const id = edge(o, ['leap-day']);
-    return [id ? nearestLeapDay(today) : v, id];
+    return [id ? nearestLeapDay(day) : v, id];
   };
 
   const dateRange = (o) => {
     const { from = -30, to = 0, minDays = 7, maxDays = 30 } = o || {};
     if (![from, to, minDays, maxDays].every(Number.isInteger) || to < from || maxDays < minDays || minDays < 0) throw new Error('data.dateRange needs whole days with from <= to and minDays <= maxDays');
-    const end = addDays(londonToday(), int(from, to));
+    const end = addDays(today(), int(from, to));
     const start = addDays(end, -int(minDays, maxDays));
     const id = edge(o, ['reversed']);
     return [id ? { start: end, end: start } : { start, end }, id];

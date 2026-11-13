@@ -351,3 +351,24 @@ func TestJourneyFetchCarriesResume(t *testing.T) {
 		t.Fatalf("fetched %+v", got)
 	}
 }
+
+func TestReplayCodeCarriesTheChainsDay(t *testing.T) {
+	_, wsrv, svc := setupBoth(t, 1<<20)
+	j := withJourney(t, svc)
+	r := startReplay(t, svc, j, 5)
+	// An earlier run of the same chain: a continuation draws dates from the day the chain began.
+	began := time.Date(2026, 3, 29, 23, 30, 0, 0, time.UTC) // already 30 March in London (BST)
+	if err := svc.Store.CreateRun(store.Run{ID: "first", Token: "tok-first", Persona: "ann", Story: "checkout", State: store.RunWaiting,
+		Started: began, Chain: r.Chain, Kind: store.RunReplay, JourneyID: j.ID, Revision: 1, Seed: 5}); err != nil {
+		t.Fatal(err)
+	}
+	var fetched struct {
+		Today string `json:"today"`
+	}
+	if err := json.NewDecoder(do(t, "GET", wsrv.URL+"/journey/"+r.Token, "").Body).Decode(&fetched); err != nil {
+		t.Fatal(err)
+	}
+	if fetched.Today != "2026-03-30" {
+		t.Fatalf("today = %q", fetched.Today)
+	}
+}

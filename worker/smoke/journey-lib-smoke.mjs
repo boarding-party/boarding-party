@@ -135,6 +135,13 @@ for (let seed = 1; seed <= 500; seed++) {
   for (const g of ['personName', 'businessName', 'address', 'price', 'quantity', 'date', 'dateRange', 'lineItems']) d[g]({ edges: false });
   if (inputs.edges) fail(`edges: false gave ${inputs.edges}`);
 }
+// A fixed today (the day a replay's chain began) pins every date a resumed replay draws.
+{
+  const d = makeData(7, {}, { today: '2027-03-01' });
+  if (d.date({ from: 0, to: 0, edges: false }) !== '2027-03-01') fail('date ignores the fixed today');
+  const r = d.dateRange({ from: 0, to: 0, minDays: 3, maxDays: 3, edges: false });
+  if (r.end !== '2027-03-01' || r.start !== '2027-02-26') fail('dateRange ignores the fixed today ' + JSON.stringify(r));
+}
 const hb = makeBp();
 if (hb.totalWithVat([{ quantity: 2, price: 10 }], 0.2) !== 24 || hb.totalWithVat([{ quantity: 3, price: 1.1 }]) !== 3.96) fail('totalWithVat');
 if (hb.ukDate('2026-02-09') !== '09/02/2026') fail('ukDate ' + hb.ukDate('2026-02-09'));

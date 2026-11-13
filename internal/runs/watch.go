@@ -48,7 +48,7 @@ func (s *Service) Reconcile(ctx context.Context, now time.Time, timeout time.Dur
 		var v *store.Verdict
 		if r.Kind == store.RunReplay {
 			reason = replayNoResult
-			if v, err = s.fixCheckVerdict(r, ReplayResult{}, now); err != nil {
+			if v, err = FixCheckVerdict(r, ReplayResult{}, now); err != nil {
 				errs = append(errs, fmt.Errorf("run %s: %w", r.ID, err))
 				continue
 			}
@@ -60,7 +60,7 @@ func (s *Service) Reconcile(ctx context.Context, now time.Time, timeout time.Dur
 		}
 		if won {
 			if v != nil {
-				if err := s.fixCheckDecided(r, v, now); err != nil {
+				if err := FixCheckDecided(s.Store, r, v, now); err != nil {
 					errs = append(errs, fmt.Errorf("run %s: record fix check: %w", r.ID, err))
 				}
 			} else if r.Kind == store.RunReplay {

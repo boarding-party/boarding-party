@@ -65,9 +65,10 @@ function seedOf(v) {
 
 // runChild runs the journey in a child process and returns its result. The
 // child gets only paths and plain options: no URL, no token.
-function runChild({ file, seed, device, outDir, profile, saveProfile, cdp, resume }) {
+function runChild({ file, seed, device, outDir, profile, saveProfile, cdp, resume, today }) {
   const args = [self, '--child', '--file', file, '--seed', String(seed), '--out', outDir];
   if (resume) args.push('--resume', resume);
+  if (today) args.push('--today', today);
   if (device) args.push('--device', device);
   if (profile) args.push('--profile', profile);
   if (saveProfile) args.push('--save-profile', saveProfile);
@@ -165,7 +166,9 @@ async function runMode() {
     helper('/opt/bp/bp-screen.mjs', urls.live);
     helper('/opt/bp/bp-console.mjs', urls.console);
     const saveProfile = join(outDir, 'profile-out.json');
-    res = await runChild({ file, seed, device: opts.device, outDir, profile, saveProfile, cdp: true, resume });
+    // The day the replay's chain began: a resumed replay draws the dates it drew before.
+    const today = /^\d{4}-\d{2}-\d{2}$/.test(fetched.today || '') ? fetched.today : '';
+    res = await runChild({ file, seed, device: opts.device, outDir, profile, saveProfile, cdp: true, resume, today });
     await uploadEvidence(outDir, urls.upload);
     if (existsSync(saveProfile)) {
       await put(urls.profile, readFileSync(saveProfile), 'application/json').catch((e) => log('profile not saved:', e.message));
@@ -248,7 +251,7 @@ async function child() {
     humanise(page);
     const resume = opts.resume ? JSON.parse(readFileSync(opts.resume, 'utf8')) : undefined;
     const bp = lib.makeBp({ onFail: () => page.screenshot({ path: join(opts.out, 'failed-step.png') }), resume });
-    const data = lib.makeData(seed, inputs);
+    const data = lib.makeData(seed, inputs, { today: opts.today || '' });
     const limit = Number(process.env.BP_REPLAY_TIMEOUT_MS) || 10 * 60 * 1000;
     let timer;
     await Promise.race([

@@ -284,3 +284,24 @@ func TestDroppedFixCheckReplaySettles(t *testing.T) {
 		})
 	}
 }
+
+func TestFixCheckReplayPastStepThenWaitIsGone(t *testing.T) {
+	svc, _ := newSvc(t)
+	id, j, _ := linked(t, svc)
+	r := fixCheck(t, svc, id)
+	res := ReplayResult{Status: "waiting", Step: 4, Seed: r.Seed, Wait: &ReplayWait{N: 1, Until: json.RawMessage(`{"time":{"after":"1d"}}`)}}
+	w := store.Wait{Kind: "time", At: at.Add(24 * time.Hour), Deadline: at.Add(24 * time.Hour)}
+	if err := svc.FinishReplayWaiting(r.Token, res, w, "Waiting", at); err != nil {
+		t.Fatal(err)
+	}
+	if is := issueNow(t, svc, id); is.Status != store.IssueClosed || is.CheckNote != "Gone: The replay got past step 3." {
+		t.Fatalf("issue %+v", is)
+	}
+	if got, _ := svc.Store.RunByID(r.ID); got.State != store.RunDone {
+		t.Fatalf("run %+v", got)
+	}
+	if ow, err := svc.Store.WaitFor(r.ID); err == nil && ow.Status == store.WaitOpen {
+		t.Fatalf("parked anyway: %+v", ow)
+	}
+	fixCheckRow(t, svc, j, r.ID, "Issue "+id+": Gone")
+}

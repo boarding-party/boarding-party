@@ -167,7 +167,7 @@ func (s *Service) FinishReplay(token string, res ReplayResult, now time.Time) er
 	if err := s.Store.SetReplayResult(r.ID, b); err != nil {
 		return err
 	}
-	v, err := s.fixCheckVerdict(r, res, now)
+	v, err := FixCheckVerdict(r, res, now)
 	if err != nil {
 		return err
 	}
@@ -180,7 +180,7 @@ func (s *Service) FinishReplay(token string, res ReplayResult, now time.Time) er
 	}
 	if v != nil {
 		// A fix check is not the journey's health: its record stays.
-		if err := s.fixCheckDecided(r, v, now); err != nil {
+		if err := FixCheckDecided(s.Store, r, v, now); err != nil {
 			log.Printf("runs: record fix check of %s: %v", r.ID, err)
 		}
 	} else if err := s.Store.CountReplay(r.JourneyID, state == store.RunDone, now); err != nil && !errors.Is(err, store.ErrNotFound) {
@@ -214,6 +214,22 @@ func (s *Service) FinishReplayWaiting(token string, res ReplayResult, w store.Wa
 	}
 	if err := s.Store.SetReplayResult(r.ID, b); err != nil {
 		return err
+	}
+	if v, err := FixCheckVerdict(r, res, now); err != nil {
+		return err
+	} else if v != nil && v.Next == nil && v.Reached {
+		// A fix check that got past its step has its answer: no need to wait.
+		won, err := s.Store.FinishRunChecked(r.ID, store.RunDone, fmt.Sprintf("Passed step %d, then reached a wait", res.Step), now, v)
+		if err != nil {
+			return err
+		}
+		if !won {
+			return ErrNotActive
+		}
+		if err := FixCheckDecided(s.Store, r, v, now); err != nil {
+			log.Printf("runs: record fix check of %s: %v", r.ID, err)
+		}
+		return s.ended(context.Background(), r, now)
 	}
 	w.RunID = r.ID
 	won, err := s.Store.FinishRunWaiting(r.ID, outcome, now, w)

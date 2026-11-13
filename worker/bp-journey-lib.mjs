@@ -19,8 +19,10 @@ export function rng(seed) {
 // makeData returns the journey's data helpers. Every value drawn lands in
 // inputs under its helper's name and draw number (int1, pick2, …), so a
 // replay can be read back and repeated from its seed. The edge cases a
-// replay carries are listed in inputs.edges as "<name><n>:<id>".
-export function makeData(seed, inputs) {
+// replay carries are listed in inputs.edges as "<name><n>:<id>". today
+// (YYYY-MM-DD) fixes the day dates are drawn from.
+export function makeData(seed, inputs, { today = '' } = {}) {
+  if (today && !/^\d{4}-\d{2}-\d{2}$/.test(today)) throw new Error('makeData today must be YYYY-MM-DD');
   const next = rng(seed);
   const counts = {};
   const keep = (name, v) => {
@@ -33,7 +35,7 @@ export function makeData(seed, inputs) {
   };
   return {
     seed,
-    ...generators(next, edgeStream(seed), keep, edgeKeep),
+    ...generators(next, edgeStream(seed), keep, edgeKeep, today),
     int(min, max) {
       if (!Number.isInteger(min) || !Number.isInteger(max) || max < min) throw new Error('data.int(min, max) needs whole numbers with min <= max');
       return keep('int', min + Math.floor(next() * (max - min + 1)));
