@@ -24,6 +24,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -407,9 +408,12 @@ func seedJourney(st *store.Store, p project.Project, now time.Time) error {
 		return nil
 	}
 	persona, story := p.Roles[0].Personas[0].Name, p.Roles[0].Stories[0].Name
+	settled := strings.Replace(devJourney, "  await bp.step('Check the counter'",
+		"  await expect(page.getByTestId('todo-item')).toHaveCount(n);\n  await bp.step('Check the counter'", 1)
 	for i, reason := range []string{"First recording of the story.", "The counter check now waits for the list to settle."} {
 		at := now.Add(time.Duration(i-2) * time.Hour)
-		if _, _, err := st.AddRevision(persona, story, store.Revision{Kind: store.RevisionFull, Code: devJourney, Reason: reason, Created: at},
+		code := []string{devJourney, settled}[i]
+		if _, _, err := st.AddRevision(persona, story, store.Revision{Kind: store.RevisionFull, Code: code, Reason: reason, Created: at},
 			store.Decision{Kind: "recorded", Reason: reason, Actor: store.ActorModel, Created: at, Explored: true}); err != nil {
 			return err
 		}

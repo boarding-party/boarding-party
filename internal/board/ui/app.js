@@ -13,6 +13,7 @@ import { Coverage, LEAD_STORY, isLead } from './coverage.js';
 import { ConsoleCard, ConsoleBefore, fenced } from './console.js';
 import { Timeline } from './timeline.js';
 import { Shot } from './shot.js';
+import { JourneysPage, JourneyPage } from './journeys.js';
 
 const ACTIVE = new Set(['pending', 'running']);
 // LOCAL is the CLI's own board, which listens on loopback only; anywhere
@@ -102,6 +103,10 @@ function parseRoute(hash) {
   if (parts[0] === 'bugs') return { page: 'bugs' };
   if (parts[0] === 'leads' && parts[1]) {
     try { return { page: 'lead', id: decodeURIComponent(parts[1]) }; } catch (_) { /* fall through */ }
+  }
+  if (parts[0] === 'journeys') return { page: 'journeys' };
+  if (parts[0] === 'journey' && parts[1]) {
+    try { return { page: 'journey', id: decodeURIComponent(parts[1]) }; } catch (_) { /* fall through */ }
   }
   if (parts[0] === 'runs' && parts[1]) {
     try { return { page: 'run', id: decodeURIComponent(parts[1]) }; } catch (_) { /* fall through */ }
@@ -236,6 +241,8 @@ function App() {
           : route.page === 'bugs' ? html`<${BugsPage} />`
           : route.page === 'issue' ? html`<${IssuePage} key=${route.id} id=${route.id} />`
           : route.page === 'lead' ? html`<${LeadPage} key=${route.id} name=${route.id} />`
+          : route.page === 'journeys' ? html`<${JourneysPage} />`
+          : route.page === 'journey' ? html`<${JourneyPage} key=${route.id} id=${route.id} />`
           : html`<${RunsPage} project=${full} projectErr=${projectErr} runs=${runs} runsErr=${runsErr}
                     queue=${queue} status=${status} active=${active} onStarted=${loadRuns} />`}
       </main>
@@ -253,7 +260,8 @@ function withChildren(project, children) {
 }
 
 function Sidebar({ route, project, runs, leads, children }) {
-  const on = (p) => (route.page === p || (p === 'runs' && route.page === 'run') || (p === 'bugs' && route.page === 'issue') ? 'on' : '');
+  const on = (p) => (route.page === p || (p === 'runs' && route.page === 'run') || (p === 'bugs' && route.page === 'issue')
+    || (p === 'journeys' && route.page === 'journey') ? 'on' : '');
   const [open, setOpen] = useState(null);
   usePoll(async (stale) => {
     try {
@@ -274,6 +282,7 @@ function Sidebar({ route, project, runs, leads, children }) {
         : null}
       <nav aria-label="Main">
         <a href="#/runs" class=${on('runs')}>Runs ${runs ? html`<span class="count">${runs.length}</span>` : null}</a>
+        <a href="#/journeys" class=${on('journeys')}>Journeys</a>
         <a href="#/bugs" class=${on('bugs')}>Bugs ${open ? html`<span class="count" title="Open bugs">${open}</span>` : null}</a>
         <a href="#/inbox" class=${on('inbox')}>Inbox</a>
         <a href="#/project" class=${on('project')}>Project</a>
