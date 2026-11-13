@@ -34,7 +34,8 @@ CREATE TABLE IF NOT EXISTS runs (
   journey_id TEXT NOT NULL DEFAULT '',
   revision   INTEGER NOT NULL DEFAULT 0,
   seed       INTEGER NOT NULL DEFAULT 0,
-  replay_result TEXT NOT NULL DEFAULT ''
+  replay_result TEXT NOT NULL DEFAULT '',
+  claim TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS runs_started ON runs(started);
 CREATE TABLE IF NOT EXISTS bugs (

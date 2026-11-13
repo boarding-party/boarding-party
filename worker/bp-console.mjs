@@ -1,10 +1,16 @@
 // Records what the run's browser logs (console errors and warnings, uncaught
 // exceptions, failed requests) over CDP and PUTs it to the director in
 // batches. Logs go to stderr only; it never exits on its own.
+// The URL carries the run token: --url-stdin takes it from stdin (replay
+// runs), so it is never on a command line anything in the pod can read.
 const arg = process.argv.find((a) => a.startsWith('--console-url='));
-const consoleUrl = arg ? arg.slice('--console-url='.length) : '';
+let consoleUrl = arg ? arg.slice('--console-url='.length) : '';
+if (!consoleUrl && process.argv.includes('--url-stdin')) {
+  for await (const c of process.stdin) consoleUrl += c;
+  consoleUrl = consoleUrl.trim();
+}
 if (!consoleUrl) {
-  console.error('bp-console: --console-url is required');
+  console.error('bp-console: --console-url or --url-stdin is required');
   process.exit(2);
 }
 const log = (...a) => console.error(new Date().toISOString(), 'bp-console:', ...a);

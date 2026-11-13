@@ -1,9 +1,15 @@
 // Streams the Chromium screen (CDP screencast) to the director as JPEG PUTs.
 // Logs go to stderr only; it never exits on its own.
+// The URL carries the run token: --url-stdin takes it from stdin (replay
+// runs), so it is never on a command line anything in the pod can read.
 const arg = process.argv.find((a) => a.startsWith('--live-url='));
-const liveUrl = arg ? arg.slice('--live-url='.length) : '';
+let liveUrl = arg ? arg.slice('--live-url='.length) : '';
+if (!liveUrl && process.argv.includes('--url-stdin')) {
+  for await (const c of process.stdin) liveUrl += c;
+  liveUrl = liveUrl.trim();
+}
 if (!liveUrl) {
-  console.error('bp-screen: --live-url is required');
+  console.error('bp-screen: --live-url or --url-stdin is required');
   process.exit(2);
 }
 let host = 'unknown';

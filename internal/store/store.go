@@ -68,6 +68,10 @@ type Run struct {
 	Context   json.RawMessage `json:"context,omitempty"`
 	// ReplayResult is a replay run's result as bp-replay reported it.
 	ReplayResult json.RawMessage `json:"replayResult,omitempty"`
+	// Claim is a replay run's one-time code: its pod's command carries it
+	// in place of the token, and redeeming it once gives the pod its URLs.
+	// Only CreateRun writes it; it is never read back into a Run or shown.
+	Claim string `json:"-"`
 }
 
 // RunContext is what a chained run is told about the run before it.
@@ -258,6 +262,7 @@ var runsAddedColumns = []addedColumn{
 	{"revision", "revision INTEGER NOT NULL DEFAULT 0"},
 	{"seed", "seed INTEGER NOT NULL DEFAULT 0"},
 	{"replay_result", "replay_result TEXT NOT NULL DEFAULT ''"},
+	{"claim", "claim TEXT NOT NULL DEFAULT ''"},
 }
 
 // journeysAddedColumns are the journeys columns added after the table first shipped.
@@ -467,12 +472,30 @@ func (s *Store) CreateRunFrom(r Run, queueID string) error {
 			return ErrNotFound
 		}
 	}
-	if _, err := tx.Exec(`INSERT INTO runs(`+runCols+`) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+	if _, err := tx.Exec(`INSERT INTO runs(`+runCols+`, claim) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		r.ID, r.Token, r.Persona, r.Role, r.Story, string(r.State), r.Outcome, r.Session, ts(r.Started), ts(r.Finished),
-		r.Chain, r.Follows, r.Via, string(r.Context), r.Kind, r.JourneyID, r.Revision, r.Seed, string(r.ReplayResult)); err != nil {
+		r.Chain, r.Follows, r.Via, string(r.Context), r.Kind, r.JourneyID, r.Revision, r.Seed, string(r.ReplayResult), r.Claim); err != nil {
 		return err
 	}
 	return tx.Commit()
+}
+
+// RedeemClaim spends an active run's claim and returns the run. A claim
+// already spent, unknown, or of a run no longer active is ErrNotFound.
+func (s *Store) RedeemClaim(claim string) (Run, error) {
+	if claim == "" {
+		return Run{}, ErrNotFound
+	}
+	var id string
+	err := s.db.QueryRow(`UPDATE runs SET claim = '' WHERE claim = ? AND state IN (?, ?) RETURNING id`,
+		claim, string(RunPending), string(RunRunning)).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Run{}, ErrNotFound
+	}
+	if err != nil {
+		return Run{}, err
+	}
+	return s.RunByID(id)
 }
 
 func (s *Store) RunByToken(token string) (Run, error) {

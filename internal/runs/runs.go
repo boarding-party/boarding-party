@@ -329,6 +329,11 @@ func (s *Service) start(ctx context.Context, persona, story string, q *store.Que
 	}
 	if replay != nil {
 		r.Kind, r.JourneyID, r.Revision, r.Seed = store.RunReplay, replay.JourneyID, replay.Revision, replay.Seed
+		// The pod's command carries this one-time claim, not the token:
+		// everything in the pod, the journey too, can read its command.
+		if r.Claim, err = randHex(32); err != nil {
+			return store.Run{}, err
+		}
 	}
 	s.startMu.Lock()
 	active, err := s.Store.ActiveRuns()
@@ -406,6 +411,17 @@ func find(p project.Project, persona, story string) (role, storyName string, err
 }
 
 // Active returns the run for token if it is pending or running.
+// Claim spends a replay run's one-time claim and returns the run, whose
+// token its pod then keeps in memory only. A claim spent, unknown or of a
+// run no longer active is ErrNotActive.
+func (s *Service) Claim(code string) (store.Run, error) {
+	r, err := s.Store.RedeemClaim(code)
+	if errors.Is(err, store.ErrNotFound) {
+		return store.Run{}, ErrNotActive
+	}
+	return r, err
+}
+
 func (s *Service) Active(token string) (store.Run, error) {
 	r, err := s.Store.RunByToken(token)
 	if errors.Is(err, store.ErrNotFound) {

@@ -140,6 +140,7 @@ func Worker(svc *runs.Service, maxBytes int64, hub *live.Hub) http.Handler {
 	mux.HandleFunc("PUT /profile/{token}", s.putProfile)
 	mux.HandleFunc("GET /journey/{token}", s.getReplayCode)
 	mux.HandleFunc("PUT /replay/{token}", s.putReplay)
+	mux.HandleFunc("POST /claim/{code}", s.postClaim)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
 	return mux
 }

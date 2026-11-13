@@ -16,6 +16,8 @@ const page = `<!doctype html><title>shop</title>
 
 const got = {}; // what the fake director received, by path
 const token = 'a'.repeat(64);
+const claims = new Set(); // one-time claims not yet spent
+const helpers = new Set(); // live screen and console PUTs seen
 let journeyCode = '';
 let journeyResume = null;
 const srv = http.createServer((req, res) => {
@@ -30,6 +32,14 @@ const srv = http.createServer((req, res) => {
       return res.end(JSON.stringify({ code: journeyCode, ...(journeyResume ? { resume: journeyResume } : {}) }));
     }
     if (req.method === 'GET' && path === `/profile/${token}`) { res.writeHead(204); return res.end(); }
+    if (path.startsWith('/claim/')) {
+      const code = path.slice('/claim/'.length);
+      if (req.method !== 'POST' || !claims.delete(code)) { res.writeHead(404); return res.end(); }
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ journey: `/journey/${token}`, report: `/replay/${token}`, upload: `/artifacts/${token}/`,
+        profile: `/profile/${token}`, live: `/live/${token}`, console: `/console/${token}` }));
+    }
+    if (req.method === 'PUT' && (path === `/live/${token}` || path === `/console/${token}`)) helpers.add(path.split('/')[1]);
     got[req.method + ' ' + path.replace(token, 'TOKEN')] = body;
     res.writeHead(204); res.end();
   });
@@ -80,11 +90,16 @@ if (r.code !== 0 || r.res?.status !== 'failed' || r.res.step !== 2) fail('expect
 r = await run(['--journey', missing, '--self', '--expect-fail-step', '1']);
 if (r.code === 0) fail('expect-fail-step 1 must not prove a failure at step 2');
 
-// Run mode: the code comes from the director; the result and evidence go back.
+// Run mode: bp-replay spends its one-time claim for its URLs; the code
+// comes from the director; the result and evidence go back.
+let nclaim = 0;
+const claimed = (...extra) => {
+  const code = `claim${++nclaim}`;
+  claims.add(code);
+  return run([`--claim-url=${base}/claim/${code}`, ...extra]);
+};
 journeyCode = passing;
-const urls = (p) => `${base}/${p}/${token}`;
-r = await run([`--journey-url=${urls('journey')}`, `--report-url=${urls('replay')}`, `--upload-url=${urls('artifacts')}/`,
-  `--profile-url=${urls('profile')}`, '--seed=11']);
+r = await claimed('--seed=11');
 const report = got['PUT /replay/TOKEN'];
 if (r.code !== 0 || !report) fail('run mode sent no report: ' + r.out);
 const rep = JSON.parse(report.toString());
@@ -93,18 +108,44 @@ if (!Object.keys(got).some((k) => k.startsWith('PUT /artifacts/TOKEN/') && k.end
 if (!got['PUT /artifacts/TOKEN/trace.zip']) fail('no trace uploaded');
 if (!got['PUT /profile/TOKEN']) fail('profile not saved back');
 
-// The journey runs apart from bp-replay: its argv and env carry no token.
-journeyCode = `export default async function journey({ bp }) {
+// A spent or unknown claim gives nothing: bp-replay stops with no report.
+for (const k of Object.keys(got)) delete got[k];
+r = await run([`--claim-url=${base}/claim/spent`]);
+if (r.code === 0 || got['PUT /replay/TOKEN']) fail('a spent claim still ran: ' + r.out);
+
+// The journey can read every command line and environment in the pod, its
+// own and bp-replay's and the live screen's: none carries the token.
+journeyCode = `import { readdirSync, readFileSync } from 'node:fs';
+export default async function journey({ bp }) {
   await bp.step('Look around', async () => {
-    const seen = JSON.stringify([process.argv, process.env]);
+    let seen = JSON.stringify([process.argv, process.env]);
+    let n = 0;
+    for (const pid of readdirSync('/proc').filter((d) => /^\\d+$/.test(d))) {
+      for (const f of ['cmdline', 'environ']) {
+        try { seen += readFileSync('/proc/' + pid + '/' + f, 'latin1'); n++; } catch { /* not ours to read */ }
+      }
+    }
+    if (n < 4) throw new Error('read only ' + n + ' proc files');
     if (seen.includes('${token}')) throw new Error('journey saw the run token');
   });
 }`;
 for (const k of Object.keys(got)) delete got[k];
-r = await run([`--journey-url=${urls('journey')}`, `--report-url=${urls('replay')}`, `--upload-url=${urls('artifacts')}/`,
-  `--profile-url=${urls('profile')}`]);
+r = await claimed();
 const leakRep = JSON.parse(got['PUT /replay/TOKEN']?.toString() || '{}');
 if (leakRep.status !== 'passed') fail('the journey could see the run token: ' + JSON.stringify(leakRep));
+
+// The live screen and the console recorder get their URLs on stdin and
+// report as in AI runs.
+journeyCode = `export default async function journey({ page, bp }) {
+  await bp.step('Open the shop', async () => {
+    await page.goto('${base}/');
+    await page.evaluate(() => console.error('bp-smoke console line'));
+    await page.waitForTimeout(6000);
+  });
+}`;
+helpers.clear();
+r = await claimed();
+if (!helpers.has('live') || !helpers.has('console')) fail('helpers reported only ' + JSON.stringify([...helpers]));
 
 // A failed step leaves its screenshot.
 journeyCode = `export default async function journey({ page, bp }) {
@@ -112,8 +153,7 @@ journeyCode = `export default async function journey({ page, bp }) {
   await bp.step('Press pay', async () => { await page.getByRole('button', { name: 'Pay now' }).click({ timeout: 2000 }); });
 }`;
 for (const k of Object.keys(got)) delete got[k];
-r = await run([`--journey-url=${urls('journey')}`, `--report-url=${urls('replay')}`, `--upload-url=${urls('artifacts')}/`,
-  `--profile-url=${urls('profile')}`]);
+r = await claimed();
 const failRep = JSON.parse(got['PUT /replay/TOKEN']?.toString() || '{}');
 if (failRep.status !== 'failed' || failRep.step !== 2 || !got['PUT /artifacts/TOKEN/failed-step.png']) fail('failed replay: ' + JSON.stringify(failRep));
 
@@ -134,14 +174,14 @@ r = await run(['--journey', waiting, '--self']);
 if (r.code !== 0 || r.res?.status !== 'waiting' || r.res.step !== 1 || r.res.wait?.n !== 1) fail('self mode at a wait: ' + r.out);
 journeyCode = waitingCode;
 for (const k of Object.keys(got)) delete got[k];
-r = await run([`--journey-url=${urls('journey')}`, `--report-url=${urls('replay')}`, `--upload-url=${urls('artifacts')}/`, `--profile-url=${urls('profile')}`]);
+r = await claimed();
 const waitRep = JSON.parse(got['PUT /replay/TOKEN']?.toString() || '{}');
 if (waitRep.status !== 'waiting' || waitRep.step !== 1 || waitRep.wait?.n !== 1 || waitRep.wait.until?.email?.subject !== 'Confirm' || waitRep.wait.until.timeout !== '2h') {
   fail('waiting replay: ' + JSON.stringify(waitRep));
 }
 journeyResume = { after: 1, arrivals: [{ detail: 'email "Confirm"', message: { from: 'shop', subject: 'Confirm', text: '', links: [`${base}/help`, `${base}/confirm?t=1`] } }] };
 for (const k of Object.keys(got)) delete got[k];
-r = await run([`--journey-url=${urls('journey')}`, `--report-url=${urls('replay')}`, `--upload-url=${urls('artifacts')}/`, `--profile-url=${urls('profile')}`]);
+r = await claimed();
 const resumedRep = JSON.parse(got['PUT /replay/TOKEN']?.toString() || '{}');
 if (resumedRep.status !== 'passed') fail('resumed replay: ' + JSON.stringify(resumedRep));
 

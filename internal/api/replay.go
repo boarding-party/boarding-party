@@ -87,6 +87,21 @@ func (s *server) getReplayCode(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
+// postClaim spends a replay run's one-time claim and gives its pod the
+// paths it works with, each carrying the run token. The pod's command holds
+// only the claim, spent before the journey starts.
+func (s *server) postClaim(w http.ResponseWriter, r *http.Request) {
+	run, err := s.svc.Claim(r.PathValue("code"))
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	t := run.Token
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, http.StatusOK, map[string]string{"journey": "/journey/" + t, "report": "/replay/" + t,
+		"upload": "/artifacts/" + t + "/", "profile": "/profile/" + t, "live": "/live/" + t, "console": "/console/" + t})
+}
+
 // messageLinks is every http(s) link of a message, from its HTML and its
 // text, in order and without repeats, at most maxArrivalLinks.
 func messageLinks(m store.Message) []string {

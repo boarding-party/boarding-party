@@ -18,7 +18,7 @@ import (
 
 func replayRun() store.Run {
 	return store.Run{ID: "ffffffff11", Token: "tok9", Persona: "ann", Role: "buyer", Story: "checkout",
-		Kind: store.RunReplay, JourneyID: "j1", Revision: 2, Seed: 77}
+		Kind: store.RunReplay, JourneyID: "j1", Revision: 2, Seed: 77, Claim: "claim5"}
 }
 
 func replayProject() project.Project {
@@ -41,12 +41,14 @@ func TestLauncherStartsReplayAsCommandSession(t *testing.T) {
 		t.Fatalf("command %v", s.Command)
 	}
 	d := tn.DirectorURL
-	for _, want := range []string{"--journey-url=" + d + "/journey/tok9", "--report-url=" + d + "/replay/tok9",
-		"--upload-url=" + d + "/artifacts/tok9/", "--profile-url=" + d + "/profile/tok9", "--live-url=" + d + "/live/tok9",
-		"--console-url=" + d + "/console/tok9", "--seed=77", "--device=iphone-15"} {
+	for _, want := range []string{"--claim-url=" + d + "/claim/claim5", "--seed=77", "--device=iphone-15"} {
 		if !slices.Contains(s.Command, want) {
 			t.Errorf("command %v lacks %s", s.Command, want)
 		}
+	}
+	// Everything in the pod can read its command: the token is never in it.
+	if strings.Contains(strings.Join(s.Command, " "), "tok9") {
+		t.Errorf("command %v carries the run token", s.Command)
 	}
 	if s.NodeSelector["pool"] != "runs" || len(s.Tolerations) != 1 || s.Resources == nil {
 		t.Fatalf("placement or resources lost: %+v", s)

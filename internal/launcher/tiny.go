@@ -322,16 +322,13 @@ func (t *Tiny) browserArgs(r store.Run, p project.Project) []string {
 
 var errOldTinyReplay = errors.New("tiny on this cluster is older than v0.15 and cannot run replays; update it with tiny init, then start the replay again")
 
-// replayCommand is the bp-replay invocation of a replay run. Every URL
-// carries the run's token and works only while the run is active.
+// replayCommand is the bp-replay invocation of a replay run. Everything in
+// the pod, the journey too, can read the command, so it carries the run's
+// one-time claim and never its token: bp-replay spends the claim for its
+// URLs before the journey starts.
 func (t *Tiny) replayCommand(r store.Run, p project.Project) []string {
 	cmd := []string{"bp-replay",
-		"--journey-url=" + t.DirectorURL + "/journey/" + r.Token,
-		"--report-url=" + t.DirectorURL + "/replay/" + r.Token,
-		"--upload-url=" + t.DirectorURL + "/artifacts/" + r.Token + "/",
-		"--profile-url=" + t.DirectorURL + "/profile/" + r.Token,
-		"--live-url=" + t.DirectorURL + "/live/" + r.Token,
-		"--console-url=" + t.DirectorURL + "/console/" + r.Token,
+		"--claim-url=" + t.DirectorURL + "/claim/" + r.Claim,
 		"--seed=" + strconv.FormatInt(r.Seed, 10)}
 	device := personaDevice(r, p)
 	if pd, _ := project.DeviceLaunch(device); pd != "" {

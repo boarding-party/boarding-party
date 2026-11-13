@@ -6,16 +6,19 @@
 //     only when the result proves the revision (passed, stopped at its first
 //     bp.waitFor, or failed exactly at --expect-fail-step).
 //
-//   bp-replay --journey-url URL --report-url URL --upload-url URL --profile-url URL
-//             [--live-url URL] [--console-url URL] [--seed N] [--device KEY]
-//     A replay run: fetches the code (and, after a wait, where to resume),
-//     restores the persona's browser, runs, uploads the evidence, saves the
-//     browser back and PUTs the result. A bp.waitFor past the resume point
-//     ends it with status waiting.
+//   bp-replay --claim-url URL [--seed N] [--device KEY]
+//     A replay run: spends its one-time claim for the run's URLs, fetches
+//     the code (and, after a wait, where to resume), restores the persona's
+//     browser, runs, uploads the evidence, saves the browser back and PUTs
+//     the result. A bp.waitFor past the resume point ends it with status
+//     waiting.
 //
-// The journey itself runs in a child process whose argv and environment
-// carry none of these URLs (they hold the run token). Logs go to stderr;
-// stdout carries only the result line.
+// The run's URLs carry its token, and everything in the pod, the journey
+// too, can read every process's command line and environment. So the pod's
+// command holds only the claim, spent before the journey starts; the URLs
+// live in this process's memory and reach the live screen and the console
+// recorder on their stdin. The journey runs in a child process given only
+// paths. Logs go to stderr (never a URL); stdout carries only the result line.
 import { spawn } from 'node:child_process';
 import { mkdtempSync, writeFileSync, readFileSync, readdirSync, existsSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -45,10 +48,10 @@ if (opts.child) {
   await child();
 } else if (opts.self) {
   await selfMode();
-} else if (opts['journey-url']) {
+} else if (opts['claim-url']) {
   await runMode();
 } else {
-  log('usage: bp-replay --journey FILE --self | --journey-url URL --report-url URL --upload-url URL --profile-url URL');
+  log('usage: bp-replay --journey FILE --self | --claim-url URL');
   process.exit(2);
 }
 
@@ -100,15 +103,42 @@ async function put(url, body, type) {
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
 }
 
-async function runMode() {
-  for (const k of ['report-url', 'upload-url', 'profile-url']) {
-    if (!opts[k]) { log(`--${k} is required`); process.exit(2); }
+// claim spends the run's one-time claim and returns its URLs. With no URLs
+// there is nowhere to report, so a refused claim ends bp-replay.
+async function claim() {
+  const u = opts['claim-url'];
+  let r;
+  try {
+    r = await fetch(u, { method: 'POST' });
+  } catch (e) {
+    log('could not claim this replay:', e.message);
+    process.exit(1);
   }
+  if (!r.ok) { log(`could not claim this replay (HTTP ${r.status})`); process.exit(1); }
+  const paths = await r.json();
+  const urls = {};
+  for (const k of ['journey', 'report', 'upload', 'profile', 'live', 'console']) {
+    if (typeof paths[k] !== 'string') { log(`the claim gave no ${k} URL`); process.exit(1); }
+    urls[k] = new URL(paths[k], u).href;
+  }
+  return urls;
+}
+
+// helper starts the live screen or the console recorder with its URL on
+// stdin, never on its command line.
+function helper(script, url) {
+  const p = spawn(process.execPath, [script, '--url-stdin'], { stdio: ['pipe', 'ignore', 'ignore'], detached: true });
+  p.stdin.end(url + '\n');
+  p.unref();
+}
+
+async function runMode() {
   const seed = seedOf(opts.seed);
+  const urls = await claim();
   const outDir = mkdtempSync(join(tmpdir(), 'bp-replay-'));
   let res;
   try {
-    const r = await fetch(opts['journey-url']);
+    const r = await fetch(urls.journey);
     if (!r.ok) throw new Error(`could not fetch the journey (HTTP ${r.status})`);
     const fetched = await r.json();
     if (typeof fetched.code !== 'string') throw new Error('the journey fetched has no code');
@@ -121,26 +151,26 @@ async function runMode() {
     }
     let profile = '';
     try {
-      const pr = await fetch(opts['profile-url']);
+      const pr = await fetch(urls.profile);
       if (pr.status === 200) {
         profile = join(outDir, 'profile.json');
         writeFileSync(profile, Buffer.from(await pr.arrayBuffer()));
       } else if (pr.status !== 204) log(`no profile restored (HTTP ${pr.status})`);
     } catch { log('no profile restored'); }
     // The live screen and the console recorder attach over CDP, as in AI runs.
-    if (opts['live-url']) spawn(process.execPath, ['/opt/bp/bp-screen.mjs', `--live-url=${opts['live-url']}`], { stdio: 'ignore', detached: true }).unref();
-    if (opts['console-url']) spawn(process.execPath, ['/opt/bp/bp-console.mjs', `--console-url=${opts['console-url']}`], { stdio: 'ignore', detached: true }).unref();
+    helper('/opt/bp/bp-screen.mjs', urls.live);
+    helper('/opt/bp/bp-console.mjs', urls.console);
     const saveProfile = join(outDir, 'profile-out.json');
     res = await runChild({ file, seed, device: opts.device, outDir, profile, saveProfile, cdp: true, resume });
-    await uploadEvidence(outDir);
+    await uploadEvidence(outDir, urls.upload);
     if (existsSync(saveProfile)) {
-      await put(opts['profile-url'], readFileSync(saveProfile), 'application/json').catch((e) => log('profile not saved:', e.message));
+      await put(urls.profile, readFileSync(saveProfile), 'application/json').catch((e) => log('profile not saved:', e.message));
     }
   } catch (e) {
     res = { status: 'failed', step: 0, error: String(e.message || e).slice(0, 2000), seed };
   }
   try {
-    await put(opts['report-url'], JSON.stringify(res), 'application/json');
+    await put(urls.report, JSON.stringify(res), 'application/json');
   } catch (e) {
     log('could not report the result:', e.message);
     process.exit(1);
@@ -149,7 +179,7 @@ async function runMode() {
 }
 
 // uploadEvidence sends the video, the trace and the failed step's picture.
-async function uploadEvidence(outDir) {
+async function uploadEvidence(outDir, uploadUrl) {
   const names = [];
   for (const n of readdirSync(outDir)) {
     if (n === 'trace.zip' || n === 'failed-step.png') names.push([n, n]);
@@ -163,7 +193,7 @@ async function uploadEvidence(outDir) {
     const path = join(outDir, from);
     if (!statSync(path).size) continue;
     const type = to.endsWith('.png') ? 'image/png' : to.endsWith('.zip') ? 'application/zip' : 'video/webm';
-    await put(opts['upload-url'] + to, readFileSync(path), type).catch((e) => log(`could not upload ${to}:`, e.message));
+    await put(uploadUrl + to, readFileSync(path), type).catch((e) => log(`could not upload ${to}:`, e.message));
   }
 }
 
