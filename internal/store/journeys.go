@@ -75,6 +75,16 @@ type Decision struct {
 	RevBefore int       `json:"revBefore"`
 	RevAfter  int       `json:"revAfter"`
 	Created   time.Time `json:"created"`
+
+	// Explored marks the journey explored at Created: a fresh AI run
+	// decided. Copilot and people's decisions leave it.
+	Explored bool `json:"-"`
+	// Resolves ends a repair: the journey goes live (a paused one stays
+	// paused), its flaky streak restarts and it is blocked at BlockStep by
+	// BlockBug (0 and "": not blocked).
+	Resolves  bool   `json:"-"`
+	BlockStep int    `json:"-"`
+	BlockBug  string `json:"-"`
 }
 
 const journeyCols = `id, persona, story, state, live_rev, created, passed, failed, last_replay, last_explored,
@@ -154,11 +164,20 @@ func (s *Store) AddRevision(persona, story string, r Revision, d Decision) (Jour
 		j.LiveRev = r.N
 	}
 	d.RevAfter = j.LiveRev
-	j.LastExplored = r.Created
+	if d.Explored {
+		j.LastExplored = r.Created
+	}
 	if _, err := tx.Exec(`UPDATE journeys SET live_rev = ?, last_explored = ? WHERE id = ?`, j.LiveRev, ts(j.LastExplored), j.ID); err != nil {
 		return Journey{}, Revision{}, err
 	}
+	if err := resolve(tx, j.ID, d); err != nil {
+		return Journey{}, Revision{}, err
+	}
 	if err := insertDecision(tx, &d); err != nil {
+		return Journey{}, Revision{}, err
+	}
+	j, err = scanJourney(tx.QueryRow(`SELECT `+journeyCols+` FROM journeys WHERE id = ?`, j.ID))
+	if err != nil {
 		return Journey{}, Revision{}, err
 	}
 	return j, r, tx.Commit()
@@ -242,8 +261,8 @@ func (s *Store) Revision(journeyID string, n int) (Revision, error) {
 	return scanRevision(s.db.QueryRow(`SELECT `+revisionCols+` FROM journey_revisions WHERE journey_id = ? AND n = ?`, journeyID, n))
 }
 
-// AddDecision stores a decision about an existing journey. A model's
-// decision also marks the journey as explored at that time.
+// AddDecision stores a decision about an existing journey, applying its
+// Explored and Resolves.
 func (s *Store) AddDecision(d Decision) error {
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -251,7 +270,7 @@ func (s *Store) AddDecision(d Decision) error {
 	}
 	defer tx.Rollback()
 	explored := int64(0) // MAX leaves last_explored alone
-	if d.Actor == ActorModel {
+	if d.Explored {
 		explored = ts(d.Created)
 	}
 	res, err := tx.Exec(`UPDATE journeys SET last_explored = MAX(last_explored, ?) WHERE id = ?`, explored, d.JourneyID)
@@ -260,6 +279,9 @@ func (s *Store) AddDecision(d Decision) error {
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
 		return ErrNotFound
+	}
+	if err := resolve(tx, d.JourneyID, d); err != nil {
+		return err
 	}
 	if err := insertDecision(tx, &d); err != nil {
 		return err
@@ -357,6 +379,16 @@ func (s *Store) DeleteJourney(id string, d Decision) error {
 		return err
 	}
 	return tx.Commit()
+}
+
+// resolve applies d.Resolves to journey id.
+func resolve(tx *sql.Tx, id string, d Decision) error {
+	if !d.Resolves {
+		return nil
+	}
+	_, err := tx.Exec(`UPDATE journeys SET state = CASE state WHEN 'paused' THEN 'paused' ELSE 'live' END,
+		flaky_streak = 0, blocked_step = ?, blocked_bug = ? WHERE id = ?`, d.BlockStep, d.BlockBug, id)
+	return err
 }
 
 // ActorModel is the actor of decisions an AI run made.

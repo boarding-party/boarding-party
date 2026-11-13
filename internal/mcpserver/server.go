@@ -136,6 +136,19 @@ type saveJourneyArgs struct {
 	SelfReplay runs.ReplayResult `json:"self_replay" jsonschema:"the JSON line bp-replay --self printed"`
 }
 
+type decideJourneyArgs struct {
+	Kind       string            `json:"kind" jsonschema:"bug, site changed, journey weakness, flaky or input refused correctly"`
+	Reason     string            `json:"reason" jsonschema:"what you found and did, in one to three sentences"`
+	Evidence   []string          `json:"evidence,omitempty" jsonschema:"up to 10 short items: artifacts you looked at or what you compared"`
+	WhyNotBug  string            `json:"why_not_bug,omitempty" jsonschema:"site changed: why the change is right and not a bug"`
+	BugID      string            `json:"bug_id,omitempty" jsonschema:"bug: the id report_bug returned"`
+	Code       string            `json:"code,omitempty" jsonschema:"every kind but bug: the fixed journey, the contents of /workspace/journey.mjs"`
+	SelfReplay runs.ReplayResult `json:"self_replay,omitempty" jsonschema:"every kind but bug: the JSON line bp-replay --self printed"`
+}
+
+// errCopilotDecides refuses the AI run journey tools on a copilot run.
+const errCopilotDecides = "this is a copilot run: decide with decide_journey"
+
 type journeyDecisionArgs struct {
 	Kind   string `json:"kind" jsonschema:"confirmed (the live journey already does what this run did) or not recorded (no passing journey could be made)"`
 	Reason string `json:"reason" jsonschema:"one or two sentences on why"`
@@ -411,6 +424,9 @@ func newServer(svc *runs.Service, st *store.Store, directorURL, token string, ma
 				if in.Verify != nil {
 					return toolErr("verify goes only with outcome done, not waiting")
 				}
+				if runs.IsCopilot(r) {
+					return toolErr("a copilot run cannot wait: decide with decide_journey, then finish done, stuck or failed")
+				}
 				return finishWaiting(ctx, svc, st, mail, token, r, in)
 			}
 			if in.Until != nil {
@@ -434,7 +450,9 @@ func newServer(svc *runs.Service, st *store.Store, directorURL, token string, ma
 			if lead, err := onLeadRun(r); err != nil {
 				return nil, nil, err
 			} else if !lead && !isFixCheck(r) {
-				if err := svc.CheckJourneyDecided(r); errors.Is(err, runs.ErrNoJourneyDecision) {
+				if err := svc.CheckJourneyDecided(r); errors.Is(err, runs.ErrNoJourneyDecision) && runs.IsCopilot(r) {
+					return toolErr("before finish_run, call decide_journey with your decision about the failed replay")
+				} else if errors.Is(err, runs.ErrNoJourneyDecision) {
 					return toolErr(err.Error())
 				} else if err != nil {
 					return nil, nil, err
@@ -461,6 +479,9 @@ func newServer(svc *runs.Service, st *store.Store, directorURL, token string, ma
 			} else if lead {
 				return toolErr("a lead records no journeys; its personas do")
 			}
+			if runs.IsCopilot(r) {
+				return toolErr(errCopilotDecides)
+			}
 			rev, err := svc.SaveJourney(token, runs.SaveJourney{Code: in.Code, Reason: in.Reason, Kind: store.RevisionKind(in.Kind),
 				BugID: in.BugID, BugStep: in.BugStep, SelfReplay: in.SelfReplay})
 			if errors.Is(err, runs.ErrNotActive) {
@@ -484,6 +505,9 @@ func newServer(svc *runs.Service, st *store.Store, directorURL, token string, ma
 			} else if lead {
 				return toolErr("a lead records no journeys; its personas do")
 			}
+			if runs.IsCopilot(r) {
+				return toolErr(errCopilotDecides)
+			}
 			err = svc.JourneyDecision(token, in.Kind, in.Reason)
 			if errors.Is(err, runs.ErrNotActive) {
 				return toolErr(errNotActive)
@@ -492,6 +516,27 @@ func newServer(svc *runs.Service, st *store.Store, directorURL, token string, ma
 				return toolErr(err.Error())
 			}
 			return text("noted")
+		})
+
+	mcp.AddTool(s, &mcp.Tool{Name: "decide_journey",
+		Description: "On a copilot run (context kind replay_failed), say why the replay failed: bug (with bug_id from report_bug; the journey stays), or site changed (needs why_not_bug), journey weakness, flaky or input refused correctly, each with the fixed journey's code and its passing bp-replay --self line. On any other run, only journey weakness: a sturdier revision of the live journey. When unsure, report the bug and decide bug."},
+		func(ctx context.Context, _ *mcp.CallToolRequest, in decideJourneyArgs) (*mcp.CallToolResult, any, error) {
+			_, bad, err := active()
+			if bad != nil || err != nil {
+				return bad, nil, err
+			}
+			d, err := svc.DecideJourney(token, runs.Decide{Kind: in.Kind, Reason: in.Reason, WhyNotBug: in.WhyNotBug, BugID: in.BugID,
+				Evidence: in.Evidence, Code: in.Code, SelfReplay: in.SelfReplay})
+			if errors.Is(err, runs.ErrNotActive) {
+				return toolErr(errNotActive)
+			}
+			if err != nil {
+				return toolErr(err.Error())
+			}
+			if d.RevAfter != d.RevBefore {
+				return text(fmt.Sprintf("decided %s; revision %d is live", d.Kind, d.RevAfter))
+			}
+			return text(fmt.Sprintf("decided %s; revision %d stays live", d.Kind, d.RevAfter))
 		})
 
 	// A lead's address can receive mail, but a lead run reads none of it:

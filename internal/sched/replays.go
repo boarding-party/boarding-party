@@ -29,7 +29,7 @@ const (
 // FlakyLimit times in a row, or a wait that never came goes to the copilot.
 func (s *Scheduler) followReplays(now time.Time) error {
 	un, err := s.Store.UnfollowedReplays()
-	if err != nil || len(un) == 0 {
+	if err != nil {
 		return err
 	}
 	var errs []error
@@ -38,7 +38,71 @@ func (s *Scheduler) followReplays(now time.Time) error {
 			errs = append(errs, fmt.Errorf("follow up replay %s: %w", r.ID, err))
 		}
 	}
+	return errors.Join(append(errs, s.settleCopilots(now))...)
+}
+
+// settleCopilots returns to live every repairing journey whose copilot run
+// ended without a decision, or never started: a journey is never left
+// repairing for ever.
+func (s *Scheduler) settleCopilots(now time.Time) error {
+	js, err := s.Store.Journeys()
+	if err != nil {
+		return err
+	}
+	var queue []store.Queued
+	var errs []error
+	for _, j := range js {
+		if j.State != store.JourneyRepairing {
+			continue
+		}
+		if queue == nil {
+			if queue, err = s.Store.Queue(); err != nil {
+				return err
+			}
+		}
+		if copilotQueued(queue, j) {
+			continue
+		}
+		reason, runID := "the copilot run never started", ""
+		r, err := s.Store.LastRunVia(j.Persona, j.Story, viaCopilot)
+		switch {
+		case errors.Is(err, store.ErrNotFound):
+		case err != nil:
+			errs = append(errs, err)
+			continue
+		case r.Started.Before(j.CopilotAt):
+			// An earlier repair's copilot: this one never started.
+		case !r.State.Final() || r.State == store.RunWaiting:
+			continue // still at work
+		default:
+			decided, err := s.Store.RunDecided(r.ID)
+			if err != nil {
+				errs = append(errs, err)
+				continue
+			}
+			if decided {
+				continue
+			}
+			reason, runID = firstLine(r.Outcome, 300), r.ID
+			if reason == "" {
+				reason = "it ended " + string(r.State) + " without deciding"
+			}
+		}
+		if err := s.Store.SetJourneyState(j.ID, store.JourneyLive, store.Decision{RunID: runID, Kind: "copilot gave no decision",
+			Reason: reason, Actor: store.ActorDirector, Created: now}); err != nil {
+			errs = append(errs, err)
+		}
+	}
 	return errors.Join(errs...)
+}
+
+func copilotQueued(queue []store.Queued, j store.Journey) bool {
+	for _, q := range queue {
+		if q.Via == viaCopilot && q.Persona == j.Persona && q.Story == j.Story {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Scheduler) followReplay(r store.Run, now time.Time) error {

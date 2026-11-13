@@ -27,7 +27,7 @@ func withJourney(t *testing.T, svc *runs.Service) store.Journey {
 		t.Fatal(err)
 	}
 	j, _, err := svc.Store.AddRevision("ann", "checkout", store.Revision{Kind: store.RevisionFull, Code: journeyJS, Reason: "r", RunID: "old", Created: time.Now()},
-		store.Decision{Kind: "recorded", Reason: "r", Actor: store.ActorModel, Created: time.Now()})
+		store.Decision{Kind: "recorded", Reason: "r", Actor: store.ActorModel, Created: time.Now(), Explored: true})
 	if err != nil {
 		t.Fatal(err)
 	}

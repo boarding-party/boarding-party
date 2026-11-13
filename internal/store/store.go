@@ -561,6 +561,17 @@ func (s *Store) RunsInChain(chain string) ([]Run, error) {
 
 // Unfollowed returns done or waiting runs the scheduler has not yet acted on,
 // oldest finished first.
+// LastRunVia returns persona's newest run of story that came via via, or
+// ErrNotFound.
+func (s *Store) LastRunVia(persona, story, via string) (Run, error) {
+	r, err := scanRun(s.db.QueryRow(`SELECT `+runCols+` FROM runs WHERE persona = ? AND story = ? AND via = ?
+		ORDER BY started DESC, rowid DESC LIMIT 1`, persona, story, via))
+	if errors.Is(err, sql.ErrNoRows) {
+		return Run{}, ErrNotFound
+	}
+	return r, err
+}
+
 // UnfollowedReplays returns the ended replay runs the scheduler has not
 // acted on yet, oldest first.
 func (s *Store) UnfollowedReplays() ([]Run, error) {

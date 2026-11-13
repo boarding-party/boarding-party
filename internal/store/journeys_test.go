@@ -15,7 +15,7 @@ func addRev(t *testing.T, s *Store, kind RevisionKind, code string, at time.Time
 	if kind == RevisionBug {
 		r.BugID, r.BugStep, dk = "bug-"+code, 3, "bug revision recorded"
 	}
-	j, rev, err := s.AddRevision("megan", "invoice", r, Decision{RunID: r.RunID, Kind: dk, Reason: r.Reason, Actor: "model", Created: at})
+	j, rev, err := s.AddRevision("megan", "invoice", r, Decision{RunID: r.RunID, Kind: dk, Reason: r.Reason, Actor: "model", Created: at, Explored: true})
 	if err != nil {
 		t.Fatal(err)
 	}

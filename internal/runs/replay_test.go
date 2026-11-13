@@ -18,7 +18,7 @@ func recorded(t *testing.T, svc *Service, n int) store.Journey {
 	for i := 0; i < n; i++ {
 		var err error
 		j, _, err = svc.Store.AddRevision("ann", "checkout", store.Revision{Kind: store.RevisionFull, Code: journeyCode, Reason: "r", RunID: "old", Created: time.Now().UTC()},
-			store.Decision{Kind: "recorded", Reason: "r", Actor: store.ActorModel, Created: time.Now().UTC()})
+			store.Decision{Kind: "recorded", Reason: "r", Actor: store.ActorModel, Created: time.Now().UTC(), Explored: true})
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -112,3 +112,69 @@ func TestReplayTokenOpensNoTools(t *testing.T) {
 		}
 	}
 }
+
+// copilotRun ends the setup run and starts a copilot run for ann's
+// checkout journey, which has one live revision.
+func copilotRun(t *testing.T, st *store.Store, run store.Run) (store.Run, store.Journey) {
+	t.Helper()
+	if _, err := st.FinishRun(run.ID, store.RunDone, "x", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	j, _, err := st.AddRevision("ann", "checkout", store.Revision{Kind: store.RevisionFull, Code: testJourney, Reason: "r", RunID: "old", Created: time.Now()},
+		store.Decision{Kind: "recorded", Reason: "r", Actor: store.ActorModel, Created: time.Now(), Explored: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, _ := json.Marshal(store.RunContext{Kind: "replay_failed", PreviousRun: "rp", Previous: "Failed at step 1: Open",
+		Replay: &store.ContextReplay{JourneyID: j.ID, Revision: 1, Step: 1, StepName: "Open", Error: "timeout", Seed: 9, Why: "failed again with the same inputs"}})
+	cp := store.Run{ID: "cp", Token: "tok-copilot", Persona: "ann", Role: "buyer", Story: "checkout", State: store.RunRunning,
+		Started: time.Now(), Chain: "rp", Via: "copilot", Follows: "rp", Context: ctx}
+	if err := st.CreateRun(cp); err != nil {
+		t.Fatal(err)
+	}
+	return cp, j
+}
+
+func TestCopilotRefusesSaveJourneyAndWaiting(t *testing.T) {
+	_, st, srv, run := setup(t)
+	cp, _ := copilotRun(t, st, run)
+	cs := connect(t, srv, cp.Token)
+	for name, args := range map[string]map[string]any{
+		"save_journey":     {"code": testJourney, "reason": "r", "kind": "full", "self_replay": map[string]any{"status": "passed"}},
+		"journey_decision": {"kind": "confirmed", "reason": "r"},
+	} {
+		if text, isErr := call(t, cs, name, args); !isErr || !strings.Contains(text, "copilot run: decide with decide_journey") {
+			t.Errorf("%s on a copilot run: %q", name, text)
+		}
+	}
+	text, isErr := call(t, cs, "finish_run", map[string]any{"outcome": "waiting", "summary": "s", "until": map[string]any{"time": map[string]any{"after": "1h"}}})
+	if !isErr || !strings.Contains(text, "copilot") {
+		t.Fatalf("waiting copilot: %q", text)
+	}
+	text, isErr = call(t, cs, "finish_run", map[string]any{"outcome": "done", "summary": "s"})
+	if !isErr || !strings.Contains(text, "decide_journey") {
+		t.Fatalf("undecided copilot finish: %q", text)
+	}
+}
+
+func TestDecideJourneyTool(t *testing.T) {
+	_, st, srv, run := setup(t)
+	cp, j := copilotRun(t, st, run)
+	cs := connect(t, srv, cp.Token)
+	if text, isErr := call(t, cs, "decide_journey", map[string]any{"kind": "site changed", "reason": "Open moved",
+		"code": testJourney, "self_replay": map[string]any{"status": "passed"}}); !isErr || !strings.Contains(text, "why_not_bug") {
+		t.Fatalf("site changed without why: %q", text)
+	}
+	text, isErr := call(t, cs, "decide_journey", map[string]any{"kind": "flaky", "reason": "the page loads slowly",
+		"evidence": []string{"trace.zip: 14 s to load"}, "code": testJourney, "self_replay": map[string]any{"status": "passed", "seed": 9}})
+	if isErr || !strings.Contains(text, "revision 2") {
+		t.Fatalf("flaky: %q", text)
+	}
+	got, _ := st.Journey(j.ID)
+	if got.LiveRev != 2 {
+		t.Fatalf("journey %+v", got)
+	}
+	if text, isErr := call(t, cs, "finish_run", map[string]any{"outcome": "done", "summary": "s"}); isErr {
+		t.Fatalf("decided copilot finish: %q", text)
+	}
+}

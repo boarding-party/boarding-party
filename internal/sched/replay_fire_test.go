@@ -31,7 +31,7 @@ func scheduleFire(stories ...string) Fire {
 func (f *fix) journey(story string, explored time.Time) store.Journey {
 	f.t.Helper()
 	j, _, err := f.st.AddRevision("Ada", story, store.Revision{Kind: store.RevisionFull, Code: "c", Reason: "r", Created: explored},
-		store.Decision{Kind: "recorded", Reason: "r", Actor: store.ActorModel, Created: explored})
+		store.Decision{Kind: "recorded", Reason: "r", Actor: store.ActorModel, Created: explored, Explored: true})
 	if err != nil {
 		f.t.Fatal(err)
 	}

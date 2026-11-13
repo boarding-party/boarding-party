@@ -1,12 +1,14 @@
 package runs
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"regexp"
 	"strings"
 	"time"
 
+	"github.com/boarding-party/boardingparty/internal/project"
 	"github.com/boarding-party/boardingparty/internal/store"
 )
 
@@ -67,16 +69,13 @@ func (s *Service) SaveJourney(token string, in SaveJourney) (store.Revision, err
 	if err := checkText(in.Code, in.Reason); err != nil {
 		return store.Revision{}, err
 	}
-	if strings.TrimSpace(in.Code) == "" {
-		return store.Revision{}, errors.New("code is required")
-	}
-	if tokenLike.MatchString(in.Code) {
-		return store.Revision{}, errors.New("the journey holds what looks like a run token or server URL; journeys replay unattended, so they never carry one")
+	if err := checkJourneyCode(in.Code); err != nil {
+		return store.Revision{}, err
 	}
 	kind := "recorded"
 	switch in.Kind {
 	case store.RevisionFull:
-		if in.SelfReplay.Status != "passed" {
+		if !provesFull(in.SelfReplay) {
 			return store.Revision{}, fmt.Errorf("%w: a full revision's self-replay must pass, it %s", ErrUnproven, describe(in.SelfReplay))
 		}
 	case store.RevisionBug:
@@ -100,7 +99,7 @@ func (s *Service) SaveJourney(token string, in SaveJourney) (store.Revision, err
 	now := time.Now().UTC()
 	_, rev, err := s.Store.AddRevision(r.Persona, r.Story,
 		store.Revision{Kind: in.Kind, Code: in.Code, Reason: in.Reason, RunID: r.ID, BugID: in.BugID, BugStep: in.BugStep, Created: now},
-		store.Decision{RunID: r.ID, Kind: kind, Reason: in.Reason, Actor: store.ActorModel, Created: now})
+		store.Decision{RunID: r.ID, Kind: kind, Reason: in.Reason, Actor: store.ActorModel, Created: now, Explored: true})
 	return rev, err
 }
 
@@ -132,8 +131,154 @@ func (s *Service) JourneyDecision(token, kind, reason string) error {
 		return err
 	}
 	return s.Store.AddDecision(store.Decision{JourneyID: j.ID, RunID: r.ID, Kind: kind, Reason: reason,
-		Actor: store.ActorModel, RevBefore: j.LiveRev, RevAfter: j.LiveRev, Created: now})
+		Actor: store.ActorModel, RevBefore: j.LiveRev, RevAfter: j.LiveRev, Created: now, Explored: true})
 }
+
+// Copilot decision kinds: why a replay failed and what was done about it.
+const (
+	DecideBug         = "bug"
+	DecideSiteChanged = "site changed"
+	DecideWeakness    = "journey weakness"
+	DecideFlaky       = "flaky"
+	DecideRefused     = "input refused correctly"
+)
+
+// Limits on a copilot decision's evidence.
+const (
+	MaxEvidence     = 10
+	MaxEvidenceText = 500
+)
+
+// Decide is a copilot's answer about a failed replay. Every kind but bug
+// carries a new journey revision proven by its self-replay.
+type Decide struct {
+	Kind, Reason, WhyNotBug, BugID string
+	Evidence                       []string
+	Code                           string
+	SelfReplay                     ReplayResult
+}
+
+// IsCopilot reports whether r is a copilot run: an AI run deciding about a
+// failed replay.
+func IsCopilot(r store.Run) bool {
+	var c store.RunContext
+	return json.Unmarshal(r.Context, &c) == nil && c.Kind == "replay_failed" && c.Replay != nil
+}
+
+// DecideJourney records a copilot's decision about the replay its run was
+// called for, and ends the repair. Outside a copilot run only journey
+// weakness is allowed, as a fresh AI run's sturdier revision. Nothing is
+// stored when it is refused.
+func (s *Service) DecideJourney(token string, in Decide) (store.Decision, error) {
+	r, err := s.Active(token)
+	if err != nil {
+		return store.Decision{}, err
+	}
+	var c store.RunContext
+	_ = json.Unmarshal(r.Context, &c)
+	copilot := c.Kind == "replay_failed" && c.Replay != nil
+	switch {
+	case r.Story == project.LeadStory:
+		return store.Decision{}, errors.New("a lead records no journeys; its personas do")
+	case c.Verify != nil:
+		return store.Decision{}, errors.New("a fix check records no journey")
+	}
+	switch in.Kind {
+	case DecideBug, DecideSiteChanged, DecideFlaky, DecideRefused:
+		if !copilot {
+			return store.Decision{}, fmt.Errorf("kind %q is only for a copilot run; outside one, use %q", in.Kind, DecideWeakness)
+		}
+	case DecideWeakness:
+	default:
+		return store.Decision{}, fmt.Errorf("kind must be one of %q, %q, %q, %q or %q, got %q",
+			DecideBug, DecideSiteChanged, DecideWeakness, DecideFlaky, DecideRefused, in.Kind)
+	}
+	if err := checkText(in.Code, in.Reason); err != nil {
+		return store.Decision{}, err
+	}
+	if len(in.Evidence) > MaxEvidence {
+		return store.Decision{}, fmt.Errorf("evidence has over %d items", MaxEvidence)
+	}
+	for _, e := range in.Evidence {
+		if len(e) > MaxEvidenceText {
+			return store.Decision{}, fmt.Errorf("an evidence item is over %d characters", MaxEvidenceText)
+		}
+	}
+	reason := in.Reason
+	if in.Kind == DecideSiteChanged {
+		if strings.TrimSpace(in.WhyNotBug) == "" {
+			return store.Decision{}, errors.New("site changed needs why_not_bug: why the change is right and not a bug")
+		}
+		reason += "\n\nWhy this is not a bug: " + strings.TrimSpace(in.WhyNotBug)
+		if len(reason) > 2*MaxJourneyReason {
+			return store.Decision{}, fmt.Errorf("reason and why_not_bug are over %d characters", 2*MaxJourneyReason)
+		}
+	}
+	var j store.Journey
+	if copilot {
+		j, err = s.Store.Journey(c.Replay.JourneyID)
+	} else {
+		j, err = s.Store.JourneyFor(r.Persona, r.Story)
+		if err == nil && j.LiveRev == 0 {
+			err = store.ErrNotFound
+		}
+	}
+	if errors.Is(err, store.ErrNotFound) {
+		return store.Decision{}, errors.New("there is no live journey to decide about")
+	}
+	if err != nil {
+		return store.Decision{}, err
+	}
+	now := time.Now().UTC()
+	d := store.Decision{JourneyID: j.ID, RunID: r.ID, Kind: in.Kind, Reason: reason, Actor: store.ActorModel, Evidence: in.Evidence,
+		Created: now, Explored: !copilot, Resolves: copilot}
+	if in.Kind == DecideBug {
+		b, err := s.Store.Report(in.BugID)
+		if errors.Is(err, store.ErrNotFound) || (err == nil && b.RunID != r.ID) {
+			return store.Decision{}, fmt.Errorf("bug_id %q is not a bug this run reported; report it with report_bug first", in.BugID)
+		}
+		if err != nil {
+			return store.Decision{}, err
+		}
+		d.BlockStep, d.BlockBug = c.Replay.Step, b.ID
+		d.RevBefore, d.RevAfter = j.LiveRev, j.LiveRev
+		if err := s.Store.AddDecision(d); err != nil {
+			return store.Decision{}, err
+		}
+		return d, nil
+	}
+	if err := checkJourneyCode(in.Code); err != nil {
+		return store.Decision{}, err
+	}
+	if !provesFull(in.SelfReplay) {
+		return store.Decision{}, fmt.Errorf("%w: the new revision's self-replay must pass, it %s", ErrUnproven, describe(in.SelfReplay))
+	}
+	_, _, err = s.Store.AddRevision(j.Persona, j.Story,
+		store.Revision{Kind: store.RevisionFull, Code: in.Code, Reason: reason, RunID: r.ID, Created: now}, d)
+	if err != nil {
+		return store.Decision{}, err
+	}
+	ds, err := s.Store.Decisions(j.ID)
+	if err != nil || len(ds) == 0 {
+		return d, err
+	}
+	return ds[0], nil
+}
+
+// checkJourneyCode refuses empty code and code holding what looks like a
+// run token.
+func checkJourneyCode(code string) error {
+	if strings.TrimSpace(code) == "" {
+		return errors.New("code is required")
+	}
+	if tokenLike.MatchString(code) {
+		return errors.New("the journey holds what looks like a run token or server URL; journeys replay unattended, so they never carry one")
+	}
+	return nil
+}
+
+// provesFull reports whether a self-replay proves a full revision.
+func provesFull(res ReplayResult) bool { return res.Status == "passed" }
 
 // CheckJourneyDecided is ErrNoJourneyDecision until run r has saved a
 // revision or made a journey decision.

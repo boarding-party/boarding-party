@@ -310,7 +310,7 @@ func TestReplayOfDeletedJourneyIsFollowed(t *testing.T) {
 func TestReplaysNeverHandOff(t *testing.T) {
 	f := newFix(t, schedYAML)
 	j, _, err := f.st.AddRevision("Ada", "book", store.Revision{Kind: store.RevisionFull, Code: "c", Reason: "r", Created: now},
-		store.Decision{Kind: "recorded", Actor: store.ActorModel, Created: now})
+		store.Decision{Kind: "recorded", Actor: store.ActorModel, Created: now, Explored: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -318,5 +318,88 @@ func TestReplaysNeverHandOff(t *testing.T) {
 	f.tick()
 	if q := f.queue(); len(q) != 0 {
 		t.Fatalf("queue = %+v", q)
+	}
+}
+
+// copilotEnded records a copilot run of Ada's story that ended in state.
+func (f *fix) copilotEnded(id string, state store.RunState, outcome string) {
+	f.t.Helper()
+	r := store.Run{ID: id, Token: "tok-" + id, Persona: "Ada", Role: "patient", Story: "book", State: store.RunRunning,
+		Started: f.clk.Now(), Chain: "c", Via: "copilot", Context: []byte(`{"kind":"replay_failed","replay":{"journeyId":"x"}}`)}
+	if err := f.st.CreateRun(r); err != nil {
+		f.t.Fatal(err)
+	}
+	if state != store.RunRunning {
+		if ok, err := f.st.FinishRun(id, state, outcome, f.clk.Now()); err != nil || !ok {
+			f.t.Fatal(ok, err)
+		}
+	}
+}
+
+func (f *fix) repairing(j store.Journey) {
+	f.t.Helper()
+	if err := f.st.SetJourneyState(j.ID, store.JourneyRepairing, store.Decision{Kind: "copilot called", Actor: store.ActorDirector, Created: f.clk.Now()}); err != nil {
+		f.t.Fatal(err)
+	}
+}
+
+func TestCopilotWithoutDecisionReturnsJourneyLive(t *testing.T) {
+	f := newFix(t, exploreYAML)
+	j := f.journey("book", now)
+	f.repairing(j)
+	f.copilotEnded("cp1", store.RunRunning, "")
+	f.follow()
+	if got := f.journeyNow(j); got.State != store.JourneyRepairing {
+		t.Fatalf("while the copilot runs: %s", got.State)
+	}
+	if ok, err := f.st.FinishRun("cp1", store.RunFailed, "The run timed out after 60 min\nlogs", f.clk.Now()); err != nil || !ok {
+		t.Fatal(ok, err)
+	}
+	f.follow()
+	if got := f.journeyNow(j); got.State != store.JourneyLive {
+		t.Fatalf("after an undecided copilot: %s", got.State)
+	}
+	ds := f.decisions(j)
+	if ds[0].Kind != "copilot gave no decision" || ds[0].Actor != store.ActorDirector || ds[0].RunID != "cp1" || ds[0].Reason != "The run timed out after 60 min" {
+		t.Fatalf("decision %+v", ds[0])
+	}
+	f.follow()
+	if n := len(f.decisions(j)); n != len(ds) {
+		t.Fatalf("settled twice: %d rows", n)
+	}
+}
+
+func TestQueuedCopilotKeepsJourneyRepairing(t *testing.T) {
+	f := newFix(t, exploreYAML)
+	j := f.journey("book", now)
+	f.repairing(j)
+	f.copilotEnded("old", store.RunFailed, "yesterday's copilot")
+	if err := f.st.Enqueue(store.Queued{ID: "cq", Persona: "Ada", Role: "patient", Story: "book", Via: "copilot", Created: now}); err != nil {
+		t.Fatal(err)
+	}
+	f.follow()
+	if got := f.journeyNow(j); got.State != store.JourneyRepairing {
+		t.Fatalf("with a copilot queued: %s", got.State)
+	}
+	f.st.DeleteQueued("cq")
+	f.follow()
+	if got := f.journeyNow(j); got.State != store.JourneyLive {
+		t.Fatalf("copilot taken off the queue: %s", got.State)
+	}
+}
+
+func TestDecidedCopilotIsLeftAlone(t *testing.T) {
+	f := newFix(t, exploreYAML)
+	j := f.journey("book", now)
+	f.repairing(j)
+	f.copilotEnded("cp1", store.RunDone, "decided")
+	if err := f.st.AddDecision(store.Decision{JourneyID: j.ID, RunID: "cp1", Kind: "bug", Actor: store.ActorModel, Created: now}); err != nil {
+		t.Fatal(err)
+	}
+	// Repairing again by a later replay, its copilot not yet queued: the
+	// decided run is not "no decision".
+	f.follow()
+	if ds := f.decisions(j); ds[0].Kind == "copilot gave no decision" {
+		t.Fatalf("decision %+v", ds[0])
 	}
 }

@@ -410,7 +410,7 @@ func seedJourney(st *store.Store, p project.Project, now time.Time) error {
 	for i, reason := range []string{"First recording of the story.", "The counter check now waits for the list to settle."} {
 		at := now.Add(time.Duration(i-2) * time.Hour)
 		if _, _, err := st.AddRevision(persona, story, store.Revision{Kind: store.RevisionFull, Code: devJourney, Reason: reason, Created: at},
-			store.Decision{Kind: "recorded", Reason: reason, Actor: store.ActorModel, Created: at}); err != nil {
+			store.Decision{Kind: "recorded", Reason: reason, Actor: store.ActorModel, Created: at, Explored: true}); err != nil {
 			return err
 		}
 	}
