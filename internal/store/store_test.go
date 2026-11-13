@@ -24,7 +24,7 @@ func TestRunRoundTrip(t *testing.T) {
 	s := open(t)
 	start := time.Now().UTC().Truncate(time.Second)
 	r := Run{ID: "r1", Token: "tok", Persona: "Ada", Role: "visitor", Story: "todos",
-		State: "pending", Session: "sess-1", Started: start}
+		State: "pending", Session: "sess-1", Started: start, Profile: project.Profile{Device: "ipad", Vision: "blurred"}}
 	if err := s.CreateRun(r); err != nil {
 		t.Fatal(err)
 	}
@@ -32,7 +32,7 @@ func TestRunRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.ID != "r1" || got.State != "pending" || got.Session != "sess-1" || !got.Started.Equal(start) {
+	if got.ID != "r1" || got.State != "pending" || got.Session != "sess-1" || !got.Started.Equal(start) || got.Profile != r.Profile {
 		t.Fatalf("got %+v", got)
 	}
 	r.State, r.Outcome, r.Finished = "done", "ok", start.Add(time.Minute)

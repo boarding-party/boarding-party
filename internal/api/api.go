@@ -428,6 +428,9 @@ func (s *server) getRun(w http.ResponseWriter, r *http.Request) {
 	} else if len(con) > 0 {
 		out["console"] = con
 	}
+	if st := run.Profile.Settings(); len(st) > 0 {
+		out["settings"] = st
+	}
 	if run.Kind == store.RunReplay {
 		out["cost"] = 0.0 // a replay runs no model
 		if cop, err := s.copilotOf(run); err != nil {

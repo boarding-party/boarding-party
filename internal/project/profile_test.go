@@ -120,3 +120,23 @@ func TestParseProfileTakesValuesOrLabels(t *testing.T) {
 		t.Fatalf("unknown field should list the fields: %v", err)
 	}
 }
+
+func TestProfileSettings(t *testing.T) {
+	got := Profile{Device: "iphone-15", Age: "65-plus", Assistive: "keyboard-only", Vision: "deuteranopia", Display: "dark"}.Settings()
+	want := []Setting{
+		{Key: "device", Label: "Device", Value: "iPhone 15", Browser: true},
+		{Key: "age", Label: "Age", Value: "65 or over"},
+		{Key: "assistive", Label: "Assistive technology", Value: "Keyboard only", Browser: true},
+		{Key: "vision", Label: "Eyesight", Value: "Red-green colour blindness (deuteranopia)", Browser: true},
+		{Key: "display", Label: "Display settings", Value: "Dark mode", Browser: true},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %+v", got)
+	}
+	if s := (Profile{Assistive: "none"}).Settings(); len(s) != 1 || s[0].Browser {
+		t.Fatalf("no assistive technology is not a browser setting: %+v", s)
+	}
+	if s := (Profile{Device: "gone"}).Settings(); len(s) != 0 {
+		t.Fatalf("an unknown value is shown: %+v", s)
+	}
+}

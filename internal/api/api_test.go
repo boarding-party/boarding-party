@@ -1111,3 +1111,21 @@ func TestAdminBrowserProfile(t *testing.T) {
 		t.Errorf("no token: %d", r.StatusCode)
 	}
 }
+
+func TestGetRunShowsThePersonasSettings(t *testing.T) {
+	srv, svc := setup(t, 1024)
+	if err := svc.Store.CreateRun(store.Run{ID: "rp", Token: "tok-rp", Persona: "ann", Role: "buyer", Story: "checkout", State: store.RunDone,
+		Started: time.Now(), Chain: "rp", Profile: project.Profile{Device: "desktop", Assistive: "keyboard-only", Age: "50-64"}}); err != nil {
+		t.Fatal(err)
+	}
+	var d struct {
+		Settings []project.Setting `json:"settings"`
+	}
+	if err := json.NewDecoder(do(t, "GET", srv.URL+"/api/runs/rp", "").Body).Decode(&d); err != nil {
+		t.Fatal(err)
+	}
+	if len(d.Settings) != 3 || d.Settings[0].Value != "Desktop 1280×800" || !d.Settings[0].Browser || d.Settings[1].Label != "Age" ||
+		d.Settings[1].Browser || d.Settings[2].Value != "Keyboard only" {
+		t.Fatalf("settings %+v", d.Settings)
+	}
+}

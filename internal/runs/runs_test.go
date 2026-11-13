@@ -127,6 +127,27 @@ func TestStartCreatesRunningRun(t *testing.T) {
 	}
 }
 
+func TestRunKeepsTheProfileItRanWith(t *testing.T) {
+	svc, _ := newSvc(t)
+	p, _ := svc.Store.Project()
+	ran := project.Profile{Device: "pixel-7", Assistive: "keyboard-only", Vision: "tritanopia"}
+	p.Roles[0].Personas[0].Profile = ran
+	if err := svc.Store.PutProject(p); err != nil {
+		t.Fatal(err)
+	}
+	r, err := svc.Start(context.Background(), "ann", "checkout")
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.Roles[0].Personas[0].Profile = project.Profile{Device: "ipad"}
+	if err := svc.Store.PutProject(p); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := svc.Store.RunByID(r.ID); got.Profile != ran {
+		t.Fatalf("profile %+v, want %+v", got.Profile, ran)
+	}
+}
+
 func TestStartRefusesWithoutFence(t *testing.T) {
 	svc, fl := newSvc(t)
 	svc.Fence = func(context.Context) error { return errors.New("proxy is off") }

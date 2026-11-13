@@ -1148,11 +1148,12 @@ function RunPage({ id, onChange }) {
           ${replay ? html`<${ReplayCard} run=${run} artifacts=${artifacts} copilot=${data.copilot} />` : null}
           ${chain || queued ? html`<${Chain} links=${links} current=${run.id} queued=${queued || []} />` : null}
           ${blocked.length ? html`<${BlockedHosts} hosts=${blocked} />` : null}
+          ${data.settings && data.settings.length ? html`<${PersonaCard} run=${run} settings=${data.settings} />` : null}
           <div class="card">
             <h2>Details</h2>
             <dl class="facts">
-              <dt>Persona</dt><dd>${run.persona}</dd>
-              ${run.role ? html`<dt>Role</dt><dd>${run.role}</dd>` : null}
+              ${data.settings && data.settings.length ? null : html`<dt>Persona</dt><dd>${run.persona}</dd>
+              ${run.role ? html`<dt>Role</dt><dd>${run.role}</dd>` : null}`}
               <dt>Story</dt><dd>${run.story}</dd>
               <dt>State</dt><dd><${StateTag} state=${run.state} wait=${wait} /></dd>
               ${wait ? html`<dt>Waiting for</dt><dd>${waitText(wait)}</dd>` : null}
@@ -1303,6 +1304,22 @@ const MAX_BLOCKED = 50;
 // page that loads fonts, scripts or payments from such a host looks broken
 // to the persona. Allow adds the host to the project's extra hosts, which
 // the director copies to the fence's allow-list.
+// PersonaCard is the profile the persona had when the run started: what the
+// browser itself was set to, then how the agent was asked to act.
+function PersonaCard({ run, settings }) {
+  const browser = settings.filter((s) => s.browser);
+  const acts = settings.filter((s) => !s.browser);
+  const rows = (list) => html`<dl class="facts wide">${list.map((s) => html`<dt key=${'k' + s.key}>${s.label}</dt><dd key=${'v' + s.key}>${s.value}</dd>`)}</dl>`;
+  return html`
+    <div class="card personacard">
+      <h2>Persona</h2>
+      <p class="pwho"><b>${run.persona}</b>${run.role ? html` <span class="muted">${run.role}</span>` : null}</p>
+      ${browser.length ? html`<h3>Set in the browser</h3>${rows(browser)}` : null}
+      ${acts.length ? html`<h3>How they act</h3>${rows(acts)}` : null}
+      <p class="hint">As the profile was when this run started.</p>
+    </div>`;
+}
+
 function BlockedHosts({ hosts }) {
   const [allowed, setAllowed] = useState(() => new Set());
   const [busy, setBusy] = useState('');

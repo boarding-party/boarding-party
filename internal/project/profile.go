@@ -122,6 +122,29 @@ func (p Profile) Labels() map[string]string {
 	return out
 }
 
+// Setting is one set profile field as people read it. Browser marks the
+// fields the browser itself enforces (see BrowserSettings).
+type Setting struct {
+	Key     string `json:"key"`
+	Label   string `json:"label"`
+	Value   string `json:"value"`
+	Browser bool   `json:"browser,omitempty"`
+}
+
+// Settings lists the set fields with known values, in ProfileFields order.
+func (p Profile) Settings() []Setting {
+	browser := p.BrowserSettings()
+	out := []Setting{}
+	for i, v := range p.values() {
+		f := ProfileFields[i]
+		if o, ok := f.option(v); ok {
+			_, b := browser[f.Key]
+			out = append(out, Setting{Key: f.Key, Label: f.Label, Value: o.Label, Browser: b})
+		}
+	}
+	return out
+}
+
 // ParseProfile reads a profile written by an agent: keys as in JSON, each
 // value either an option's value or its label, ignoring case and spaces.
 // Errors list what is allowed, so the agent can try again.

@@ -318,7 +318,7 @@ func (s *Service) start(ctx context.Context, persona, story string, q *store.Que
 		}
 	}
 	r := store.Run{ID: id, Token: token, Persona: persona, Role: role, Story: st,
-		State: store.RunPending, Started: time.Now().UTC(), Chain: id}
+		State: store.RunPending, Started: time.Now().UTC(), Chain: id, Profile: profileOf(p, role, persona)}
 	queueID := ""
 	if q != nil {
 		r.Follows, r.Via, r.Context = q.Follows, q.Via, q.Context
@@ -384,6 +384,18 @@ func (s *Service) start(ctx context.Context, persona, story string, q *store.Que
 }
 
 // find returns the role owning persona, and the goal of the named story in that role.
+// profileOf is the profile of persona in role.
+func profileOf(p project.Project, role, persona string) project.Profile {
+	for _, r := range p.Roles {
+		for _, pe := range r.Personas {
+			if r.Name == role && pe.Name == persona {
+				return pe.Profile
+			}
+		}
+	}
+	return project.Profile{}
+}
+
 func find(p project.Project, persona, story string) (role, storyName string, err error) {
 	for _, r := range p.Roles {
 		for _, pe := range r.Personas {
