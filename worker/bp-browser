@@ -1,11 +1,16 @@
 #!/bin/sh
-# MCP stdio launcher: starts the screen streamer once per pod, then execs Playwright MCP.
+# MCP stdio launcher: starts the screen streamer once per pod, then execs
+# Playwright MCP behind the tool gate, with the browser set to the persona's
+# device and accessibility settings.
 # Nothing may be written to stdout here; it belongs to the MCP protocol.
 live=""
 files=""
 usage=""
 profile=""
 device=""
+assistive=""
+vision=""
+display=""
 usageonly=""
 consoleurl=""
 n=$#
@@ -18,6 +23,9 @@ while [ "$n" -gt 0 ]; do
     --console-url=*) consoleurl="${a#--console-url=}" ;;
     --profile-url=*) profile="${a#--profile-url=}" ;;
     --bp-device=*) device="${a#--bp-device=}" ;;
+    --bp-assistive=*) assistive="${a#--bp-assistive=}" ;;
+    --bp-vision=*) vision="${a#--bp-vision=}" ;;
+    --bp-display=*) display="${a#--bp-display=}" ;;
     --usage-only) usageonly=1 ;;
     *) set -- "$@" "$a" ;;
   esac
@@ -105,19 +113,15 @@ if [ -n "$proxy" ]; then
   [ -n "$bypass" ] && set -- "$@" "--proxy-bypass=$bypass"
 fi
 
-name=""
-case "$device" in
-  "") ;;
-  iphone-15) name="iPhone 15" ;;
-  iphone-15-pro-max) name="iPhone 15 Pro Max" ;;
-  pixel-7) name="Pixel 7" ;;
-  galaxy-s24) name="Galaxy S24" ;;
-  ipad) name="iPad (gen 11)" ;;
-  ipad-mini) name="iPad Mini" ;;
-  *) echo "bp-browser: ignoring unknown --bp-device value" >&2 ;;
-esac
-
-if [ -n "$name" ]; then
-  exec playwright-mcp --config /opt/bp/pw-config.json "$@" "--device=$name"
+# The run's config: the persona's device, zoom, display settings and
+# eyesight (bp-pw-setup also records them for bp-replay --self). A browser
+# that is not the persona's would make every finding misleading, so a failed
+# setup stops here rather than starting a default browser.
+if ! node /opt/bp/bp-pw-setup.mjs --out=/tmp/bp-pw "--device=$device" "--assistive=$assistive" \
+    "--vision=$vision" "--display=$display" >>/tmp/bp-pw-setup.log 2>&1; then
+  echo "bp-browser: could not set up the persona's browser; see /tmp/bp-pw-setup.log" >&2
+  exit 1
 fi
-exec playwright-mcp --config /opt/bp/pw-config.json "$@"
+
+# The gate hides and refuses the tools the persona cannot use.
+exec node /opt/bp/bp-gate.mjs "--assistive=$assistive" -- playwright-mcp --config /tmp/bp-pw/pw-config.json "$@"

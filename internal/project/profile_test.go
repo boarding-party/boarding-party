@@ -8,9 +8,6 @@ import (
 	"testing"
 )
 
-var playwrightDevices = map[string]bool{"iPhone 15": true, "iPhone 15 Pro Max": true, "Pixel 7": true,
-	"Galaxy S24": true, "iPad (gen 11)": true, "iPad Mini": true}
-
 func TestProfileOptionValues(t *testing.T) {
 	re := regexp.MustCompile(`^[a-z0-9-]+$`)
 	for _, f := range ProfileFields {
@@ -27,30 +24,17 @@ func TestProfileOptionValues(t *testing.T) {
 	}
 }
 
-func TestDeviceLaunch(t *testing.T) {
-	var dev Field
-	for _, f := range ProfileFields {
-		if f.Key == "device" {
-			dev = f
-		}
+func TestBrowserSettingFields(t *testing.T) {
+	got := Profile{Vision: "deuteranopia", Display: "high-contrast"}.Labels()
+	if got["vision"] == "" || got["display"] == "" {
+		t.Fatalf("labels %v", got)
 	}
-	if len(dev.Options) == 0 {
-		t.Fatal("no device field")
+	g := Profile{Assistive: "zoom", Vision: "blurred", Display: "reduced-motion"}.Guidance()
+	if len(g) != 3 || !strings.Contains(g[0], "200 per cent") || !strings.Contains(g[1], "blurred") || !strings.Contains(g[2], "motion") {
+		t.Fatalf("guidance %v", g)
 	}
-	for _, o := range dev.Options {
-		pw, vp := DeviceLaunch(o.Value)
-		if (pw == "") == (vp == "") {
-			t.Errorf("%s: want exactly one of device/viewport, got %q %q", o.Value, pw, vp)
-		}
-		if pw != "" && !playwrightDevices[pw] {
-			t.Errorf("%s: unknown Playwright device %q", o.Value, pw)
-		}
-	}
-	if pw, vp := DeviceLaunch(""); pw != "" || vp != "1280x800" {
-		t.Errorf("default: %q %q", pw, vp)
-	}
-	if pw, _ := DeviceLaunch("ipad"); pw != "iPad (gen 11)" {
-		t.Errorf("ipad: %q", pw)
+	if _, err := ParseProfile(map[string]string{"vision": "tritanopia", "display": "dark"}); err != nil {
+		t.Fatal(err)
 	}
 }
 

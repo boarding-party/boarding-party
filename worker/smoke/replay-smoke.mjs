@@ -64,9 +64,9 @@ writeFileSync(missing, `export default async function journey({ page, bp }) {
   await bp.step('Open the shop', async () => { await page.goto('${base}/'); });
   await bp.step('Press pay', async () => { await page.getByRole('button', { name: 'Pay now' }).click({ timeout: 2000 }); });
 }`);
-function run(args) {
+function run(args, env = {}) {
   return new Promise((resolve) => {
-    const p = spawn('bp-replay', args, { stdio: ['ignore', 'pipe', 'inherit'] });
+    const p = spawn(process.env.BP_REPLAY || 'bp-replay', args, { stdio: ['ignore', 'pipe', 'inherit'], env: { ...process.env, ...env } });
     let out = '';
     p.stdout.on('data', (d) => { out += d; });
     p.on('close', (code) => {
@@ -89,6 +89,32 @@ r = await run(['--journey', missing, '--self', '--expect-fail-step', '2']);
 if (r.code !== 0 || r.res?.status !== 'failed' || r.res.step !== 2) fail('expect-fail-step 2: ' + r.out);
 r = await run(['--journey', missing, '--self', '--expect-fail-step', '1']);
 if (r.code === 0) fail('expect-fail-step 1 must not prove a failure at step 2');
+
+// The persona's settings: zoom lays the page out at 200%, reduced motion
+// reaches the page, and eyesight changes what screenshots show. Given on
+// the command line, or recorded by bp-browser for an AI run's self-replay.
+const looks = join(dir, 'looks.mjs');
+writeFileSync(looks, `export default async function journey({ page, bp }) {
+  await bp.step('Look at a red box', async () => {
+    await page.setContent('<body style="margin:0"><div style="width:100px;height:100px;background:rgb(255,0,0)"></div></body>');
+    const [w, dpr, reduced] = await page.evaluate(() => [innerWidth, devicePixelRatio, matchMedia('(prefers-reduced-motion: reduce)').matches]);
+    if (w !== 640 || dpr !== 2 || !reduced) throw new Error('width, pixel ratio, reduced motion: ' + [w, dpr, reduced]);
+    const px = await page.evaluate(async (b64) => {
+      const img = new Image(); img.src = 'data:image/png;base64,' + b64; await img.decode();
+      const c = document.createElement('canvas'); c.width = img.width; c.height = img.height;
+      const g = c.getContext('2d'); g.drawImage(img, 0, 0); return Array.from(g.getImageData(50, 50, 1, 1).data);
+    }, (await page.screenshot()).toString('base64'));
+    if (!(px[0] === px[1] && px[1] === px[2])) throw new Error('colour left with no colour vision: ' + px);
+  });
+}`);
+r = await run(['--journey', looks, '--self', '--assistive', 'zoom', '--display', 'reduced-motion', '--vision', 'achromatopsia']);
+if (r.code !== 0 || r.res?.status !== 'passed') fail('settings on the command line: ' + r.out);
+const recorded = join(dir, 'settings.json');
+writeFileSync(recorded, JSON.stringify({ device: 'desktop', assistive: 'zoom', vision: 'achromatopsia', display: 'reduced-motion' }));
+r = await run(['--journey', looks, '--self'], { BP_SETTINGS: recorded });
+if (r.code !== 0 || r.res?.status !== 'passed') fail('recorded settings: ' + r.out);
+r = await run(['--journey', looks, '--self', '--device', 'desktop'], { BP_SETTINGS: recorded });
+if (r.res?.status !== 'failed') fail('flags on the command line must win over recorded settings: ' + r.out);
 
 // Run mode: bp-replay spends its one-time claim for its URLs; the code
 // comes from the director; the result and evidence go back.

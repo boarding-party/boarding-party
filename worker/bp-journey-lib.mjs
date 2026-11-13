@@ -171,11 +171,3 @@ export function cleanError(msg) {
   return (cut >= 0 ? s.slice(0, cut) : s).trim().slice(0, 2000);
 }
 
-export const devices = {
-  'iphone-15': 'iPhone 15',
-  'iphone-15-pro-max': 'iPhone 15 Pro Max',
-  'pixel-7': 'Pixel 7',
-  'galaxy-s24': 'Galaxy S24',
-  ipad: 'iPad (gen 11)',
-  'ipad-mini': 'iPad Mini',
-};

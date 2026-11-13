@@ -85,9 +85,10 @@ linux/amd64 (local build was arm64; build the pushed image for the cluster's arc
 
 ## Live screen (`bp-browser`)
 
-The director launches Playwright MCP as `bp-browser --live-url=<url> [--files-url=<url>] [--bp-device=<key>] <playwright-mcp args>`.
-It starts `bp-screen` once per pod (pidfile `/tmp/bp-screen.pid`, log `/tmp/bp-screen.log`), then `exec`s
-`playwright-mcp --config /opt/bp/pw-config.json ...`. The config makes Chromium listen for CDP on
+The director launches Playwright MCP as `bp-browser --live-url=<url> [--files-url=<url>] [SETTINGS] <playwright-mcp args>`.
+It starts `bp-screen` once per pod (pidfile `/tmp/bp-screen.pid`, log `/tmp/bp-screen.log`), writes the run's
+config with `bp-pw-setup`, then `exec`s `bp-gate -- playwright-mcp --config /tmp/bp-pw/pw-config.json ...`.
+The base config (`/opt/bp/pw-config.json`) makes Chromium listen for CDP on
 `127.0.0.1:9222` (pod-local only). `bp-screen` attaches to the newest page, runs a CDP screencast
 (JPEG, quality 60, max 1280) and PUTs frames to the live URL: every 250 ms while the director reports
 watchers (`X-Bp-Watchers` > 0), otherwise every 5 s, one request in flight. A 404 or 410 means the run is over
@@ -97,21 +98,38 @@ and it stops. The agent never sees frames. Nothing is written to stdout (MCP std
 downloads every file it lists into `/workspace/files/` (30 s in total, best effort: failures go to
 `/tmp/bp-files.log` and never stop the browser from starting).
 
-`--bp-device` keys: `iphone-15`, `iphone-15-pro-max`, `pixel-7`, `galaxy-s24`, `ipad`, `ipad-mini`
-(mapped to Playwright `--device`); unknown values are ignored.
+SETTINGS are the persona's device and accessibility settings, as stable keys from the director's profile
+catalogue. `bp-a11y.mjs` turns them into browser settings, for AI runs and replays alike:
 
-Smoke test: `docker run --rm bp-worker:dev node /opt/bp/smoke/screen-smoke.mjs` (expects `ok N frames`).
+| Flag | Keys | Browser |
+|---|---|---|
+| `--bp-device` | `desktop`, `desktop-large`, `laptop-small`; `iphone-15`, `iphone-15-pro-max`, `pixel-7`, `galaxy-s24`, `ipad`, `ipad-mini` | viewport, or the Playwright device; unset or unknown is a 1280×800 desktop |
+| `--bp-assistive` | `zoom` | half the viewport at twice the pixel density: the page lays out as at 200% zoom |
+| | `keyboard-only` | `bp-gate` removes click, hover, drag, drop, select, fill, element typing and JS evaluation, and adds `browser_type_focused` (types into the focused element) |
+| | `screen-reader` | `--image-responses=omit`: the agent works from the accessibility snapshot. Screenshots are still saved |
+| `--bp-vision` | `blurred`, `low-contrast`, `deuteranopia`, `protanopia`, `tritanopia`, `achromatopsia` | Chrome's vision deficiency emulation on every tab (an init page) |
+| `--bp-display` | `reduced-motion`, `high-contrast`, `dark` | `reducedMotion`, `forcedColors` with `contrast: more`, `colorScheme: dark` |
+
+`bp-gate` refuses `browser_resize` and `browser_emulate_media` to every persona: the browser is set to the
+persona, and the agent may not undo it. A refused call returns an error result that says what to use instead.
+`bp-pw-setup` records the settings in `/tmp/bp-pw/settings.json` for `bp-replay --self`. If it fails, `bp-browser`
+exits instead of starting a browser that is not the persona's.
+
+Smoke tests: `docker run --rm bp-worker:dev node /opt/bp/smoke/screen-smoke.mjs` (expects `ok N frames`),
+`a11y-smoke.mjs` (settings, gate, config) and `browser-smoke.mjs` (bp-browser end to end, needs a writable
+`/workspace`).
 
 ## Journeys (`bp-replay`)
 
 `bp-replay` runs a recorded journey (an ES module exporting `async function journey({ page, data, bp, expect })`)
 with Playwright and no model. Two modes:
 
-- `bp-replay --journey <file> --self [--seed N] [--expect-fail-step N] [--device KEY]`: an AI run proves the
-  journey it wrote. A fresh browser (no CDP port, so it never clashes with the run's own browser), one JSON line on
+- `bp-replay --journey <file> --self [--seed N] [--expect-fail-step N] [SETTINGS]`: an AI run proves the
+  journey it wrote. With no SETTINGS (`--device`, `--assistive`, `--vision`, `--display`) it uses the persona's,
+  from `/tmp/bp-pw/settings.json`. A fresh browser (no CDP port, so it never clashes with the run's own browser), one JSON line on
   stdout (`{"status":"passed"|"failed","step","stepName","error","seed","inputs","durationMs"}`), exit 0 only when
   the result proves the revision: passed, or failed exactly at `--expect-fail-step`.
-- `bp-replay --claim-url URL [--seed N] [--device KEY]`: a replay run (a tiny `command` session). POSTs the
+- `bp-replay --claim-url URL [--seed N] [SETTINGS]`: a replay run (a tiny `command` session). POSTs the
   one-time claim URL for the run's URLs, fetches the code, restores the persona's browser profile, starts
   `bp-screen` and `bp-console` (Chromium gets the `pw-config.json` flags, CDP on 9222), runs, uploads `trace.zip`,
   `replay-N.webm` and `failed-step.png`, saves the profile back and PUTs the result to the report URL.

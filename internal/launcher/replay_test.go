@@ -23,7 +23,7 @@ func replayRun() store.Run {
 
 func replayProject() project.Project {
 	return project.Project{NodePool: "pool=runs", Roles: []project.Role{{Name: "buyer",
-		Personas: []project.Persona{{Name: "ann", Profile: project.Profile{Device: "iphone-15"}}},
+		Personas: []project.Persona{{Name: "ann", Profile: project.Profile{Device: "iphone-15", Assistive: "zoom", Vision: "protanopia", Display: "reduced-motion"}}},
 		Stories:  []project.Story{{Name: "checkout", Goal: "g"}}}}}
 }
 
@@ -41,7 +41,8 @@ func TestLauncherStartsReplayAsCommandSession(t *testing.T) {
 		t.Fatalf("command %v", s.Command)
 	}
 	d := tn.DirectorURL
-	for _, want := range []string{"--claim-url=" + d + "/claim/claim5", "--seed=77", "--device=iphone-15"} {
+	for _, want := range []string{"--claim-url=" + d + "/claim/claim5", "--seed=77", "--device=iphone-15", "--assistive=zoom",
+		"--vision=protanopia", "--display=reduced-motion"} {
 		if !slices.Contains(s.Command, want) {
 			t.Errorf("command %v lacks %s", s.Command, want)
 		}

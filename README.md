@@ -255,7 +255,10 @@ has the full check: a successful run, a run that gets stuck on purpose, and a
 watchdog timeout.
 
 A persona can carry a `profile`: a few choices that shape how the agent
-behaves. All are optional, and each value is a fixed key:
+behaves. All are optional, and each value is a fixed key. Device, assistive
+technology, eyesight and display set up the browser itself, so a finding from
+a keyboard-only or colour-blind persona comes from a browser that really works
+that way. The rest guide how the agent acts.
 
 | Field | Values |
 |---|---|
@@ -264,7 +267,9 @@ behaves. All are optional, and each value is a fixed key:
 | `techLevel` | `new`, `everyday`, `confident`, `expert` |
 | `patience` | `patient`, `normal`, `impatient` |
 | `reading` | `careful`, `skims`, `struggles`, `second-language` |
-| `assistive` | `none`, `screen-reader`, `keyboard-only`, `zoom` |
+| `assistive` | `none`, `screen-reader` (the agent gets no screenshots, only the accessibility snapshot), `keyboard-only` (no clicking: Tab, arrow keys, Enter and typing into the focused field), `zoom` (the page renders at 200%) |
+| `vision` | `blurred`, `low-contrast`, `deuteranopia`, `protanopia`, `tritanopia`, `achromatopsia`. Chrome draws the page as the persona sees it. |
+| `display` | `reduced-motion`, `high-contrast`, `dark`. The system setting the site reads. |
 
 ```yaml
 personas:

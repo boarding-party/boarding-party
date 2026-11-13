@@ -610,7 +610,7 @@ function ProfileGrid({ profile, fields, onChange }) {
             </select></label>`;
         })}
       </div>
-      <span class="hint">The agent behaves like this person. Device sets the browser's screen size when the run starts.</span>
+      <span class="hint">The agent behaves like this person. Device, assistive technology, eyesight and display settings also set up the browser itself, so the agent cannot ignore them.</span>
     </div>`;
 }
 

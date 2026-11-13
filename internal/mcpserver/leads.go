@@ -307,7 +307,7 @@ type storyArgs struct {
 type childArgs struct {
 	Name    string            `json:"name" jsonschema:"the persona's name, such as Priya Shah"`
 	Traits  []string          `json:"traits,omitempty" jsonschema:"short traits, such as hurried or careful"`
-	Profile map[string]string `json:"profile,omitempty" jsonschema:"device, age, techLevel, patience, reading, assistive; each value as shown on the hand-made personas; a wrong value is refused with the allowed list"`
+	Profile map[string]string `json:"profile,omitempty" jsonschema:"device, age, techLevel, patience, reading, assistive, vision, display; each value as shown on the hand-made personas; a wrong value is refused with the allowed list"`
 	Stories []storyArgs       `json:"stories,omitempty" jsonschema:"one to five stories"`
 	Reason  string            `json:"reason" jsonschema:"why, in one short sentence; shown to the owner"`
 }

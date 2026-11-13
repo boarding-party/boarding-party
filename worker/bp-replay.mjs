@@ -1,17 +1,23 @@
 #!/usr/bin/env node
 // bp-replay runs a recorded journey with Playwright and no model.
 //
-//   bp-replay --journey <file> --self [--seed N] [--expect-fail-step N] [--device KEY]
+//   bp-replay --journey <file> --self [--seed N] [--expect-fail-step N] [SETTINGS]
 //     An AI run proving its journey: prints one JSON result line; exits 0
 //     only when the result proves the revision (passed, stopped at its first
-//     bp.waitFor, or failed exactly at --expect-fail-step).
+//     bp.waitFor, or failed exactly at --expect-fail-step). With no SETTINGS
+//     it uses the ones bp-browser recorded for the run's persona, so the
+//     journey renders as the scheduled replay will.
 //
-//   bp-replay --claim-url URL [--seed N] [--device KEY]
+//   bp-replay --claim-url URL [--seed N] [SETTINGS]
 //     A replay run: spends its one-time claim for the run's URLs, fetches
 //     the code (and, after a wait, where to resume), restores the persona's
 //     browser, runs, uploads the evidence, saves the browser back and PUTs
 //     the result. A bp.waitFor past the resume point ends it with status
 //     waiting.
+//
+// SETTINGS are the persona's device and accessibility settings, stable keys
+// from the director: --device KEY --assistive KEY --vision KEY --display KEY
+// (bp-a11y.mjs turns them into browser settings).
 //
 // The run's URLs carry its token, and everything in the pod, the journey
 // too, can read every process's command line and environment. So the pod's
@@ -26,6 +32,7 @@ import { join } from 'node:path';
 import { randomInt } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { edgeReplay } from './bp-data.mjs';
+import { contextOptions, visionType, readSettings } from './bp-a11y.mjs';
 
 const log = (...a) => console.error('bp-replay:', ...a);
 const self = fileURLToPath(import.meta.url);
@@ -45,6 +52,9 @@ function parse(argv) {
 }
 
 const opts = parse(process.argv.slice(2));
+const LOOK = ['device', 'assistive', 'vision', 'display'];
+// look is the persona's settings given on the command line.
+const look = Object.fromEntries(LOOK.filter((k) => opts[k]).map((k) => [k, opts[k]]));
 if (opts.child) {
   await child();
 } else if (opts.self) {
@@ -65,11 +75,11 @@ function seedOf(v) {
 
 // runChild runs the journey in a child process and returns its result. The
 // child gets only paths and plain options: no URL, no token.
-function runChild({ file, seed, device, outDir, profile, saveProfile, cdp, resume, today }) {
+function runChild({ file, seed, settings = {}, outDir, profile, saveProfile, cdp, resume, today }) {
   const args = [self, '--child', '--file', file, '--seed', String(seed), '--out', outDir];
   if (resume) args.push('--resume', resume);
   if (today) args.push('--today', today);
-  if (device) args.push('--device', device);
+  for (const k of LOOK) if (settings[k]) args.push('--' + k, settings[k]);
   if (profile) args.push('--profile', profile);
   if (saveProfile) args.push('--save-profile', saveProfile);
   if (cdp) args.push('--cdp', '1');
@@ -96,7 +106,8 @@ async function selfMode() {
   let seed = seedOf(opts.seed);
   for (let i = 0; opts.seed === undefined && i < 100 && edgeReplay(seed); i++) seed = seedOf(undefined);
   const outDir = mkdtempSync(join(tmpdir(), 'bp-self-'));
-  const res = await runChild({ file: opts.journey, seed, device: opts.device, outDir });
+  const settings = Object.keys(look).length ? look : readSettings(process.env.BP_SETTINGS || '/tmp/bp-pw/settings.json');
+  const res = await runChild({ file: opts.journey, seed, settings, outDir });
   process.stdout.write(JSON.stringify(res) + '\n');
   const want = opts['expect-fail-step'] ? Number(opts['expect-fail-step']) : 0;
   const proven = want ? res.status === 'failed' && res.step === want : res.status === 'passed' || res.status === 'waiting';
@@ -168,7 +179,7 @@ async function runMode() {
     const saveProfile = join(outDir, 'profile-out.json');
     // The day the replay's chain began: a resumed replay draws the dates it drew before.
     const today = /^\d{4}-\d{2}-\d{2}$/.test(fetched.today || '') ? fetched.today : '';
-    res = await runChild({ file, seed, device: opts.device, outDir, profile, saveProfile, cdp: true, resume, today });
+    res = await runChild({ file, seed, settings: look, outDir, profile, saveProfile, cdp: true, resume, today });
     await uploadEvidence(outDir, urls.upload);
     if (existsSync(saveProfile)) {
       await put(urls.profile, readFileSync(saveProfile), 'application/json').catch((e) => log('profile not saved:', e.message));
@@ -238,15 +249,19 @@ async function child() {
     const mod = await import(opts.file);
     if (typeof mod.default !== 'function') throw new lib.StepFailed(0, '', new Error('the journey must export a default async function'));
     browser = await chromium.launch(launch);
-    const name = opts.device ? lib.devices[opts.device] : '';
-    if (opts.device && !name) log('ignoring unknown --device value');
     ctx = await browser.newContext({
-      ...(name ? devices[name] : {}),
+      ...contextOptions(look, devices),
       ...(opts.profile ? { storageState: opts.profile } : {}),
       recordVideo: { dir: join(opts.out, 'video') },
     });
+    // Every tab, popups too, as the persona sees it.
+    const vision = visionType(look.vision);
+    const see = (pg) => ctx.newCDPSession(pg).then((s) => s.send('Emulation.setEmulatedVisionDeficiency', { type: vision }))
+      .catch((e) => log('could not apply the eyesight setting:', e.message));
+    if (vision) ctx.on('page', see);
     await ctx.tracing.start({ screenshots: true, snapshots: true });
     page = await ctx.newPage();
+    if (vision) await see(page); // before the journey's first step
     page.setDefaultTimeout(15000);
     humanise(page);
     const resume = opts.resume ? JSON.parse(readFileSync(opts.resume, 'utf8')) : undefined;

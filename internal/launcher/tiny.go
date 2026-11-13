@@ -302,8 +302,9 @@ func podStage(p corev1.Pod) (string, string) {
 }
 
 // browserArgs builds the bp-browser arguments. tiny's CRD rejects MCP args
-// with whitespace, quotes or backslashes, so a phone or tablet goes as a
-// stable key (--bp-device) that the worker maps to a Playwright device name.
+// with whitespace, quotes or backslashes, so the persona's device and
+// accessibility settings go as stable keys (--bp-device, --bp-assistive,
+// --bp-vision, --bp-display) that the worker turns into browser settings.
 func (t *Tiny) browserArgs(r store.Run, p project.Project) []string {
 	args := []string{"--live-url=" + t.DirectorURL + "/live/" + r.Token,
 		"--files-url=" + t.DirectorURL + "/files/" + r.Token + "/",
@@ -311,13 +312,7 @@ func (t *Tiny) browserArgs(r store.Run, p project.Project) []string {
 		"--profile-url=" + t.DirectorURL + "/profile/" + r.Token,
 		"--console-url=" + t.DirectorURL + "/console/" + r.Token,
 		"--headless", "--isolated", "--no-sandbox", "--browser=chromium", "--output-dir=/workspace/out"}
-	device := personaDevice(r, p)
-	if pd, viewport := project.DeviceLaunch(device); pd != "" {
-		args = append(args, "--bp-device="+device)
-	} else {
-		args = append(args, "--viewport-size="+viewport)
-	}
-	return append(args, "--caps=devtools,storage")
+	return append(append(args, settingArgs("--bp-", personaProfile(r, p))...), "--caps=devtools,storage")
 }
 
 var errOldTinyReplay = errors.New("tiny on this cluster is older than v0.15 and cannot run replays; update it with tiny init, then start the replay again")
@@ -330,23 +325,32 @@ func (t *Tiny) replayCommand(r store.Run, p project.Project) []string {
 	cmd := []string{"bp-replay",
 		"--claim-url=" + t.DirectorURL + "/claim/" + r.Claim,
 		"--seed=" + strconv.FormatInt(r.Seed, 10)}
-	device := personaDevice(r, p)
-	if pd, _ := project.DeviceLaunch(device); pd != "" {
-		cmd = append(cmd, "--device="+device)
-	}
-	return cmd
+	return append(cmd, settingArgs("--", personaProfile(r, p))...)
 }
 
-func personaDevice(r store.Run, p project.Project) string {
+// settingArgs are the persona's browser settings as --<prefix><key>=<value>
+// flags, in a stable order.
+func settingArgs(prefix string, pr project.Profile) []string {
+	set := pr.BrowserSettings()
+	var out []string
+	for _, k := range []string{"device", "assistive", "vision", "display"} {
+		if v, ok := set[k]; ok {
+			out = append(out, prefix+k+"="+v)
+		}
+	}
+	return out
+}
+
+func personaProfile(r store.Run, p project.Project) project.Profile {
 	for _, role := range p.Roles {
 		if role.Name != r.Role {
 			continue
 		}
 		for _, pe := range role.Personas {
 			if pe.Name == r.Persona {
-				return pe.Profile.Device
+				return pe.Profile
 			}
 		}
 	}
-	return ""
+	return project.Profile{}
 }

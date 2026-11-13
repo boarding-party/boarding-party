@@ -15,6 +15,8 @@ type Profile struct {
 	Patience  string `json:"patience,omitempty"`
 	Reading   string `json:"reading,omitempty"`
 	Assistive string `json:"assistive,omitempty"`
+	Vision    string `json:"vision,omitempty"`
+	Display   string `json:"display,omitempty"`
 }
 
 // Option is one choice of a profile field. Guide is the sentence the agent
@@ -64,16 +66,29 @@ var ProfileFields = []Field{
 		{"struggles", "Finds long text hard", "You find long text hard, so report any wording or layout that is dense or confusing, and avoid reading long passages."},
 		{"second-language", "English is a second language", "English is your second language: idioms and complex sentences confuse you, so report any wording you would not understand."},
 	}},
-	{Key: "assistive", Label: "Assistive technology", Hint: "Accessibility needs the persona browses with.", Options: []Option{
+	{Key: "assistive", Label: "Assistive technology", Hint: "The browser enforces it: a screen reader user sees no screenshots, a keyboard user cannot click, and zoom renders the page at 200%.", Options: []Option{
 		{"none", "None", "You use no assistive technology."},
-		{"screen-reader", "Screen reader", "Navigate only by the accessibility snapshot; never rely on how the page looks, and report anything a screen reader would miss."},
-		{"keyboard-only", "Keyboard only", "Use only the keyboard (Tab, Shift+Tab, Enter, Space, arrow keys); never click, and report anything you cannot reach or see focus on."},
-		{"zoom", "Large text / zoom", "Browse as someone who has enlarged text to 200 per cent; report anything that would be cut off, overlap or be too small to read at that size."},
+		{"screen-reader", "Screen reader", "You use a screen reader: you never see the page, only its accessibility snapshot, so judge the page by what the snapshot tells you and report anything a screen reader user would miss or be misled by."},
+		{"keyboard-only", "Keyboard only", "You use only the keyboard and the browser gives you no clicking: move with browser_press_key (Tab, Shift+Tab, arrow keys, Enter, Space) and type into the focused field with browser_type_focused. Report anything you cannot reach or operate, and anywhere you cannot see where focus is."},
+		{"zoom", "Large text / zoom", "Your browser is zoomed to 200 per cent, so the page you see is laid out as it really is at that size; report anything cut off, overlapping, hidden or too small to read."},
+	}},
+	{Key: "vision", Label: "Eyesight", Hint: "The browser draws the page as the persona sees it, in screenshots and on the live screen.", Options: []Option{
+		{"blurred", "Blurred vision", "Your eyesight is blurred and the page you see is blurred as it would be for you: report text you cannot read and controls you cannot make out, judging by the screenshots, not the snapshot."},
+		{"low-contrast", "Low contrast sensitivity", "You struggle to tell apart colours of similar brightness and the page you see shows it: report text, borders and controls that fade into their background."},
+		{"deuteranopia", "Red-green colour blindness (deuteranopia)", "You have red-green colour blindness and the page you see shows the colours as you see them: report anything that relies on red or green alone, such as errors, statuses or required fields."},
+		{"protanopia", "Red colour blindness (protanopia)", "You have protanopia, so reds look dark and dull, and the page you see shows the colours as you see them: report anything that relies on colour alone."},
+		{"tritanopia", "Blue-yellow colour blindness (tritanopia)", "You have blue-yellow colour blindness and the page you see shows the colours as you see them: report anything that relies on blue or yellow alone."},
+		{"achromatopsia", "No colour vision (achromatopsia)", "You see no colour at all and the page you see is in greys: report anything you can only tell apart by its colour."},
+	}},
+	{Key: "display", Label: "Display settings", Hint: "System settings the browser applies, which the site can read.", Options: []Option{
+		{"reduced-motion", "Reduce motion", "Your device asks sites to reduce motion: report animations that still move, and anything you must wait for an animation to reach."},
+		{"high-contrast", "High contrast", "Your device uses a high-contrast theme that replaces the site's colours: report anything that disappears, loses its outline or cannot be told apart."},
+		{"dark", "Dark mode", "Your device is set to dark mode: report text, images or controls that are hard to see in it."},
 	}},
 }
 
 func (p Profile) values() []string {
-	return []string{p.Device, p.Age, p.TechLevel, p.Patience, p.Reading, p.Assistive}
+	return []string{p.Device, p.Age, p.TechLevel, p.Patience, p.Reading, p.Assistive, p.Vision, p.Display}
 }
 
 func (f Field) option(value string) (Option, bool) {
@@ -113,7 +128,7 @@ func (p Profile) Labels() map[string]string {
 func ParseProfile(m map[string]string) (Profile, error) {
 	var p Profile
 	slots := map[string]*string{"device": &p.Device, "age": &p.Age, "techLevel": &p.TechLevel,
-		"patience": &p.Patience, "reading": &p.Reading, "assistive": &p.Assistive}
+		"patience": &p.Patience, "reading": &p.Reading, "assistive": &p.Assistive, "vision": &p.Vision, "display": &p.Display}
 	for k, v := range m {
 		slot, ok := slots[k]
 		if !ok {
@@ -160,35 +175,16 @@ type unknownValueError struct{ key, value string }
 
 func (e *unknownValueError) Error() string { return "unknown " + e.key + " " + `"` + e.value + `"` }
 
-const defaultViewport = "1280x800"
-
-var viewports = map[string]string{
-	"desktop":       "1280x800",
-	"desktop-large": "1920x1080",
-	"laptop-small":  "1366x768",
-}
-
-var playwrightDeviceNames = map[string]string{
-	"iphone-15":         "iPhone 15",
-	"iphone-15-pro-max": "iPhone 15 Pro Max",
-	"pixel-7":           "Pixel 7",
-	"galaxy-s24":        "Galaxy S24",
-	"ipad":              "iPad (gen 11)",
-	"ipad-mini":         "iPad Mini",
-}
-
-// DeviceLaunch maps a device value to browser launch settings: a Playwright
-// device name for phones and tablets, or a WIDTHxHEIGHT viewport for desktops.
-// Exactly one result is non-empty; unset or unknown values get the default
-// desktop viewport.
-func DeviceLaunch(device string) (playwrightDevice, viewport string) {
-	if d, ok := playwrightDeviceNames[device]; ok {
-		return d, ""
+// BrowserSettings are the set fields the worker turns into browser settings
+// (worker/bp-a11y.mjs), by profile key; "none" is left out.
+func (p Profile) BrowserSettings() map[string]string {
+	out := map[string]string{}
+	for k, v := range map[string]string{"device": p.Device, "assistive": p.Assistive, "vision": p.Vision, "display": p.Display} {
+		if v != "" && v != "none" {
+			out[k] = v
+		}
 	}
-	if v, ok := viewports[device]; ok {
-		return "", v
-	}
-	return "", defaultViewport
+	return out
 }
 
 // Validate checks every set value against its field's options.

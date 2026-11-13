@@ -40,7 +40,7 @@ RUN playwright-mcp install-browser chrome-for-testing \
 
 # Live-screen streaming: bp-browser launches bp-screen and then Playwright MCP.
 # /opt/bp is also mounted over by the smoke test (docker run -v worker:/opt/bp).
-COPY bp-screen.mjs bp-console.mjs bp-usage.mjs bp-null-mcp.mjs bp-replay.mjs bp-journey-lib.mjs bp-data.mjs pw-config.json /opt/bp/
+COPY bp-screen.mjs bp-console.mjs bp-usage.mjs bp-null-mcp.mjs bp-replay.mjs bp-journey-lib.mjs bp-data.mjs bp-a11y.mjs bp-gate.mjs bp-pw-setup.mjs pw-config.json /opt/bp/
 COPY smoke/ /opt/bp/smoke/
 COPY bp-browser /opt/bp/bp-browser
 COPY bp-browser /usr/local/bin/bp-browser

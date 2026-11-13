@@ -101,7 +101,7 @@ func TestStartCreatesSessionWithBothMCPServers(t *testing.T) {
 		t.Errorf("pw = %v", pw)
 	}
 	want := []string{"--live-url=http://bp-director.bp.svc:8080/live/tok123", "--files-url=http://bp-director.bp.svc:8080/files/tok123/", "--usage-url=http://bp-director.bp.svc:8080/usage/tok123", "--profile-url=http://bp-director.bp.svc:8080/profile/tok123", "--console-url=http://bp-director.bp.svc:8080/console/tok123", "--headless", "--isolated", "--no-sandbox", "--browser=chromium",
-		"--output-dir=/workspace/out", "--viewport-size=1280x800", "--caps=devtools,storage"}
+		"--output-dir=/workspace/out", "--caps=devtools,storage"}
 	if strings.Join(pw.Args, " ") != strings.Join(want, " ") {
 		t.Errorf("args = %v", pw.Args)
 	}
@@ -512,17 +512,17 @@ func TestPhaseFailsUnschedulablePodAfterGrace(t *testing.T) {
 	}
 }
 
-func deviceProject(device string) project.Project {
+func profileProject(pr project.Profile) project.Project {
 	return project.Project{Roles: []project.Role{{Name: "visitor", Personas: []project.Persona{
-		{Name: "ann", Profile: project.Profile{Device: device}},
+		{Name: "ann", Profile: pr},
 	}}}}
 }
 
-func pwArgs(t *testing.T, device string) []string {
+func pwArgs(t *testing.T, pr project.Profile) []string {
 	t.Helper()
 	tn := newTiny()
 	r := store.Run{ID: "eeeeeeee11", Token: "tk", Role: "visitor", Persona: "ann"}
-	name, err := tn.Start(context.Background(), r, deviceProject(device))
+	name, err := tn.Start(context.Background(), r, profileProject(pr))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -538,8 +538,8 @@ func pwArgs(t *testing.T, device string) []string {
 	return pw.Args
 }
 
-func TestStartLaunchesPersonaDevice(t *testing.T) {
-	args := strings.Join(pwArgs(t, "iphone-15"), " ")
+func TestStartLaunchesPersonaSettings(t *testing.T) {
+	args := strings.Join(pwArgs(t, project.Profile{Device: "iphone-15"}), " ")
 	if !strings.Contains(args, "--bp-device=iphone-15") || strings.Contains(args, "--viewport-size") {
 		t.Errorf("phone args = %s", args)
 	}
@@ -548,34 +548,47 @@ func TestStartLaunchesPersonaDevice(t *testing.T) {
 			t.Errorf("missing %s in %s", f, args)
 		}
 	}
-	args = strings.Join(pwArgs(t, "desktop-large"), " ")
-	if !strings.Contains(args, "--viewport-size=1920x1080") || strings.Contains(args, "--bp-device") {
+	if args = strings.Join(pwArgs(t, project.Profile{Device: "desktop-large"}), " "); !strings.Contains(args, "--bp-device=desktop-large") {
 		t.Errorf("desktop args = %s", args)
 	}
-	args = strings.Join(pwArgs(t, ""), " ")
-	if !strings.Contains(args, "--viewport-size=1280x800") || strings.Contains(args, "--bp-device") {
+	if args = strings.Join(pwArgs(t, project.Profile{}), " "); strings.Contains(args, "--bp-") || strings.Contains(args, "--viewport-size") {
 		t.Errorf("no-profile args = %s", args)
+	}
+	args = strings.Join(pwArgs(t, project.Profile{Assistive: "keyboard-only", Vision: "blurred", Display: "dark", Age: "65-plus"}), " ")
+	for _, f := range []string{"--bp-assistive=keyboard-only", "--bp-vision=blurred", "--bp-display=dark"} {
+		if !strings.Contains(args, f) {
+			t.Errorf("missing %s in %s", f, args)
+		}
+	}
+	if strings.Contains(args, "65") {
+		t.Errorf("age is role-play, not a browser setting: %s", args)
+	}
+	if args = strings.Join(pwArgs(t, project.Profile{Assistive: "none"}), " "); strings.Contains(args, "--bp-assistive") {
+		t.Errorf("no assistive technology still passed: %s", args)
 	}
 }
 
-func TestWorkerDeviceTableMatches(t *testing.T) {
-	b, err := os.ReadFile("../../worker/bp-browser")
+// The worker turns every browser setting key the catalogue offers into
+// browser settings (worker/bp-a11y.mjs); a key it does not know would
+// silently give the persona a default browser.
+func TestWorkerKnowsEveryBrowserSetting(t *testing.T) {
+	b, err := os.ReadFile("../../worker/bp-a11y.mjs")
 	if err != nil {
 		t.Fatal(err)
 	}
-	script := string(b)
+	js := string(b)
 	for _, f := range project.ProfileFields {
-		if f.Key != "device" {
+		switch f.Key {
+		case "device", "assistive", "vision", "display":
+		default:
 			continue
 		}
 		for _, o := range f.Options {
-			pd, _ := project.DeviceLaunch(o.Value)
-			if pd == "" {
+			if o.Value == "none" {
 				continue
 			}
-			want := o.Value + `) name="` + pd + `" ;;`
-			if !strings.Contains(script, want) {
-				t.Errorf("worker/bp-browser lacks %q", want)
+			if !regexp.MustCompile(`(?m)(^|[\s{,'])` + regexp.QuoteMeta(o.Value) + `'?\s*[:)]|'` + regexp.QuoteMeta(o.Value) + `'`).MatchString(js) {
+				t.Errorf("worker/bp-a11y.mjs does not know %s %q", f.Key, o.Value)
 			}
 		}
 	}
