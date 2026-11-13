@@ -338,3 +338,62 @@ func TestOldReplaysCountAsFollowed(t *testing.T) {
 		t.Fatalf("old replay unfollowed: %+v %v", un, err)
 	}
 }
+
+func addBugReport(t *testing.T, s *Store, id string) {
+	t.Helper()
+	if err := s.AddBug(Bug{ID: id, RunID: "run-" + id, Summary: "broken " + id, Created: t0}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestBugRevisionLinksItsReport(t *testing.T) {
+	s := open(t)
+	addBugReport(t, s, "b1")
+	addRev(t, s, RevisionFull, "a", t0)
+	r := Revision{Kind: RevisionBug, Code: "b", Reason: "bug", RunID: "run-b", BugID: "b1", BugStep: 3, Created: t0}
+	j, rev, err := s.AddRevision("megan", "invoice", r, Decision{RunID: "run-b", Kind: "bug revision recorded", Actor: "model", Created: t0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := s.Report("b1")
+	if err != nil || b.JourneyID != j.ID || b.JourneyRev != rev.N || b.JourneyStep != 3 {
+		t.Fatalf("report %+v %v", b, err)
+	}
+	reps, err := s.IssueReports(b.IssueID)
+	if err != nil || len(reps) != 1 || reps[0].JourneyID != j.ID || reps[0].JourneyRev != 2 || reps[0].JourneyStep != 3 {
+		t.Fatalf("issue reports %+v %v", reps, err)
+	}
+}
+
+func TestCopilotBugDecisionLinksReport(t *testing.T) {
+	s := open(t)
+	addBugReport(t, s, "b2")
+	j, _ := addRev(t, s, RevisionFull, "a", t0)
+	addRev(t, s, RevisionFull, "c", t0.Add(time.Minute))
+	err := s.AddDecision(Decision{JourneyID: j.ID, RunID: "cop", Kind: "bug", Actor: "model", Created: t0, Resolves: true, BlockStep: 4, BlockBug: "b2"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := s.Report("b2")
+	if err != nil || b.JourneyID != j.ID || b.JourneyRev != 2 || b.JourneyStep != 4 {
+		t.Fatalf("report %+v %v", b, err)
+	}
+}
+
+func TestBugLinkFirstWins(t *testing.T) {
+	s := open(t)
+	addBugReport(t, s, "b3")
+	addRev(t, s, RevisionFull, "a", t0)
+	r := Revision{Kind: RevisionBug, Code: "b", RunID: "run-b", BugID: "b3", BugStep: 2, Created: t0}
+	j, _, err := s.AddRevision("megan", "invoice", r, Decision{RunID: "run-b", Kind: "bug revision recorded", Actor: "model", Created: t0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AddDecision(Decision{JourneyID: j.ID, Kind: "bug", Actor: "model", Created: t0, Resolves: true, BlockStep: 5, BlockBug: "b3"}); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := s.Report("b3")
+	if b.JourneyRev != 2 || b.JourneyStep != 2 {
+		t.Fatalf("the second link replaced the first: %+v", b)
+	}
+}

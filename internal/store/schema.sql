@@ -47,7 +47,10 @@ CREATE TABLE IF NOT EXISTS bugs (
   severity TEXT NOT NULL DEFAULT '',
   note     TEXT NOT NULL DEFAULT '',
   created  INTEGER NOT NULL DEFAULT 0,
-  issue_id TEXT NOT NULL DEFAULT ''
+  issue_id TEXT NOT NULL DEFAULT '',
+  journey_id   TEXT NOT NULL DEFAULT '',
+  journey_rev  INTEGER NOT NULL DEFAULT 0,
+  journey_step INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS bugs_run ON bugs(run_id);
 -- An issue is one problem on the site; each bugs row (a report) belongs to

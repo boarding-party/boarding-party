@@ -47,12 +47,12 @@ type Report struct {
 	Story   string `json:"story"`
 }
 
-const bugCols = `id, run_id, summary, step, evidence, severity, note, created, issue_id`
+const bugCols = `id, run_id, summary, step, evidence, severity, note, created, issue_id, journey_id, journey_rev, journey_step`
 
 func scanBug(sc interface{ Scan(...any) error }) (Bug, error) {
 	var b Bug
 	var c int64
-	if err := sc.Scan(&b.ID, &b.RunID, &b.Summary, &b.Step, &b.Evidence, &b.Severity, &b.Note, &c, &b.IssueID); err != nil {
+	if err := sc.Scan(&b.ID, &b.RunID, &b.Summary, &b.Step, &b.Evidence, &b.Severity, &b.Note, &c, &b.IssueID, &b.JourneyID, &b.JourneyRev, &b.JourneyStep); err != nil {
 		return Bug{}, err
 	}
 	b.Created = fromTS(c)
@@ -97,8 +97,8 @@ func insertBug(tx *sql.Tx, b Bug) error {
 		}
 		b.IssueID = id
 	}
-	_, err := tx.Exec(`INSERT INTO bugs(`+bugCols+`) VALUES(?,?,?,?,?,?,?,?,?)`,
-		b.ID, b.RunID, b.Summary, b.Step, b.Evidence, b.Severity, b.Note, at, b.IssueID)
+	_, err := tx.Exec(`INSERT INTO bugs(`+bugCols+`) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`,
+		b.ID, b.RunID, b.Summary, b.Step, b.Evidence, b.Severity, b.Note, at, b.IssueID, b.JourneyID, b.JourneyRev, b.JourneyStep)
 	return err
 }
 
@@ -157,7 +157,7 @@ func (s *Store) Issue(id string) (Issue, error) {
 // IssueReports returns an issue's reports with the run that made each, newest first.
 func (s *Store) IssueReports(id string) ([]Report, error) {
 	rows, err := s.db.Query(`SELECT b.id, b.run_id, b.summary, b.step, b.evidence, b.severity, b.note, b.created, b.issue_id,
-		COALESCE(r.persona, ''), COALESCE(r.story, '') FROM bugs b LEFT JOIN runs r ON r.id = b.run_id
+		b.journey_id, b.journey_rev, b.journey_step, COALESCE(r.persona, ''), COALESCE(r.story, '') FROM bugs b LEFT JOIN runs r ON r.id = b.run_id
 		WHERE b.issue_id = ? ORDER BY b.created DESC, b.rowid DESC`, id)
 	if err != nil {
 		return nil, err
@@ -168,7 +168,7 @@ func (s *Store) IssueReports(id string) ([]Report, error) {
 		var rp Report
 		var c int64
 		if err := rows.Scan(&rp.ID, &rp.RunID, &rp.Summary, &rp.Step, &rp.Evidence, &rp.Severity, &rp.Note, &c, &rp.IssueID,
-			&rp.Persona, &rp.Story); err != nil {
+			&rp.JourneyID, &rp.JourneyRev, &rp.JourneyStep, &rp.Persona, &rp.Story); err != nil {
 			return nil, err
 		}
 		rp.Created = fromTS(c)

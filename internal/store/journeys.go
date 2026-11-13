@@ -159,6 +159,11 @@ func (s *Store) AddRevision(persona, story string, r Revision, d Decision) (Jour
 		VALUES(?,?,?,?,?,?,?,?,?,?)`, r.JourneyID, r.N, string(r.Kind), r.Code, r.Reason, r.RunID, r.Parent, r.BugID, r.BugStep, ts(r.Created)); err != nil {
 		return Journey{}, Revision{}, err
 	}
+	if r.Kind == RevisionBug && r.BugID != "" {
+		if err := linkBug(tx, r.BugID, j.ID, r.N, r.BugStep); err != nil {
+			return Journey{}, Revision{}, err
+		}
+	}
 	d.JourneyID, d.RevBefore = j.ID, j.LiveRev
 	if r.Kind == RevisionFull {
 		j.LiveRev = r.N
@@ -410,13 +415,34 @@ func (s *Store) DeleteJourney(id string, d Decision) error {
 	return tx.Commit()
 }
 
-// resolve applies d.Resolves to journey id.
+// resolve applies d.Resolves to journey id. A block by a bug links that
+// report to the live revision at the blocked step.
 func resolve(tx *sql.Tx, id string, d Decision) error {
 	if !d.Resolves {
 		return nil
 	}
-	_, err := tx.Exec(`UPDATE journeys SET state = CASE state WHEN 'paused' THEN 'paused' ELSE 'live' END,
-		flaky_streak = 0, blocked_step = ?, blocked_bug = ? WHERE id = ?`, d.BlockStep, d.BlockBug, id)
+	if _, err := tx.Exec(`UPDATE journeys SET state = CASE state WHEN 'paused' THEN 'paused' ELSE 'live' END,
+		flaky_streak = 0, blocked_step = ?, blocked_bug = ? WHERE id = ?`, d.BlockStep, d.BlockBug, id); err != nil {
+		return err
+	}
+	if d.BlockBug == "" || d.BlockStep < 1 {
+		return nil
+	}
+	var live int
+	if err := tx.QueryRow(`SELECT live_rev FROM journeys WHERE id = ?`, id).Scan(&live); err != nil {
+		return err
+	}
+	return linkBug(tx, d.BlockBug, id, live, d.BlockStep)
+}
+
+// linkBug links a bug report to a journey revision and step, unless it is
+// linked already: the first link wins.
+func linkBug(tx *sql.Tx, bugID, journeyID string, rev, step int) error {
+	if rev < 1 || step < 1 {
+		return nil
+	}
+	_, err := tx.Exec(`UPDATE bugs SET journey_id = ?, journey_rev = ?, journey_step = ? WHERE id = ? AND journey_id = ''`,
+		journeyID, rev, step, bugID)
 	return err
 }
 

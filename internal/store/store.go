@@ -157,6 +157,12 @@ type Bug struct {
 	// IssueID is the issue this report belongs to. On AddBug it may name an
 	// existing issue to attach to; empty or unknown opens a new one.
 	IssueID string `json:"issue_id"`
+	// JourneyID, JourneyRev and JourneyStep are the journey revision and
+	// step that show this report's problem (empty and 0: none). The first
+	// link wins.
+	JourneyID   string `json:"journeyId,omitempty"`
+	JourneyRev  int    `json:"journeyRev,omitempty"`
+	JourneyStep int    `json:"journeyStep,omitempty"`
 }
 
 type Store struct{ db *sql.DB }
@@ -289,6 +295,9 @@ var waitsAddedColumns = []addedColumn{
 // bugsAddedColumns are the bugs columns added after the table first shipped.
 var bugsAddedColumns = []addedColumn{
 	{"issue_id", "issue_id TEXT NOT NULL DEFAULT ''"},
+	{"journey_id", "journey_id TEXT NOT NULL DEFAULT ''"},
+	{"journey_rev", "journey_rev INTEGER NOT NULL DEFAULT 0"},
+	{"journey_step", "journey_step INTEGER NOT NULL DEFAULT 0"},
 }
 
 // addColumns adds any missing runs and waits columns to a database made by an
