@@ -230,6 +230,20 @@ func (s *Service) StartQueued(ctx context.Context, q store.Queued) (store.Run, e
 	if q.Kind == store.RunReplay {
 		return s.startReplay(ctx, q)
 	}
+	if q.JourneyID != "" {
+		// A copilot: nothing runs for a paused journey, and a deleted one
+		// has nothing left to decide about.
+		j, err := s.Store.Journey(q.JourneyID)
+		if errors.Is(err, store.ErrNotFound) {
+			return store.Run{}, fmt.Errorf("%w: its journey was deleted", ErrInvalid)
+		}
+		if err != nil {
+			return store.Run{}, err
+		}
+		if j.State == store.JourneyPaused {
+			return store.Run{}, fmt.Errorf("%w: its journey is paused", ErrInvalid)
+		}
+	}
 	return s.start(ctx, q.Persona, q.Story, &q, nil)
 }
 

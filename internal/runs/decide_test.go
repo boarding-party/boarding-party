@@ -169,3 +169,63 @@ func TestIsCopilot(t *testing.T) {
 	}
 	_ = errors.New
 }
+
+func copilotItem(j store.Journey) store.Queued {
+	ctx, _ := json.Marshal(store.RunContext{Kind: "replay_failed", Replay: &store.ContextReplay{JourneyID: j.ID, Revision: 1, Step: 3}})
+	return store.Queued{ID: "cq", Persona: "ann", Role: "buyer", Story: "checkout", Via: "copilot", Context: ctx, JourneyID: j.ID, Created: time.Now()}
+}
+
+func TestQueuedCopilotOfPausedOrGoneJourneyIsDropped(t *testing.T) {
+	svc, fl := newSvc(t)
+	j := recorded(t, svc, 1)
+	if err := svc.PauseJourney(j.ID, "kate"); err != nil {
+		t.Fatal(err)
+	}
+	q := copilotItem(j)
+	if err := svc.Store.Enqueue(q); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.StartQueued(context.Background(), q); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("paused: %v", err)
+	}
+	q.JourneyID = "gone"
+	if _, err := svc.StartQueued(context.Background(), q); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("gone: %v", err)
+	}
+	if len(fl.started) != 0 {
+		t.Fatal("a copilot started")
+	}
+}
+
+// A copilot whose journey was deleted while it ran can still finish.
+func TestCopilotOfDeletedJourneyMayFinish(t *testing.T) {
+	svc, _ := newSvc(t)
+	j := recorded(t, svc, 1)
+	r := copilotRun(t, svc, j)
+	if err := svc.CheckJourneyDecided(r); !errors.Is(err, ErrNoJourneyDecision) {
+		t.Fatalf("undecided: %v", err)
+	}
+	if err := svc.DeleteJourney(j.ID, "kate"); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.CheckJourneyDecided(r); err != nil {
+		t.Fatalf("journey gone: %v", err)
+	}
+}
+
+// A self-replay that stops at a wait before the failed step proves nothing
+// about that step.
+func TestDecideRevisionMustReachTheFailedStep(t *testing.T) {
+	svc, _ := newSvc(t)
+	j := recorded(t, svc, 1)
+	r := copilotRun(t, svc, j) // failed at step 3
+	waitingAt := func(step int) ReplayResult {
+		return ReplayResult{Status: "waiting", Step: step, Wait: &ReplayWait{N: 1, Until: json.RawMessage(`{"time":{"after":"1h"}}`)}}
+	}
+	if _, err := svc.DecideJourney(r.Token, Decide{Kind: "flaky", Reason: "r", Code: journeyCode, SelfReplay: waitingAt(2)}); !errors.Is(err, ErrUnproven) {
+		t.Fatalf("stops before step 3: %v", err)
+	}
+	if _, err := svc.DecideJourney(r.Token, Decide{Kind: "flaky", Reason: "r", Code: journeyCode, SelfReplay: waitingAt(3)}); err != nil {
+		t.Fatalf("reaches step 3: %v", err)
+	}
+}

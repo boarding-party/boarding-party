@@ -78,7 +78,7 @@ func (s *Scheduler) fire(ctx context.Context, now time.Time) error {
 	}
 	var busy, waiting map[string]bool
 	if !gated {
-		if busy, err = s.busyPersonas(); err != nil {
+		if busy, err = s.busyPersonas(onlyReplays); err != nil {
 			return err
 		}
 		if waiting, err = s.waitingStories(); err != nil {
@@ -130,7 +130,9 @@ func (s *Scheduler) fire(ctx context.Context, now time.Time) error {
 }
 
 // busyPersonas returns the personas with an active run or any queued item.
-func (s *Scheduler) busyPersonas() (map[string]bool, error) {
+// onlyReplays (over budget) leaves out queued AI items: they wait for
+// tomorrow and must not hold up the day's replays.
+func (s *Scheduler) busyPersonas(onlyReplays bool) (map[string]bool, error) {
 	out := map[string]bool{}
 	active, err := s.Store.ActiveRuns()
 	if err != nil {
@@ -144,6 +146,9 @@ func (s *Scheduler) busyPersonas() (map[string]bool, error) {
 		return nil, err
 	}
 	for _, q := range queue {
+		if onlyReplays && q.Kind != store.RunReplay {
+			continue
+		}
 		out[q.Persona] = true
 	}
 	return out, nil
@@ -191,8 +196,8 @@ func (s *Scheduler) pick(p project.Project, f Fire, waiting map[string]bool, now
 		if err != nil && !errors.Is(err, store.ErrNotFound) {
 			return choice{}, err
 		}
-		if err == nil && last.State == store.RunStuck {
-			continue
+		if err == nil && last.State == store.RunStuck && last.Kind != store.RunReplay {
+			continue // a replay's missed wait goes to the copilot instead
 		}
 		j, err := s.Store.JourneyFor(f.Persona, st)
 		if errors.Is(err, store.ErrNotFound) {

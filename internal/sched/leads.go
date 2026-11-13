@@ -33,7 +33,7 @@ func (s *Scheduler) wakeLeads(now time.Time) error {
 		}
 		return fmt.Errorf("gate: %w", err)
 	}
-	busy, err := s.busyPersonas()
+	busy, err := s.busyPersonas(false)
 	if err != nil {
 		return err
 	}

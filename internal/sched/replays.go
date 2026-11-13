@@ -88,8 +88,9 @@ func (s *Scheduler) settleCopilots(now time.Time) error {
 				reason = "it ended " + string(r.State) + " without deciding"
 			}
 		}
-		if err := s.Store.SetJourneyState(j.ID, store.JourneyLive, store.Decision{RunID: runID, Kind: "copilot gave no decision",
-			Reason: reason, Actor: store.ActorDirector, Created: now}); err != nil {
+		err = s.Store.SetJourneyStateFrom(j.ID, store.JourneyRepairing, store.JourneyLive, store.Decision{RunID: runID,
+			Kind: "copilot gave no decision", Reason: reason, Actor: store.ActorDirector, Created: now})
+		if err != nil && !errors.Is(err, store.ErrJourneyChanged) {
 			errs = append(errs, err)
 		}
 	}
@@ -122,8 +123,23 @@ func (s *Scheduler) followReplay(r store.Run, now time.Time) error {
 	row := func(kind, reason string) []store.Decision {
 		return []store.Decision{{JourneyID: j.ID, RunID: r.ID, Kind: kind, Reason: reason, Actor: store.ActorDirector, Created: now}}
 	}
+	var was store.RunContext
+	_ = json.Unmarshal(r.Context, &was)
 	switch {
+	case r.State == store.RunFailed && len(r.ReplayResult) == 0:
+		// Lost pod or timeout: the director's trouble, not the journey's.
+		// The next scheduled replay tries again.
+		return s.Store.FollowReplay(r.ID, store.ReplayFollow{Decisions: row("replay gave no result",
+			firstLine(r.Outcome, 300)+"; the next scheduled replay tries again")})
 	case r.State == store.RunStuck:
+		known, err := s.knownBug(j, res.Step)
+		if err != nil {
+			return err
+		}
+		if known {
+			return s.Store.FollowReplay(r.ID, store.ReplayFollow{Decisions: row("still failing at a known bug",
+				fmt.Sprintf("Its wait after step %d never came, where bug %s stops it; its issue is still open", res.Step, j.BlockedBug))})
+		}
 		return s.copilot(j, r, r, "its wait never came", now, store.ReplayFollow{})
 	case r.State == store.RunDone && !check:
 		zero := 0
@@ -154,9 +170,14 @@ func (s *Scheduler) followReplay(r store.Run, now time.Time) error {
 		return s.Store.FollowReplay(r.ID, store.ReplayFollow{Decisions: row("still failing at a known bug",
 			fmt.Sprintf("Failed at step %d, where bug %s stops it; its issue is still open", res.Step, j.BlockedBug))})
 	}
+	if was.Resume != nil {
+		// Run again, it would get the same arrival, and a one-time link
+		// would fail for that alone.
+		return s.copilot(j, r, r, "failed after resuming from a wait; not run again, as what arrived (such as a one-time link) may be used up", now, store.ReplayFollow{})
+	}
 	return s.Store.FollowReplay(r.ID, store.ReplayFollow{Next: []store.Queued{{
 		ID: s.newID(), Persona: r.Persona, Role: r.Role, Story: r.Story, Chain: r.Chain, Follows: r.ID, Via: viaFlakeCheck,
-		Reason: "Checking the failure again with the same inputs", Created: now, Context: r.Context, // a resumed replay resumes again
+		Reason: "Checking the failure again with the same inputs", Created: now,
 		Kind: store.RunReplay, JourneyID: j.ID, Revision: r.Revision, Seed: r.Seed,
 	}}})
 }
@@ -212,11 +233,15 @@ func (s *Scheduler) copilot(j store.Journey, r, failed store.Run, why string, no
 	if failed.State == store.RunDone || line == "" {
 		reason = "A replay needs the copilot: " + why
 	}
-	f.State, f.CopilotAt = store.JourneyRepairing, now
+	f.State, f.From, f.CopilotAt = store.JourneyRepairing, j.State, now
 	f.Decisions = append(f.Decisions, row("copilot called", strings.TrimSpace(line+"\nCalled because it "+why+"."))...)
 	f.Next = append(f.Next, store.Queued{ID: s.newID(), Persona: r.Persona, Role: r.Role, Story: r.Story, Chain: r.Chain,
-		Follows: r.ID, Via: viaCopilot, Context: ctx, Reason: reason, Created: now})
-	return s.Store.FollowReplay(r.ID, f)
+		Follows: r.ID, Via: viaCopilot, Context: ctx, Reason: reason, Created: now, JourneyID: j.ID})
+	err = s.Store.FollowReplay(r.ID, f)
+	if errors.Is(err, store.ErrJourneyChanged) {
+		return nil // a person acted meanwhile; the next tick looks again
+	}
+	return err
 }
 
 // replayResult is a replay run's result as the scheduler reads it.

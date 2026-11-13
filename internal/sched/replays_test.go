@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/boarding-party/boardingparty/internal/runs"
 	"github.com/boarding-party/boardingparty/internal/store"
 )
 
@@ -480,22 +481,132 @@ func TestReplayStuckWaitHasNoFinding(t *testing.T) {
 	}
 }
 
-// A resumed replay that fails is checked again from the same wait.
-func TestFlakeCheckOfResumedReplayKeepsResume(t *testing.T) {
+// Review fixes.
+
+func TestCopilotItemCarriesJourney(t *testing.T) {
 	f := newFix(t, exploreYAML)
 	j := f.journey("book", now)
-	ctx := []byte(`{"kind":"continue","previousRun":"w1","previous":"x","resume":{"after":1,"arrivals":[{"detail":"time reached"}]}}`)
+	f.ended("r1", j, "", "", store.RunStuck, "stuck", `{"status":"waiting","step":1,"wait":{"n":1,"until":{}}}`)
+	f.follow()
+	if q := f.queue(); len(q) != 1 || q[0].JourneyID != j.ID || q[0].Kind != "" {
+		t.Fatalf("queue = %+v", q)
+	}
+	if err := f.st.DeleteJourney(j.ID, store.Decision{Kind: "deleted", Actor: "kate", Created: now}); err != nil {
+		t.Fatal(err)
+	}
+	if q := f.queue(); len(q) != 0 {
+		t.Fatalf("a deleted journey's copilot stays queued: %+v", q)
+	}
+}
+
+func TestStuckReplayAtKnownBugCallsNoCopilot(t *testing.T) {
+	f := newFix(t, exploreYAML)
+	j := f.journey("book", now)
+	f.done("ai", "Ada", "patient", "book", "ai", "found a bug")
+	if err := f.st.AddBug(store.Bug{ID: "b1", RunID: "ai", Summary: "no confirmation email", Created: now}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.st.SetBlocked(j.ID, 1, "b1"); err != nil {
+		t.Fatal(err)
+	}
+	f.ended("r1", j, "", "", store.RunStuck, "Waited for an email that never came", `{"status":"waiting","step":1,"wait":{"n":1,"until":{}}}`)
+	f.follow()
+	if q := f.queue(); len(q) != 0 {
+		t.Fatalf("queue = %+v", q)
+	}
+	if ds := f.decisions(j); ds[0].Kind != "still failing at a known bug" {
+		t.Fatalf("decision %+v", ds[0])
+	}
+}
+
+// A stuck replay does not take its story off the schedule.
+func TestStuckReplayKeepsStoryScheduled(t *testing.T) {
+	f := newFix(t, exploreYAML)
+	j := f.journey("book", now)
+	f.ended("r1", j, "", "", store.RunStuck, "stuck", "")
+	f.st.FollowReplay("r1", store.ReplayFollow{})
+	f.fireOnce(scheduleFire("book"))
+	if q := f.queue(); len(q) != 1 || q[0].Story != "book" {
+		t.Fatalf("queue = %+v", q)
+	}
+}
+
+// A replay that stopped without a result (pod lost, timed out) is the
+// director's trouble, not the journey's: no retry, no copilot.
+func TestReplayWithoutResultCallsNoCopilot(t *testing.T) {
+	f := newFix(t, exploreYAML)
+	j := f.journey("book", now)
+	f.ended("r1", j, "", "", store.RunFailed, "The replay stopped without a result", "")
+	f.follow()
+	if q := f.queue(); len(q) != 0 {
+		t.Fatalf("queue = %+v", q)
+	}
+	if ds := f.decisions(j); ds[0].Kind != "replay gave no result" || ds[0].Actor != store.ActorDirector {
+		t.Fatalf("decision %+v", ds[0])
+	}
+}
+
+// A resumed replay is not run again: what arrived (a one-time link) may be
+// used up. It goes to the copilot, saying so.
+func TestResumedReplayFailureGoesToCopilot(t *testing.T) {
+	f := newFix(t, exploreYAML)
+	j := f.journey("book", now)
+	ctx := []byte(`{"kind":"continue","previousRun":"w1","previous":"x","resume":{"after":1,"arrivals":[{"detail":"email"}]}}`)
 	r := store.Run{ID: "r1", Token: "tok-r1", Persona: "Ada", Role: "patient", Story: "book", State: store.RunRunning, Started: now,
 		Chain: "c", Kind: store.RunReplay, JourneyID: j.ID, Revision: 1, Seed: 42, Via: "continue", Follows: "w1", Context: ctx}
 	if err := f.st.CreateRun(r); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.st.FinishRun("r1", store.RunFailed, "Failed at step 2", now); err != nil {
+	if err := f.st.SetReplayResult("r1", []byte(failedAt3)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.st.FinishRun("r1", store.RunFailed, "Failed at step 3: Pay", now); err != nil {
 		t.Fatal(err)
 	}
 	f.follow()
 	q := f.queue()
-	if len(q) != 1 || q[0].Via != "flake check" || ctxOf(t, q[0]).Resume == nil || ctxOf(t, q[0]).Resume.After != 1 {
+	if len(q) != 1 || q[0].Via != "copilot" || !strings.Contains(ctxOf(t, q[0]).Replay.Why, "used up") {
+		t.Fatalf("queue = %+v", q)
+	}
+}
+
+// A person's pause between the scheduler reading a journey and calling the
+// copilot wins: no copilot, the journey stays paused.
+func TestPauseDuringFollowWins(t *testing.T) {
+	f := newFix(t, exploreYAML)
+	j := f.journey("book", now)
+	f.ended("r1", j, "", "", store.RunStuck, "stuck", "")
+	stale, _ := f.st.Journey(j.ID)
+	if err := f.st.SetJourneyState(j.ID, store.JourneyPaused, store.Decision{Kind: "paused", Actor: "kate", Created: now}); err != nil {
+		t.Fatal(err)
+	}
+	r, _ := f.st.RunByID("r1")
+	if err := f.s.copilot(stale, r, r, "its wait never came", now, store.ReplayFollow{}); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.journeyNow(j); got.State != store.JourneyPaused || len(f.queue()) != 0 {
+		t.Fatalf("journey %s queue %+v", got.State, f.queue())
+	}
+	if un, _ := f.st.UnfollowedReplays(); len(un) != 1 {
+		t.Fatal("the replay was marked followed; the next tick should look again")
+	}
+	f.follow()
+	if ds := f.decisions(j); ds[0].Kind != "copilot not called" {
+		t.Fatalf("decision %+v", ds[0])
+	}
+}
+
+// Over budget, a queued AI item of a persona does not stop its scheduled
+// replays.
+func TestOverBudgetReplayPastQueuedAIItem(t *testing.T) {
+	f := newFix(t, exploreYAML)
+	f.starter.SetGate(runs.ErrOverBudget)
+	f.journey("book", now.Add(-time.Hour))
+	if err := f.st.Enqueue(store.Queued{ID: "ai", Persona: "Ada", Role: "patient", Story: "lone", Created: now}); err != nil {
+		t.Fatal(err)
+	}
+	f.fireOnce(scheduleFire("book"))
+	if q := f.queue(); len(q) != 2 || q[1].Kind != store.RunReplay {
 		t.Fatalf("queue = %+v", q)
 	}
 }

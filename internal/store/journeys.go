@@ -289,6 +289,35 @@ func (s *Store) AddDecision(d Decision) error {
 	return tx.Commit()
 }
 
+// ErrJourneyChanged means a journey was not in the state a change expected:
+// someone else changed it first.
+var ErrJourneyChanged = errors.New("the journey changed meanwhile")
+
+// SetJourneyStateFrom is SetJourneyState only while the journey is in state
+// from; otherwise ErrJourneyChanged and nothing is written.
+func (s *Store) SetJourneyStateFrom(id string, from, to JourneyState, d Decision) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	j, err := scanJourney(tx.QueryRow(`SELECT `+journeyCols+` FROM journeys WHERE id = ?`, id))
+	if err != nil {
+		return err
+	}
+	if j.State != from {
+		return ErrJourneyChanged
+	}
+	if _, err := tx.Exec(`UPDATE journeys SET state = ? WHERE id = ?`, string(to), id); err != nil {
+		return err
+	}
+	d.JourneyID, d.RevBefore, d.RevAfter = id, j.LiveRev, j.LiveRev
+	if err := insertDecision(tx, &d); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 // SetJourneyState moves a journey to state to and records d, in one
 // transaction. ErrNotFound if there is no such journey.
 func (s *Store) SetJourneyState(id string, to JourneyState, d Decision) error {
@@ -403,6 +432,7 @@ type ReplayFollow struct {
 	Next         []Queued
 	Decisions    []Decision   // each JourneyID is the replay's journey
 	State        JourneyState // "" leaves the state
+	From         JourneyState // with State: change it only from this state, else ErrJourneyChanged
 	FlakyStreak  *int         // nil leaves it
 	ClearBlocked bool
 	CopilotAt    time.Time // zero leaves it
@@ -431,6 +461,16 @@ func (s *Store) FollowReplay(runID string, f ReplayFollow) error {
 		if err := insertQueued(tx, q); err != nil {
 			return err
 		}
+	}
+	if f.State != "" && f.From != "" {
+		res, err := tx.Exec(`UPDATE journeys SET state = ? WHERE id = ? AND state = ?`, string(f.State), journeyID, string(f.From))
+		if err != nil {
+			return err
+		}
+		if n, _ := res.RowsAffected(); n == 0 {
+			return ErrJourneyChanged
+		}
+		f.State = ""
 	}
 	sets, args := []string{}, []any{}
 	if f.State != "" {

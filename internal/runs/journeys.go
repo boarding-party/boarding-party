@@ -262,6 +262,10 @@ func (s *Service) DecideJourney(token string, in Decide) (store.Decision, error)
 	if !provesFull(in.SelfReplay) {
 		return store.Decision{}, fmt.Errorf("%w: the new revision's self-replay must pass, it %s", ErrUnproven, describe(in.SelfReplay))
 	}
+	if copilot && in.SelfReplay.Status == "waiting" && in.SelfReplay.Step < c.Replay.Step {
+		return store.Decision{}, fmt.Errorf("%w: the self-replay stops at a wait after step %d, before step %d where the replay failed, so it cannot prove this fix; when unsure, report the bug and decide bug",
+			ErrUnproven, in.SelfReplay.Step, c.Replay.Step)
+	}
 	_, _, err = s.Store.AddRevision(j.Persona, j.Story,
 		store.Revision{Kind: store.RevisionFull, Code: in.Code, Reason: reason, RunID: r.ID, Created: now}, d)
 	if err != nil {
@@ -293,16 +297,20 @@ func provesFull(res ReplayResult) bool {
 }
 
 // CheckJourneyDecided is ErrNoJourneyDecision until run r has saved a
-// revision or made a journey decision.
+// revision or made a journey decision. A copilot whose journey was deleted
+// meanwhile has nothing to decide.
 func (s *Service) CheckJourneyDecided(r store.Run) error {
 	ok, err := s.Store.RunDecided(r.ID)
-	if err != nil {
+	if err != nil || ok {
 		return err
 	}
-	if !ok {
-		return ErrNoJourneyDecision
+	var c store.RunContext
+	if json.Unmarshal(r.Context, &c) == nil && c.Kind == "replay_failed" && c.Replay != nil {
+		if _, err := s.Store.Journey(c.Replay.JourneyID); errors.Is(err, store.ErrNotFound) {
+			return nil
+		}
 	}
-	return nil
+	return ErrNoJourneyDecision
 }
 
 // PauseJourney stops a journey's replays until it is resumed; nothing else
