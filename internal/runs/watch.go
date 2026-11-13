@@ -45,16 +45,25 @@ func (s *Service) Reconcile(ctx context.Context, now time.Time, timeout time.Dur
 		if reason == "" {
 			continue
 		}
+		var v *store.Verdict
 		if r.Kind == store.RunReplay {
 			reason = replayNoResult
+			if v, err = s.fixCheckVerdict(r, ReplayResult{}, now); err != nil {
+				errs = append(errs, fmt.Errorf("run %s: %w", r.ID, err))
+				continue
+			}
 		}
-		won, err := s.Store.FinishRun(r.ID, store.RunFailed, reason, now)
+		won, err := s.Store.FinishRunChecked(r.ID, store.RunFailed, reason, now, v)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("run %s: %w", r.ID, err))
 			continue
 		}
 		if won {
-			if r.Kind == store.RunReplay {
+			if v != nil {
+				if err := s.fixCheckDecided(r, v, now); err != nil {
+					errs = append(errs, fmt.Errorf("run %s: record fix check: %w", r.ID, err))
+				}
+			} else if r.Kind == store.RunReplay {
 				if err := s.Store.CountReplay(r.JourneyID, false, now); err != nil && !errors.Is(err, store.ErrNotFound) {
 					errs = append(errs, fmt.Errorf("run %s: count replay: %w", r.ID, err))
 				}

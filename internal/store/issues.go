@@ -254,6 +254,12 @@ type Verdict struct {
 	Reached    bool   // got to the step where the problem was
 	StillThere bool   // the problem is still there (only when Reached)
 	Note       string // what the persona saw
+	// ByReplay marks a fix-check replay's verdict, which holds whatever
+	// state the run ended in (a replay that shows the bug ends failed).
+	ByReplay bool
+	// Next hands the check over: it is queued with the check's chain and
+	// the issue stays verifying.
+	Next *Queued
 }
 
 // MaxCheckNote caps the persona's note on a fix check.
@@ -313,7 +319,9 @@ func settleCheck(tx *sql.Tx, runID string, state RunState, v *Verdict, now time.
 	switch {
 	case state == RunWaiting:
 		return nil
-	case state != RunDone || v == nil:
+	case v != nil && v.Next != nil:
+		return handOver(tx, ctx, chain, *v.Next)
+	case v == nil || (state != RunDone && !v.ByReplay):
 	case !v.Reached:
 		note = "Could not check: " + Clip(v.Note, MaxCheckNote)
 	case v.StillThere:
@@ -322,6 +330,22 @@ func settleCheck(tx *sql.Tx, runID string, state RunState, v *Verdict, now time.
 		st, note = IssueClosed, "Gone: "+Clip(v.Note, MaxCheckNote)
 	}
 	return settle(tx, ctx, chain, st, note, reopen, now)
+}
+
+// handOver queues next, the run that carries on the fix check of a verify
+// context, if its issue is still verifying under chain.
+func handOver(tx *sql.Tx, ctxJSON, chain string, next Queued) error {
+	var c RunContext
+	if json.Unmarshal([]byte(ctxJSON), &c) != nil || c.Verify == nil || chain == "" {
+		return nil
+	}
+	var n int
+	if err := tx.QueryRow(`SELECT count(*) FROM issues WHERE id = ? AND status = 'verifying' AND check_chain = ?`,
+		c.Verify.IssueID, chain).Scan(&n); err != nil || n == 0 {
+		return err
+	}
+	next.Chain = chain
+	return insertQueued(tx, next)
 }
 
 // settle moves the issue named by a verify context to st, if that issue is

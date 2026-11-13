@@ -167,14 +167,23 @@ func (s *Service) FinishReplay(token string, res ReplayResult, now time.Time) er
 	if err := s.Store.SetReplayResult(r.ID, b); err != nil {
 		return err
 	}
-	won, err := s.Store.FinishRunChecked(r.ID, state, outcome, now, nil)
+	v, err := s.fixCheckVerdict(r, res, now)
+	if err != nil {
+		return err
+	}
+	won, err := s.Store.FinishRunChecked(r.ID, state, outcome, now, v)
 	if err != nil {
 		return err
 	}
 	if !won {
 		return ErrNotActive
 	}
-	if err := s.Store.CountReplay(r.JourneyID, state == store.RunDone, now); err != nil && !errors.Is(err, store.ErrNotFound) {
+	if v != nil {
+		// A fix check is not the journey's health: its record stays.
+		if err := s.fixCheckDecided(r, v, now); err != nil {
+			log.Printf("runs: record fix check of %s: %v", r.ID, err)
+		}
+	} else if err := s.Store.CountReplay(r.JourneyID, state == store.RunDone, now); err != nil && !errors.Is(err, store.ErrNotFound) {
 		return err
 	}
 	if s.Artifacts != nil {

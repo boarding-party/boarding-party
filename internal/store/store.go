@@ -127,6 +127,14 @@ type ContextVerify struct {
 	Summary  string `json:"summary"`
 	Step     string `json:"step,omitempty"`
 	Evidence string `json:"evidence,omitempty"`
+	// JourneyID, Revision and JourneyStep are set on a fix check by replay:
+	// the revision replayed and the step where the problem showed.
+	JourneyID   string `json:"journeyId,omitempty"`
+	Revision    int    `json:"revision,omitempty"`
+	JourneyStep int    `json:"journeyStep,omitempty"`
+	// ReplayNote is what a fix-check replay saw before it handed the check
+	// to an AI run (untrusted: it quotes the site).
+	ReplayNote string `json:"replayNote,omitempty"`
 }
 
 // ContextEvent is the calendar entry a calendar-triggered run was started for.

@@ -399,6 +399,29 @@ func (s *Store) DeleteJourney(id string, d Decision) error {
 	if err != nil {
 		return err
 	}
+	// A fix check queued as a replay of this journey goes with it.
+	rows, err := tx.Query(`SELECT context, chain FROM queue WHERE journey_id = ?`, id)
+	if err != nil {
+		return err
+	}
+	var dropped [][2]string
+	for rows.Next() {
+		var ctx, chain string
+		if err := rows.Scan(&ctx, &chain); err != nil {
+			rows.Close()
+			return err
+		}
+		dropped = append(dropped, [2]string{ctx, chain})
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for _, q := range dropped {
+		if err := settle(tx, q[0], q[1], IssueFixed, checkOffQueue, false, d.Created); err != nil {
+			return err
+		}
+	}
 	for _, q := range []string{
 		`DELETE FROM journeys WHERE id = ?`,
 		`DELETE FROM journey_revisions WHERE journey_id = ?`,

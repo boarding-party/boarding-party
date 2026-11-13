@@ -54,3 +54,9 @@ func TestPromptTeachesGenerators(t *testing.T) {
 		}
 	}
 }
+
+func TestPromptExplainsReplayNote(t *testing.T) {
+	if p := Prompt(store.Run{}); !strings.Contains(p, "verify.replayNote") {
+		t.Error("prompt does not explain a fix check's replayNote")
+	}
+}

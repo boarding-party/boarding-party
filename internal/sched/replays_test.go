@@ -610,3 +610,49 @@ func TestOverBudgetReplayPastQueuedAIItem(t *testing.T) {
 		t.Fatalf("queue = %+v", q)
 	}
 }
+
+func TestFollowSkipsFixCheckReplay(t *testing.T) {
+	f := newFix(t, exploreYAML)
+	j := f.journey("book", now)
+	before := len(f.decisions(j))
+	ctx, _ := json.Marshal(store.RunContext{Kind: "verify", Verify: &store.ContextVerify{IssueID: "i1", JourneyID: j.ID, Revision: 1, JourneyStep: 3}})
+	r := store.Run{ID: "fc", Token: "tok-fc", Persona: j.Persona, Role: "patient", Story: j.Story, State: store.RunRunning, Started: f.clk.Now(),
+		Chain: "c-fc", Kind: store.RunReplay, JourneyID: j.ID, Revision: j.LiveRev, Seed: 42, Context: ctx}
+	if err := f.st.CreateRun(r); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.st.SetReplayResult(r.ID, json.RawMessage(`{"status":"failed","step":2,"stepName":"Fill","seed":42}`)); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := f.st.FinishRun(r.ID, store.RunFailed, "Failed at step 2: Fill", f.clk.Now()); err != nil || !ok {
+		t.Fatal(ok, err)
+	}
+	f.follow()
+	if q := f.queue(); len(q) != 0 {
+		t.Fatalf("a fix-check replay was followed up: %+v", q)
+	}
+	if ds := f.decisions(j); len(ds) != before {
+		t.Fatalf("decisions %+v", ds[:len(ds)-before])
+	}
+	if un, _ := f.st.UnfollowedReplays(); len(un) != 0 {
+		t.Fatalf("left unfollowed: %+v", un)
+	}
+}
+
+func TestFixCheckReplayContinuationCarriesVerify(t *testing.T) {
+	f := newFix(t, exploreYAML)
+	j := f.journey("book", now)
+	ctx, _ := json.Marshal(store.RunContext{Kind: "verify", Verify: &store.ContextVerify{IssueID: "i1", JourneyID: j.ID, Revision: 1, JourneyStep: 3}})
+	f.parked("w1", j, 1, timeWait(now.Add(time.Minute)), ctx)
+	f.clk.Add(2 * time.Minute)
+	if err := f.s.resolveAll(f.clk.Now()); err != nil {
+		t.Fatal(err)
+	}
+	q := f.queue()
+	if len(q) != 1 || q[0].Kind != store.RunReplay {
+		t.Fatalf("queue %+v", q)
+	}
+	if c := ctxOf(t, q[0]); c.Verify == nil || c.Verify.IssueID != "i1" || c.Verify.JourneyStep != 3 || c.Resume == nil {
+		t.Fatalf("context %+v", c)
+	}
+}

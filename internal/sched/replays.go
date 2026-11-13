@@ -107,6 +107,11 @@ func copilotQueued(queue []store.Queued, j store.Journey) bool {
 }
 
 func (s *Scheduler) followReplay(r store.Run, now time.Time) error {
+	var fix store.RunContext
+	if json.Unmarshal(r.Context, &fix) == nil && fix.Verify != nil {
+		// A fix check: its verdict settled the issue; nothing to repair.
+		return s.Store.FollowReplay(r.ID, store.ReplayFollow{})
+	}
 	j, err := s.Store.Journey(r.JourneyID)
 	if errors.Is(err, store.ErrNotFound) {
 		return s.Store.FollowReplay(r.ID, store.ReplayFollow{})
