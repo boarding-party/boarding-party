@@ -218,3 +218,14 @@ func TestDeleteJourneyRow(t *testing.T) {
 		t.Fatalf("decision %+v", ds[0])
 	}
 }
+
+// A journey that waits is proven up to its first wait: self mode stops there.
+func TestSaveJourneyAcceptsWaitingSelfReplay(t *testing.T) {
+	svc, _ := newSvc(t)
+	r := startedRun(t, svc)
+	rev, err := svc.SaveJourney(r.Token, SaveJourney{Code: journeyCode, Reason: "signs up and confirms by email", Kind: store.RevisionFull,
+		SelfReplay: ReplayResult{Status: "waiting", Step: 2, Wait: &ReplayWait{N: 1, Until: []byte(`{"email":{"subject":"Confirm"}}`)}}})
+	if err != nil || rev.N != 1 {
+		t.Fatalf("%+v %v", rev, err)
+	}
+}

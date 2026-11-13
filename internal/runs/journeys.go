@@ -25,13 +25,22 @@ const (
 // ReplayResult is what bp-replay prints for one replay of a journey: the
 // same shape for an AI run's self-replay and a replay run's report.
 type ReplayResult struct {
-	Status     string         `json:"status"` // passed | failed
+	Status     string         `json:"status"` // passed | failed | waiting
 	Step       int            `json:"step,omitempty"`
 	StepName   string         `json:"stepName,omitempty"`
 	Error      string         `json:"error,omitempty"`
 	Seed       int64          `json:"seed,omitempty"`
 	Inputs     map[string]any `json:"inputs,omitempty"`
 	DurationMs int            `json:"durationMs,omitempty"`
+	// Wait is the journey's bp.waitFor that stopped it (status waiting).
+	Wait *ReplayWait `json:"wait,omitempty"`
+}
+
+// ReplayWait is the n-th bp.waitFor of a journey (from 1) and what it waits
+// for, in finish_run's until shape.
+type ReplayWait struct {
+	N     int             `json:"n"`
+	Until json.RawMessage `json:"until"`
 }
 
 // SaveJourney is a revision an AI run asks to store, with the self-replay
@@ -277,8 +286,11 @@ func checkJourneyCode(code string) error {
 	return nil
 }
 
-// provesFull reports whether a self-replay proves a full revision.
-func provesFull(res ReplayResult) bool { return res.Status == "passed" }
+// provesFull reports whether a self-replay proves a full revision: it
+// passed, or reached its first wait (self mode stops there).
+func provesFull(res ReplayResult) bool {
+	return res.Status == "passed" || (res.Status == "waiting" && res.Wait != nil)
+}
 
 // CheckJourneyDecided is ErrNoJourneyDecision until run r has saved a
 // revision or made a journey decision.
@@ -344,6 +356,8 @@ func describe(res ReplayResult) string {
 	switch res.Status {
 	case "passed":
 		return "passed"
+	case "waiting":
+		return fmt.Sprintf("stopped at a wait after step %d", res.Step)
 	case "failed":
 		return fmt.Sprintf("failed at step %d", res.Step)
 	case "":

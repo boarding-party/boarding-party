@@ -310,7 +310,11 @@ func (s *Scheduler) resolve(w store.Wait, followed bool, now time.Time) error {
 		if now.Before(w.Deadline) {
 			return nil
 		}
-		_, err := s.Store.ResolveWait(r.ID, s.stuck(r, StuckText(w), now))
+		res := s.stuck(r, StuckText(w), now)
+		if r.Kind == store.RunReplay {
+			res.Finding = nil // a missed wait in a replay goes to the copilot, not the bug list
+		}
+		_, err := s.Store.ResolveWait(r.ID, res)
 		return err
 	}
 	rs, qs, err := s.chain(r.Chain)
@@ -323,9 +327,13 @@ func (s *Scheduler) resolve(w store.Wait, followed bool, now time.Time) error {
 	}
 	var was store.RunContext
 	_ = json.Unmarshal(r.Context, &was) // a run without context has nothing to carry
-	ctxJSON, err := json.Marshal(store.RunContext{Kind: "continue", WaitedFor: Describe(w), Arrived: a.Detail,
+	c := store.RunContext{Kind: "continue", WaitedFor: Describe(w), Arrived: a.Detail,
 		MessageID: a.MessageID, PreviousRun: r.ID, Previous: store.Clip(r.Outcome, MaxContextText),
-		Verify: was.Verify}) // a fix check goes on in the continuation
+		Verify: was.Verify} // a fix check goes on in the continuation
+	if r.Kind == store.RunReplay {
+		c.Resume = resumeAfter(r, was.Resume, a)
+	}
+	ctxJSON, err := json.Marshal(c)
 	if err != nil {
 		return err
 	}
@@ -337,8 +345,23 @@ func (s *Scheduler) resolve(w store.Wait, followed bool, now time.Time) error {
 	}
 	next := store.Queued{ID: s.newID(), Persona: r.Persona, Role: r.Role, Story: r.Story, Chain: r.Chain,
 		Follows: r.ID, Via: "continue", Context: ctxJSON, Reason: "Continues after " + a.Detail, Created: now}
+	if r.Kind == store.RunReplay {
+		// The same revision and inputs, picked up after the wait.
+		next.Kind, next.JourneyID, next.Revision, next.Seed = store.RunReplay, r.JourneyID, r.Revision, r.Seed
+	}
 	_, err = s.Store.ResolveWait(r.ID, store.Resolution{Status: store.WaitMet, Detail: a.Detail, Ended: now, Next: &next})
 	return err
+}
+
+// resumeAfter is where the continuation of replay r, parked at its
+// journey's n-th wait, picks up: after that wait, with every arrival so far.
+func resumeAfter(r store.Run, was *store.ContextResume, a Arrival) *store.ContextResume {
+	res := &store.ContextResume{After: resultOf(r).waitN()}
+	if was != nil {
+		res.Arrivals = append(res.Arrivals, was.Arrivals...)
+	}
+	res.Arrivals = append(res.Arrivals, store.ContextArrival{Detail: a.Detail, MessageID: a.MessageID})
+	return res
 }
 
 // handoffLost returns why a handoff wait can no longer be met, or "" while it

@@ -17,6 +17,7 @@ const page = `<!doctype html><title>shop</title>
 const got = {}; // what the fake director received, by path
 const token = 'a'.repeat(64);
 let journeyCode = '';
+let journeyResume = null;
 const srv = http.createServer((req, res) => {
   const chunks = [];
   req.on('data', (c) => chunks.push(c));
@@ -24,7 +25,10 @@ const srv = http.createServer((req, res) => {
     const body = Buffer.concat(chunks);
     const path = req.url;
     if (req.method === 'GET' && path === '/') { res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }); return res.end(page); }
-    if (req.method === 'GET' && path === `/journey/${token}`) { res.writeHead(200, { 'Content-Type': 'text/plain' }); return res.end(journeyCode); }
+    if (req.method === 'GET' && path === `/journey/${token}`) {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ code: journeyCode, ...(journeyResume ? { resume: journeyResume } : {}) }));
+    }
     if (req.method === 'GET' && path === `/profile/${token}`) { res.writeHead(204); return res.end(); }
     got[req.method + ' ' + path.replace(token, 'TOKEN')] = body;
     res.writeHead(204); res.end();
@@ -112,6 +116,34 @@ r = await run([`--journey-url=${urls('journey')}`, `--report-url=${urls('replay'
   `--profile-url=${urls('profile')}`]);
 const failRep = JSON.parse(got['PUT /replay/TOKEN']?.toString() || '{}');
 if (failRep.status !== 'failed' || failRep.step !== 2 || !got['PUT /artifacts/TOKEN/failed-step.png']) fail('failed replay: ' + JSON.stringify(failRep));
+
+// Waits: a journey that waits stops there, and its continuation skips the
+// steps before the wait and carries on with what arrived.
+const waiting = join(dir, 'waiting.mjs');
+const waitingCode = `export default async function journey({ page, bp }) {
+  await bp.step('Open the shop', async () => { await page.goto('${base}/'); });
+  const mail = await bp.waitFor({ email: { subject: 'Confirm' }, within: '2h' });
+  await bp.step('Follow the link', async () => {
+    const url = mail.link(/confirm/);
+    if (url !== '${base}/confirm?t=1') throw new Error('picked ' + url);
+    await page.goto('${base}/');
+  });
+}`;
+writeFileSync(waiting, waitingCode);
+r = await run(['--journey', waiting, '--self']);
+if (r.code !== 0 || r.res?.status !== 'waiting' || r.res.step !== 1 || r.res.wait?.n !== 1) fail('self mode at a wait: ' + r.out);
+journeyCode = waitingCode;
+for (const k of Object.keys(got)) delete got[k];
+r = await run([`--journey-url=${urls('journey')}`, `--report-url=${urls('replay')}`, `--upload-url=${urls('artifacts')}/`, `--profile-url=${urls('profile')}`]);
+const waitRep = JSON.parse(got['PUT /replay/TOKEN']?.toString() || '{}');
+if (waitRep.status !== 'waiting' || waitRep.step !== 1 || waitRep.wait?.n !== 1 || waitRep.wait.until?.email?.subject !== 'Confirm' || waitRep.wait.until.timeout !== '2h') {
+  fail('waiting replay: ' + JSON.stringify(waitRep));
+}
+journeyResume = { after: 1, arrivals: [{ detail: 'email "Confirm"', message: { from: 'shop', subject: 'Confirm', text: '', links: [`${base}/help`, `${base}/confirm?t=1`] } }] };
+for (const k of Object.keys(got)) delete got[k];
+r = await run([`--journey-url=${urls('journey')}`, `--report-url=${urls('replay')}`, `--upload-url=${urls('artifacts')}/`, `--profile-url=${urls('profile')}`]);
+const resumedRep = JSON.parse(got['PUT /replay/TOKEN']?.toString() || '{}');
+if (resumedRep.status !== 'passed') fail('resumed replay: ' + JSON.stringify(resumedRep));
 
 srv.close();
 console.log('ok replay');

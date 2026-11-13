@@ -48,8 +48,14 @@ func (s *Store) FinishRunWaiting(id, outcome string, finished time.Time, w Wait)
 	if n, err := res.RowsAffected(); err != nil || n == 0 {
 		return false, err
 	}
+	// A wait begins when the run finishes, or earlier if it says so (a
+	// replay's email wait counts mail from the start of the replay).
+	began := finished
+	if !w.Began.IsZero() && w.Began.Before(finished) && w.Kind == "email" && w.AfterID == "" {
+		began = w.Began
+	}
 	_, err = tx.Exec(`INSERT INTO waits(`+waitCols+`) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-		id, w.Kind, w.From, w.Subject, w.Role, w.Story, ts(w.At), ts(finished), ts(w.Deadline), string(WaitOpen), "", 0, w.AfterID)
+		id, w.Kind, w.From, w.Subject, w.Role, w.Story, ts(w.At), ts(began), ts(w.Deadline), string(WaitOpen), "", 0, w.AfterID)
 	if err != nil {
 		return false, err
 	}

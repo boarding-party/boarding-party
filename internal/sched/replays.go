@@ -156,7 +156,7 @@ func (s *Scheduler) followReplay(r store.Run, now time.Time) error {
 	}
 	return s.Store.FollowReplay(r.ID, store.ReplayFollow{Next: []store.Queued{{
 		ID: s.newID(), Persona: r.Persona, Role: r.Role, Story: r.Story, Chain: r.Chain, Follows: r.ID, Via: viaFlakeCheck,
-		Reason: "Checking the failure again with the same inputs", Created: now,
+		Reason: "Checking the failure again with the same inputs", Created: now, Context: r.Context, // a resumed replay resumes again
 		Kind: store.RunReplay, JourneyID: j.ID, Revision: r.Revision, Seed: r.Seed,
 	}}})
 }
@@ -219,8 +219,19 @@ func (s *Scheduler) copilot(j store.Journey, r, failed store.Run, why string, no
 	return s.Store.FollowReplay(r.ID, f)
 }
 
-func resultOf(r store.Run) runs.ReplayResult {
+// replayResult is a replay run's result as the scheduler reads it.
+type replayResult struct{ runs.ReplayResult }
+
+func resultOf(r store.Run) replayResult {
 	var res runs.ReplayResult
 	_ = json.Unmarshal(r.ReplayResult, &res)
-	return res
+	return replayResult{res}
+}
+
+// waitN is the number of the wait the replay stopped at, 0 if none.
+func (r replayResult) waitN() int {
+	if r.Wait == nil {
+		return 0
+	}
+	return r.Wait.N
 }

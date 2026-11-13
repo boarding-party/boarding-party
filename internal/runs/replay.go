@@ -185,6 +185,51 @@ func (s *Service) FinishReplay(token string, res ReplayResult, now time.Time) er
 	return s.ended(context.Background(), r, now)
 }
 
+// FinishReplayWaiting parks a replay run at its journey's wait w, as an AI
+// run's wait: the scheduler continues it with a replay of the same revision
+// and seed that resumes after that wait.
+func (s *Service) FinishReplayWaiting(token string, res ReplayResult, w store.Wait, outcome string, now time.Time) error {
+	r, err := s.Active(token)
+	if err != nil {
+		return err
+	}
+	if r.Kind != store.RunReplay {
+		return fmt.Errorf("%w: not a replay run", ErrBadReplay)
+	}
+	if res.Status != "waiting" || res.Wait == nil || res.Wait.N < 1 {
+		return fmt.Errorf("%w: a parked replay needs status waiting and its wait", ErrBadReplay)
+	}
+	b, err := json.Marshal(res)
+	if err != nil {
+		return err
+	}
+	if err := s.Store.SetReplayResult(r.ID, b); err != nil {
+		return err
+	}
+	w.RunID = r.ID
+	won, err := s.Store.FinishRunWaiting(r.ID, outcome, now, w)
+	if err != nil {
+		return err
+	}
+	if !won {
+		return ErrNotActive
+	}
+	return s.ended(context.Background(), r, now)
+}
+
+// ReplayRun returns the active replay run of token; any other token is
+// ErrNotActive.
+func (s *Service) ReplayRun(token string) (store.Run, error) {
+	r, err := s.Active(token)
+	if err != nil {
+		return store.Run{}, err
+	}
+	if r.Kind != store.RunReplay {
+		return store.Run{}, ErrNotActive
+	}
+	return r, nil
+}
+
 // ReplayCode returns the code of the revision an active replay run replays.
 // Any other token is ErrNotActive: the code goes only to its own replay.
 func (s *Service) ReplayCode(token string) (string, error) {

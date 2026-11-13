@@ -29,3 +29,12 @@ func TestCopilotPromptSaysWhenUnsureBug(t *testing.T) {
 		t.Error("a plain run got the copilot step")
 	}
 }
+
+func TestRunPromptTeachesWaits(t *testing.T) {
+	p := Prompt(store.Run{})
+	for _, want := range []string{"bp.waitFor", "outside steps", `"status":"waiting"`, "cannot wait for a hand-off"} {
+		if !strings.Contains(p, want) {
+			t.Errorf("prompt lacks %q", want)
+		}
+	}
+}

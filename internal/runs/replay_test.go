@@ -279,3 +279,38 @@ func TestReplayTimesOutSooner(t *testing.T) {
 		t.Fatalf("after the replay timeout: %+v", got)
 	}
 }
+
+func TestFinishReplayWaitingParksTheRun(t *testing.T) {
+	svc, fl := newSvc(t)
+	j := recorded(t, svc, 1)
+	r := replay(t, svc, j.ID, 0, 5, "owner")
+	res := ReplayResult{Status: "waiting", Step: 1, Seed: 5, Wait: &ReplayWait{N: 1, Until: json.RawMessage(`{"time":{"after":"1h"}}`)}}
+	if err := svc.FinishReplay(r.Token, res, time.Now()); !errors.Is(err, ErrBadReplay) {
+		t.Fatalf("FinishReplay took a waiting result: %v", err)
+	}
+	w := store.Wait{Kind: "time", At: time.Now().Add(time.Hour), Deadline: time.Now().Add(time.Hour)}
+	if err := svc.FinishReplayWaiting(r.Token, res, w, "Waiting until 15:00", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := svc.Store.RunByID(r.ID)
+	if got.State != store.RunWaiting || got.Outcome != "Waiting until 15:00" || len(fl.stopped) != 1 {
+		t.Fatalf("run %+v stopped %v", got, fl.stopped)
+	}
+	var kept ReplayResult
+	if err := json.Unmarshal(got.ReplayResult, &kept); err != nil || kept.Wait == nil || kept.Wait.N != 1 {
+		t.Fatalf("result on the run %s", got.ReplayResult)
+	}
+	if ow, err := svc.Store.WaitFor(r.ID); err != nil || ow.Status != store.WaitOpen || ow.Kind != "time" {
+		t.Fatalf("wait %+v %v", ow, err)
+	}
+	if jj, _ := svc.Store.Journey(j.ID); jj.Passed+jj.Failed != 0 {
+		t.Fatalf("a waiting replay was counted: %+v", jj)
+	}
+	if err := svc.FinishReplayWaiting(r.Token, ReplayResult{Status: "passed"}, w, "x", time.Now()); !errors.Is(err, ErrNotActive) {
+		t.Fatalf("second report: %v", err)
+	}
+	r2 := replay(t, svc, j.ID, 0, 5, "owner")
+	if err := svc.FinishReplayWaiting(r2.Token, ReplayResult{Status: "passed"}, w, "x", time.Now()); !errors.Is(err, ErrBadReplay) {
+		t.Fatalf("a passed result parked: %v", err)
+	}
+}

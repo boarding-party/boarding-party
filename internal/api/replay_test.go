@@ -11,6 +11,7 @@ import (
 
 	"github.com/boarding-party/boardingparty/internal/project"
 	"github.com/boarding-party/boardingparty/internal/runs"
+	"github.com/boarding-party/boardingparty/internal/sched"
 	"github.com/boarding-party/boardingparty/internal/store"
 )
 
@@ -54,7 +55,12 @@ func TestReplayWorkerRoutes(t *testing.T) {
 	r := startReplay(t, svc, j, 5)
 	resp := do(t, "GET", wsrv.URL+"/journey/"+r.Token, "")
 	body, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode != 200 || string(body) != journeyJS || !strings.HasPrefix(resp.Header.Get("Content-Type"), "text/plain") {
+	var fetched struct {
+		Code   string          `json:"code"`
+		Resume json.RawMessage `json:"resume"`
+	}
+	if resp.StatusCode != 200 || json.Unmarshal(body, &fetched) != nil || fetched.Code != journeyJS || fetched.Resume != nil ||
+		!strings.HasPrefix(resp.Header.Get("Content-Type"), "application/json") {
 		t.Fatalf("journey = %d %q %s", resp.StatusCode, body, resp.Header.Get("Content-Type"))
 	}
 	if r := do(t, "GET", wsrv.URL+"/journey/wrong", ""); r.StatusCode != 404 {
@@ -205,5 +211,143 @@ func TestReplayRouteRefusesHugeSeed(t *testing.T) {
 	defer resp.Body.Close()
 	if resp.StatusCode != 400 {
 		t.Fatalf("seed past 2^31 = %d, want 400", resp.StatusCode)
+	}
+}
+
+const mailYAML = `name: p
+sites: ["https://x.test"]
+roles:
+  - name: buyer
+    personas: [{name: ann, identity: {email: ann@shop.test}}]
+    stories: [{name: checkout, goal: buy a thing}]
+`
+
+// mailJourney saves a project where ann has an email address and gives her
+// checkout journey a live revision.
+func mailJourney(t *testing.T, svc *runs.Service) store.Journey {
+	t.Helper()
+	p, err := project.Load([]byte(mailYAML))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Store.PutProject(p); err != nil {
+		t.Fatal(err)
+	}
+	j, _, err := svc.Store.AddRevision("ann", "checkout", store.Revision{Kind: store.RevisionFull, Code: journeyJS, Reason: "r", RunID: "old", Created: time.Now()},
+		store.Decision{Kind: "recorded", Reason: "r", Actor: store.ActorModel, Created: time.Now(), Explored: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return j
+}
+
+func TestReplayWaitParksTheReplay(t *testing.T) {
+	_, wsrv, svc := setupBoth(t, 1<<20)
+	j := mailJourney(t, svc)
+	r := startReplay(t, svc, j, 5)
+	body := `{"status":"waiting","step":1,"seed":5,"wait":{"n":1,"until":{"time":{"after":"30m"}}}}`
+	if got := do(t, "PUT", wsrv.URL+"/replay/"+r.Token, body).StatusCode; got != 204 {
+		t.Fatalf("PUT waiting = %d", got)
+	}
+	run, _ := svc.Store.RunByID(r.ID)
+	w, err := svc.Store.WaitFor(r.ID)
+	if run.State != store.RunWaiting || err != nil || w.Kind != "time" || w.Status != store.WaitOpen || !strings.HasPrefix(run.Outcome, "Waiting until") {
+		t.Fatalf("run %+v wait %+v %v", run, w, err)
+	}
+}
+
+func TestReplayHandoffWaitRefused(t *testing.T) {
+	_, wsrv, svc := setupBoth(t, 1<<20)
+	j := mailJourney(t, svc)
+	r := startReplay(t, svc, j, 5)
+	body := `{"status":"waiting","step":2,"seed":5,"wait":{"n":1,"until":{"handoff":{"role":"x","story":"y"}}}}`
+	if got := do(t, "PUT", wsrv.URL+"/replay/"+r.Token, body).StatusCode; got != 204 {
+		t.Fatalf("PUT = %d", got)
+	}
+	run, _ := svc.Store.RunByID(r.ID)
+	if run.State != store.RunFailed || !strings.Contains(run.Outcome, "a replay cannot wait for a hand-off") {
+		t.Fatalf("run %+v", run)
+	}
+}
+
+// An email that arrives while the replay still runs, before it reports the
+// wait, still ends the wait.
+func TestReplayEmailWaitCountsMailFromTheRun(t *testing.T) {
+	_, wsrv, svc := setupBoth(t, 1<<20)
+	j := mailJourney(t, svc)
+	r := startReplay(t, svc, j, 5)
+	if _, err := svc.Store.AddMessage(store.Message{ID: "m1", UIDValidity: 1, UID: 1, Persona: "ann", From: "hello@x.test",
+		Subject: "Confirm your account", Text: "Open https://x.test/confirm?t=1", Received: time.Now(), Stored: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(5 * time.Millisecond)
+	body := `{"status":"waiting","step":1,"seed":5,"wait":{"n":1,"until":{"email":{"subject":"confirm"},"timeout":"2h"}}}`
+	if got := do(t, "PUT", wsrv.URL+"/replay/"+r.Token, body).StatusCode; got != 204 {
+		t.Fatalf("PUT = %d", got)
+	}
+	w, err := svc.Store.WaitFor(r.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, _ := svc.Store.RunByID(r.ID)
+	a, met, err := sched.Met(svc.Store, w, run, time.Now())
+	if err != nil || !met || a.MessageID != "m1" {
+		t.Fatalf("met %v %+v %v (wait %+v)", met, a, err, w)
+	}
+}
+
+func TestReplayEmailWaitNeedsAnAddress(t *testing.T) {
+	_, wsrv, svc := setupBoth(t, 1<<20)
+	j := withJourney(t, svc) // ann has no email address here
+	r := startReplay(t, svc, j, 5)
+	body := `{"status":"waiting","step":1,"wait":{"n":1,"until":{"email":{"subject":"confirm"}}}}`
+	if got := do(t, "PUT", wsrv.URL+"/replay/"+r.Token, body).StatusCode; got != 204 {
+		t.Fatalf("PUT = %d", got)
+	}
+	if run, _ := svc.Store.RunByID(r.ID); run.State != store.RunFailed || !strings.Contains(run.Outcome, "no email address") {
+		t.Fatalf("run %+v", run)
+	}
+}
+
+func TestJourneyFetchCarriesResume(t *testing.T) {
+	_, wsrv, svc := setupBoth(t, 1<<20)
+	j := mailJourney(t, svc)
+	if _, err := svc.Store.AddMessage(store.Message{ID: "m1", UIDValidity: 1, UID: 1, Persona: "ann", From: "hello@x.test",
+		Subject: "Confirm", Text: "Open https://x.test/confirm?t=1 or https://x.test/help.", Links: []string{"https://x.test/confirm?t=1", "https://x.test/html-only"},
+		Received: time.Now(), Stored: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	ctx, _ := json.Marshal(store.RunContext{Kind: "continue", Resume: &store.ContextResume{After: 1,
+		Arrivals: []store.ContextArrival{{Detail: "email \"Confirm\" from hello@x.test", MessageID: "m1"}}}})
+	q, err := svc.EnqueueReplay(j.ID, 0, 5, "owner", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	q.Context, q.Via = ctx, "continue"
+	r, err := svc.StartQueued(context.Background(), q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp := do(t, "GET", wsrv.URL+"/journey/"+r.Token, "")
+	var got struct {
+		Code   string `json:"code"`
+		Resume struct {
+			After    int `json:"after"`
+			Arrivals []struct {
+				Detail  string `json:"detail"`
+				Message *struct {
+					From, Subject, Text string
+					Links               []string
+				} `json:"message"`
+			} `json:"arrivals"`
+		} `json:"resume"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil || resp.StatusCode != 200 {
+		t.Fatalf("%d %v", resp.StatusCode, err)
+	}
+	a := got.Resume.Arrivals
+	if got.Code != journeyJS || got.Resume.After != 1 || len(a) != 1 || a[0].Message == nil || a[0].Message.Subject != "Confirm" ||
+		strings.Join(a[0].Message.Links, " ") != "https://x.test/confirm?t=1 https://x.test/html-only https://x.test/help" {
+		t.Fatalf("fetched %+v", got)
 	}
 }

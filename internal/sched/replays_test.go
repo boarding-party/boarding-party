@@ -403,3 +403,99 @@ func TestDecidedCopilotIsLeftAlone(t *testing.T) {
 		t.Fatalf("decision %+v", ds[0])
 	}
 }
+
+// parked stores a replay run of j parked at its journey's n-th wait w,
+// carrying context ctx (a resume from an earlier wait, or nil).
+func (f *fix) parked(id string, j store.Journey, n int, w store.Wait, ctx []byte) store.Run {
+	f.t.Helper()
+	r := store.Run{ID: id, Token: "tok-" + id, Persona: j.Persona, Role: "patient", Story: j.Story, State: store.RunRunning,
+		Started: f.clk.Now(), Chain: "c", Kind: store.RunReplay, JourneyID: j.ID, Revision: j.LiveRev, Seed: 42, Context: ctx}
+	if err := f.st.CreateRun(r); err != nil {
+		f.t.Fatal(err)
+	}
+	res, _ := json.Marshal(map[string]any{"status": "waiting", "step": 1, "seed": 42, "wait": map[string]any{"n": n, "until": map[string]any{}}})
+	if err := f.st.SetReplayResult(id, res); err != nil {
+		f.t.Fatal(err)
+	}
+	if ok, err := f.st.FinishRunWaiting(id, "Waiting", f.clk.Now(), w); err != nil || !ok {
+		f.t.Fatal(ok, err)
+	}
+	return r
+}
+
+func TestReplayWaitContinuesAsReplay(t *testing.T) {
+	f := newFix(t, exploreYAML)
+	j := f.journey("book", now)
+	f.parked("w1", j, 1, timeWait(now.Add(time.Hour)), nil)
+	f.clk.Add(30 * time.Minute)
+	if err := f.s.resolveAll(f.clk.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if q := f.queue(); len(q) != 0 {
+		t.Fatalf("before the time: %+v", q)
+	}
+	f.clk.Add(time.Hour)
+	if err := f.s.resolveAll(f.clk.Now()); err != nil {
+		t.Fatal(err)
+	}
+	q := f.queue()
+	if len(q) != 1 || q[0].Kind != store.RunReplay || q[0].JourneyID != j.ID || q[0].Revision != 1 || q[0].Seed != 42 ||
+		q[0].Via != "continue" || q[0].Follows != "w1" || q[0].Chain != "c" {
+		t.Fatalf("queue = %+v", q)
+	}
+	c := ctxOf(t, q[0])
+	if c.Kind != "continue" || c.Resume == nil || c.Resume.After != 1 || len(c.Resume.Arrivals) != 1 || c.Resume.Arrivals[0].Detail != "time reached" {
+		t.Fatalf("context %+v %+v", c, c.Resume)
+	}
+	// The continuation waits again at the second wait: arrivals add up.
+	f.st.DeleteQueued(q[0].ID)
+	f.parked("w2", j, 2, timeWait(f.clk.Now().Add(time.Minute)), q[0].Context)
+	f.clk.Add(2 * time.Minute)
+	if err := f.s.resolveAll(f.clk.Now()); err != nil {
+		t.Fatal(err)
+	}
+	c = ctxOf(t, f.queue()[0])
+	if c.Resume.After != 2 || len(c.Resume.Arrivals) != 2 {
+		t.Fatalf("second wait: %+v", c.Resume)
+	}
+}
+
+func TestReplayStuckWaitHasNoFinding(t *testing.T) {
+	f := newFix(t, exploreYAML)
+	j := f.journey("book", now)
+	f.parked("w1", j, 1, store.Wait{Kind: "email", Subject: "Confirm", Deadline: now.Add(time.Hour)}, nil)
+	f.clk.Add(2 * time.Hour)
+	if err := f.s.resolveAll(f.clk.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.state("w1"); got != store.RunStuck {
+		t.Fatalf("state %s", got)
+	}
+	if bugs, _ := f.st.Bugs("w1"); len(bugs) != 0 {
+		t.Fatalf("a replay's missed wait filed %+v", bugs)
+	}
+	f.follow()
+	if q := f.queue(); len(q) != 1 || q[0].Via != "copilot" {
+		t.Fatalf("queue = %+v", q)
+	}
+}
+
+// A resumed replay that fails is checked again from the same wait.
+func TestFlakeCheckOfResumedReplayKeepsResume(t *testing.T) {
+	f := newFix(t, exploreYAML)
+	j := f.journey("book", now)
+	ctx := []byte(`{"kind":"continue","previousRun":"w1","previous":"x","resume":{"after":1,"arrivals":[{"detail":"time reached"}]}}`)
+	r := store.Run{ID: "r1", Token: "tok-r1", Persona: "Ada", Role: "patient", Story: "book", State: store.RunRunning, Started: now,
+		Chain: "c", Kind: store.RunReplay, JourneyID: j.ID, Revision: 1, Seed: 42, Via: "continue", Follows: "w1", Context: ctx}
+	if err := f.st.CreateRun(r); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.st.FinishRun("r1", store.RunFailed, "Failed at step 2", now); err != nil {
+		t.Fatal(err)
+	}
+	f.follow()
+	q := f.queue()
+	if len(q) != 1 || q[0].Via != "flake check" || ctxOf(t, q[0]).Resume == nil || ctxOf(t, q[0]).Resume.After != 1 {
+		t.Fatalf("queue = %+v", q)
+	}
+}

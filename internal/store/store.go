@@ -87,6 +87,21 @@ type RunContext struct {
 	// Replay is the failed replay a copilot run decides about (kind
 	// "replay_failed").
 	Replay *ContextReplay `json:"replay,omitempty"`
+	// Resume carries a replay on after its journey's waits: the steps before
+	// wait After are skipped and each wait gets its arrival.
+	Resume *ContextResume `json:"resume,omitempty"`
+}
+
+// ContextResume is where a continued replay picks its journey up.
+type ContextResume struct {
+	After    int              `json:"after"`
+	Arrivals []ContextArrival `json:"arrivals"`
+}
+
+// ContextArrival is what ended one of a journey's waits.
+type ContextArrival struct {
+	Detail    string `json:"detail"`
+	MessageID string `json:"messageId,omitempty"`
 }
 
 // ContextReplay is the replay a copilot run was called for: which revision

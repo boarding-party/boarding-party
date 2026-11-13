@@ -3,13 +3,15 @@
 //
 //   bp-replay --journey <file> --self [--seed N] [--expect-fail-step N] [--device KEY]
 //     An AI run proving its journey: prints one JSON result line; exits 0
-//     only when the result proves the revision (passed, or failed exactly
-//     at --expect-fail-step).
+//     only when the result proves the revision (passed, stopped at its first
+//     bp.waitFor, or failed exactly at --expect-fail-step).
 //
 //   bp-replay --journey-url URL --report-url URL --upload-url URL --profile-url URL
 //             [--live-url URL] [--console-url URL] [--seed N] [--device KEY]
-//     A replay run: fetches the code, restores the persona's browser, runs,
-//     uploads the evidence, saves the browser back and PUTs the result.
+//     A replay run: fetches the code (and, after a wait, where to resume),
+//     restores the persona's browser, runs, uploads the evidence, saves the
+//     browser back and PUTs the result. A bp.waitFor past the resume point
+//     ends it with status waiting.
 //
 // The journey itself runs in a child process whose argv and environment
 // carry none of these URLs (they hold the run token). Logs go to stderr;
@@ -59,8 +61,9 @@ function seedOf(v) {
 
 // runChild runs the journey in a child process and returns its result. The
 // child gets only paths and plain options: no URL, no token.
-function runChild({ file, seed, device, outDir, profile, saveProfile, cdp }) {
+function runChild({ file, seed, device, outDir, profile, saveProfile, cdp, resume }) {
   const args = [self, '--child', '--file', file, '--seed', String(seed), '--out', outDir];
+  if (resume) args.push('--resume', resume);
   if (device) args.push('--device', device);
   if (profile) args.push('--profile', profile);
   if (saveProfile) args.push('--save-profile', saveProfile);
@@ -88,7 +91,7 @@ async function selfMode() {
   const res = await runChild({ file: opts.journey, seed, device: opts.device, outDir });
   process.stdout.write(JSON.stringify(res) + '\n');
   const want = opts['expect-fail-step'] ? Number(opts['expect-fail-step']) : 0;
-  const proven = want ? res.status === 'failed' && res.step === want : res.status === 'passed';
+  const proven = want ? res.status === 'failed' && res.step === want : res.status === 'passed' || res.status === 'waiting';
   process.exit(proven ? 0 : 1);
 }
 
@@ -107,8 +110,15 @@ async function runMode() {
   try {
     const r = await fetch(opts['journey-url']);
     if (!r.ok) throw new Error(`could not fetch the journey (HTTP ${r.status})`);
+    const fetched = await r.json();
+    if (typeof fetched.code !== 'string') throw new Error('the journey fetched has no code');
     const file = join(outDir, 'journey.mjs');
-    writeFileSync(file, await r.text());
+    writeFileSync(file, fetched.code);
+    let resume = '';
+    if (fetched.resume) {
+      resume = join(outDir, 'resume.json');
+      writeFileSync(resume, JSON.stringify(fetched.resume));
+    }
     let profile = '';
     try {
       const pr = await fetch(opts['profile-url']);
@@ -121,7 +131,7 @@ async function runMode() {
     if (opts['live-url']) spawn(process.execPath, ['/opt/bp/bp-screen.mjs', `--live-url=${opts['live-url']}`], { stdio: 'ignore', detached: true }).unref();
     if (opts['console-url']) spawn(process.execPath, ['/opt/bp/bp-console.mjs', `--console-url=${opts['console-url']}`], { stdio: 'ignore', detached: true }).unref();
     const saveProfile = join(outDir, 'profile-out.json');
-    res = await runChild({ file, seed, device: opts.device, outDir, profile, saveProfile, cdp: true });
+    res = await runChild({ file, seed, device: opts.device, outDir, profile, saveProfile, cdp: true, resume });
     await uploadEvidence(outDir);
     if (existsSync(saveProfile)) {
       await put(opts['profile-url'], readFileSync(saveProfile), 'application/json').catch((e) => log('profile not saved:', e.message));
@@ -202,7 +212,8 @@ async function child() {
     page = await ctx.newPage();
     page.setDefaultTimeout(15000);
     humanise(page);
-    const bp = lib.makeBp({ onFail: () => page.screenshot({ path: join(opts.out, 'failed-step.png') }) });
+    const resume = opts.resume ? JSON.parse(readFileSync(opts.resume, 'utf8')) : undefined;
+    const bp = lib.makeBp({ onFail: () => page.screenshot({ path: join(opts.out, 'failed-step.png') }), resume });
     const data = lib.makeData(seed, inputs);
     const limit = Number(process.env.BP_REPLAY_TIMEOUT_MS) || 10 * 60 * 1000;
     let timer;
@@ -211,10 +222,18 @@ async function child() {
       new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(`the journey ran over ${Math.round(limit / 60000)} minutes`)), limit); }),
     ]).finally(() => clearTimeout(timer));
   } catch (e) {
-    result.status = 'failed';
-    result.step = e instanceof lib.StepFailed ? e.step : 0;
-    if (e instanceof lib.StepFailed && e.stepName) result.stepName = e.stepName;
-    result.error = lib.cleanError(e.message || e);
+    if (e instanceof lib.WaitReached) {
+      // The journey waits for an email or a time: the director parks the
+      // replay and resumes it after this wait.
+      result.status = 'waiting';
+      result.step = e.step;
+      result.wait = { n: e.n, until: e.until };
+    } else {
+      result.status = 'failed';
+      result.step = e instanceof lib.StepFailed ? e.step : 0;
+      if (e instanceof lib.StepFailed && e.stepName) result.stepName = e.stepName;
+      result.error = lib.cleanError(e.message || e);
+    }
   }
   try {
     if (ctx) {

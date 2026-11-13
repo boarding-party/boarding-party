@@ -61,25 +61,83 @@ export class StepFailed extends Error {
   }
 }
 
+// WaitReached stops a replay at a journey's n-th bp.waitFor, after step
+// steps; until is what it waits for, in the director's until shape.
+export class WaitReached extends Error {
+  constructor(n, step, until) {
+    super(`waiting at wait ${n}`);
+    this.n = n;
+    this.step = step;
+    this.until = until;
+  }
+}
+
+// waitUntil checks a bp.waitFor argument and returns it as the director's
+// until: exactly one of email {from, subject} or time {after | at}, and
+// within as the timeout.
+export function waitUntil(spec) {
+  const s = spec || {};
+  if (s.handoff) throw new Error('a replay cannot wait for a hand-off');
+  if (!!s.email === !!s.time) throw new Error('bp.waitFor needs exactly one of email or time');
+  const out = {};
+  if (s.email) {
+    const { from, subject } = s.email;
+    if (!from && !subject) throw new Error('bp.waitFor email needs from or subject');
+    out.email = { ...(from ? { from: String(from) } : {}), ...(subject ? { subject: String(subject) } : {}) };
+  } else {
+    const { after, at } = s.time;
+    if (!after === !at) throw new Error('bp.waitFor time needs after or at');
+    out.time = after ? { after: String(after) } : { at: String(at) };
+  }
+  if (s.within) out.timeout = String(s.within);
+  return out;
+}
+
+// arrival is what a resumed bp.waitFor returns: what ended the wait and, for
+// an email, the message with link(re) to pick a link from it.
+function arrival(a, n) {
+  if (!a) throw new Error(`bp.waitFor ${n}: the replay was resumed without its arrival`);
+  return {
+    detail: a.detail,
+    message: a.message,
+    link(re) {
+      const links = (a.message && a.message.links) || [];
+      const m = links.find((u) => (re instanceof RegExp ? re.test(u) : u.includes(String(re))));
+      if (!m) throw new Error(`no link matching ${re} in the email`);
+      return m;
+    },
+  };
+}
+
 // makeBp returns the journey's bp helpers. onFail runs once, at the failing
-// step, before the error leaves it (the screenshot is taken there).
-export function makeBp({ onFail } = {}) {
+// step, before the error leaves it (the screenshot is taken there). resume
+// ({after, arrivals}) picks a replay up after its journey's wait number
+// after: earlier steps are counted, not run, and earlier waits return their
+// arrivals. A wait past it stops the replay with WaitReached.
+export function makeBp({ onFail, resume } = {}) {
   let n = 0;
+  let waits = 0;
+  const after = (resume && resume.after) || 0;
+  const arrivals = (resume && resume.arrivals) || [];
   return {
     async step(name, fn) {
       if (typeof name !== 'string' || !name.trim() || typeof fn !== 'function') throw new Error('bp.step(name, fn) needs a name and a function');
       const at = ++n;
+      if (waits < after) return undefined; // done before the wait this replay resumes after
       try {
         return await fn();
       } catch (e) {
-        if (e instanceof StepFailed) throw e; // a step inside a step: the inner one is where it failed
+        if (e instanceof StepFailed || e instanceof WaitReached) throw e; // a step inside a step: the inner one is where it failed
         if (onFail) await onFail(at, name).catch(() => {});
         throw new StepFailed(at, name, e);
       }
     },
     money,
-    async waitFor() {
-      throw new Error('waits arrive in a later version: bp.waitFor cannot run in a replay yet');
+    async waitFor(spec) {
+      const until = waitUntil(spec);
+      const i = ++waits;
+      if (i <= after) return arrival(arrivals[i - 1], i);
+      throw new WaitReached(i, n, until);
     },
   };
 }
