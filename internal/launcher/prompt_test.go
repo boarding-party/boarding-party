@@ -38,3 +38,19 @@ func TestRunPromptTeachesWaits(t *testing.T) {
 		}
 	}
 }
+
+func TestPromptTeachesGenerators(t *testing.T) {
+	p := Prompt(store.Run{})
+	for _, want := range []string{"data.lineItems(", "data.businessName({ size", "exclude", "fits the persona"} {
+		if !strings.Contains(p, want) {
+			t.Errorf("recording prompt lacks %q", want)
+		}
+	}
+	ctx, _ := json.Marshal(store.RunContext{Kind: "replay_failed", Replay: &store.ContextReplay{JourneyID: "j", Revision: 2, Step: 3, Seed: 9}})
+	c := Prompt(store.Run{Context: ctx})
+	for _, want := range []string{"input refused correctly", "exclude: ['", "context.replay.inputs.edges"} {
+		if !strings.Contains(c, want) {
+			t.Errorf("copilot prompt lacks %q", want)
+		}
+	}
+}
