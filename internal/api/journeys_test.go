@@ -1,14 +1,21 @@
 package api
 
 import (
+	"database/sql"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/boarding-party/boardingparty/internal/artifacts"
+	"github.com/boarding-party/boardingparty/internal/live"
 	"github.com/boarding-party/boardingparty/internal/runs"
 	"github.com/boarding-party/boardingparty/internal/store"
+
+	_ "modernc.org/sqlite"
 )
 
 // act sends a board request as actor (none: no X-BP-Actor header).
@@ -191,5 +198,44 @@ func TestFailedReplayShowsItsCopilot(t *testing.T) {
 	}
 	if _, ok := none["copilot"]; ok {
 		t.Fatal("an AI run got a copilot")
+	}
+}
+
+func TestRunWithoutItsCopilotWhenTheLookupFails(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "bp.db")
+	st, err := store.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	svc := &runs.Service{Store: st, Artifacts: artifacts.NewFS(t.TempDir(), 1<<20), Launcher: noopLauncher{}}
+	srv := httptest.NewServer(Admin(svc, 1<<20, testToken, live.NewHub(), nil))
+	t.Cleanup(srv.Close)
+	j := withJourney(t, svc)
+	now := time.Now().UTC()
+	replayRun(t, svc, "rp", j.ID, "", "", store.RunFailed, now)
+	if err := svc.Store.CreateRun(store.Run{ID: "cop", Token: "tok-cop", Persona: "ann", Role: "buyer", Story: "checkout", State: store.RunDone,
+		Started: now.Add(time.Second), Chain: "c", Via: "copilot", Follows: "rp"}); err != nil {
+		t.Fatal(err)
+	}
+	// Break the copilot's decision lookup.
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := db.Exec(`ALTER TABLE journey_decisions RENAME TO journey_decisions_gone`); err != nil {
+		t.Fatal(err)
+	}
+	resp := act(t, "GET", srv.URL+"/api/runs/rp", "", "")
+	var got map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil || resp.StatusCode != 200 {
+		t.Fatalf("%d %v", resp.StatusCode, err)
+	}
+	if run, _ := got["run"].(map[string]any); run == nil || run["id"] != "rp" {
+		t.Fatalf("run %+v", got)
+	}
+	if _, ok := got["copilot"]; ok {
+		t.Fatalf("copilot shown after a failed lookup: %+v", got["copilot"])
 	}
 }

@@ -85,6 +85,9 @@ type fakeStarter struct {
 	n        int
 	called   chan struct{}
 	gate     error // returned by Gate
+	// fallback answers FixCheckFallback; nil falls back for nothing.
+	fallback func(q store.Queued) bool
+	fellBack []store.Queued
 }
 
 func (f *fakeStarter) StartQueued(ctx context.Context, q store.Queued) (store.Run, error) {
@@ -114,6 +117,13 @@ func (f *fakeStarter) StartQueued(ctx context.Context, q store.Queued) (store.Ru
 		return store.Run{}, err
 	}
 	return r, nil
+}
+
+func (f *fakeStarter) FixCheckFallback(q store.Queued, _ time.Time) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.fellBack = append(f.fellBack, q)
+	return f.fallback != nil && f.fallback(q), nil
 }
 
 func (f *fakeStarter) Gate(time.Time) error {

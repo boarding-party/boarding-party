@@ -135,6 +135,9 @@ type ContextVerify struct {
 	// ReplayNote is what a fix-check replay saw before it handed the check
 	// to an AI run (untrusted: it quotes the site).
 	ReplayNote string `json:"replayNote,omitempty"`
+	// Repeat marks the replay that runs a failure at JourneyStep again with
+	// the same inputs.
+	Repeat bool `json:"repeat,omitempty"`
 }
 
 // ContextEvent is the calendar entry a calendar-triggered run was started for.

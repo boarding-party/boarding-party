@@ -90,10 +90,38 @@ func (s *Store) DeleteQueued(id string) error {
 	if _, err := tx.Exec(`DELETE FROM queue WHERE id = ?`, id); err != nil {
 		return err
 	}
-	if err := settle(tx, ctx, chain, IssueFixed, checkOffQueue, false, time.Now().UTC()); err != nil {
+	if _, err := settle(tx, ctx, chain, IssueFixed, checkOffQueue, false, time.Now().UTC()); err != nil {
 		return err
 	}
 	return tx.Commit()
+}
+
+// ReplaceQueued takes queued item id off the queue and queues next in its
+// place to carry on its fix check, if that check's issue is still
+// verifying; ErrNotFound if id is not there. It returns whether next was
+// queued.
+func (s *Store) ReplaceQueued(id string, next Queued) (bool, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback()
+	var ctx, chain string
+	err = tx.QueryRow(`SELECT context, chain FROM queue WHERE id = ?`, id).Scan(&ctx, &chain)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, ErrNotFound
+	}
+	if err != nil {
+		return false, err
+	}
+	if _, err := tx.Exec(`DELETE FROM queue WHERE id = ?`, id); err != nil {
+		return false, err
+	}
+	queued, err := handOver(tx, ctx, chain, next)
+	if err != nil {
+		return false, err
+	}
+	return queued, tx.Commit()
 }
 
 // FollowUp marks a run as acted on and queues its follow-ups, atomically.

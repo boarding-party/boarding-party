@@ -37,7 +37,12 @@ func (s *server) getIssue(w http.ResponseWriter, r *http.Request) {
 	if reports == nil {
 		reports = []store.Report{}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"issue": is, "reports": reports})
+	checkBy, err := s.svc.CheckBy(id)
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"issue": is, "reports": reports, "checkBy": checkBy})
 }
 
 // putIssueStatus records the user's triage; fixed queues a check of the fix.

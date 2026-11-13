@@ -1,7 +1,9 @@
 package sched
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -688,5 +690,29 @@ func TestMissedWaitInFixCheckReplayHandsOver(t *testing.T) {
 	}
 	if c := ctxOf(t, *next); c.Verify == nil || !strings.Contains(c.Verify.ReplayNote, "wait") {
 		t.Fatalf("context %+v", c.Verify)
+	}
+}
+
+func TestDrainHandsUnplayableFixCheckToFallback(t *testing.T) {
+	for _, falls := range []bool{true, false} {
+		t.Run(fmt.Sprint("falls back ", falls), func(t *testing.T) {
+			f := newFix(t, exploreYAML)
+			if err := f.st.Enqueue(store.Queued{ID: "q1", Persona: "Ada", Role: "patient", Story: "book", Created: now,
+				Kind: store.RunReplay, JourneyID: "gone", Revision: 1, Seed: 7}); err != nil {
+				t.Fatal(err)
+			}
+			f.starter.errs = []error{fmt.Errorf("%w: its journey is paused", runs.ErrInvalid)}
+			f.starter.fallback = func(store.Queued) bool { return falls }
+			if err := f.s.drain(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			if len(f.starter.fellBack) != 1 || f.starter.fellBack[0].ID != "q1" {
+				t.Fatalf("fallback calls %+v", f.starter.fellBack)
+			}
+			// A fallback replaces the item itself; otherwise the item is dropped.
+			if q := f.queue(); falls != (len(q) == 1) {
+				t.Fatalf("queue %+v", q)
+			}
+		})
 	}
 }

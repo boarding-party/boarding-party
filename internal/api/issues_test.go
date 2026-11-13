@@ -68,3 +68,35 @@ func TestIssuesAPI(t *testing.T) {
 		t.Fatalf("worker serves issues: %d", resp.StatusCode)
 	}
 }
+
+func TestIssueSaysHowAFixIsChecked(t *testing.T) {
+	srv, svc := setup(t, 1024)
+	now := time.Now().UTC()
+	if err := svc.Store.CreateRun(store.Run{ID: "r1", Token: "tok", Persona: "ann", Role: "buyer", Story: "checkout",
+		State: store.RunDone, Started: now, Chain: "r1"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Store.AddBug(store.Bug{ID: "b1", RunID: "r1", Summary: "total wrong", Created: now}); err != nil {
+		t.Fatal(err)
+	}
+	bugs, _ := svc.Store.Bugs("r1")
+	checkBy := func() string {
+		t.Helper()
+		var d struct {
+			CheckBy string `json:"checkBy"`
+		}
+		resp := do(t, "GET", srv.URL+"/api/issues/"+bugs[0].IssueID, "")
+		defer resp.Body.Close()
+		if err := json.NewDecoder(resp.Body).Decode(&d); err != nil || resp.StatusCode != 200 {
+			t.Fatalf("%d %v", resp.StatusCode, err)
+		}
+		return d.CheckBy
+	}
+	if got := checkBy(); got != "none" {
+		t.Fatalf("no persona in the project: checkBy = %q", got)
+	}
+	withJourney(t, svc) // puts the project
+	if got := checkBy(); got != "run" {
+		t.Fatalf("checkBy = %q", got)
+	}
+}

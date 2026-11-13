@@ -260,6 +260,10 @@ type Verdict struct {
 	// Next hands the check over: it is queued with the check's chain and
 	// the issue stays verifying.
 	Next *Queued
+	// Settled is set by the store when the verdict moved the issue or
+	// handed its check over; false when the issue was no longer waiting
+	// for this check.
+	Settled bool
 }
 
 // MaxCheckNote caps the persona's note on a fix check.
@@ -320,7 +324,9 @@ func settleCheck(tx *sql.Tx, runID string, state RunState, v *Verdict, now time.
 	case state == RunWaiting:
 		return nil
 	case v != nil && v.Next != nil:
-		return handOver(tx, ctx, chain, *v.Next)
+		ok, err := handOver(tx, ctx, chain, *v.Next)
+		v.Settled = ok
+		return err
 	case v == nil || (state != RunDone && !v.ByReplay):
 	case !v.Reached:
 		note = "Could not check: " + Clip(v.Note, MaxCheckNote)
@@ -329,38 +335,46 @@ func settleCheck(tx *sql.Tx, runID string, state RunState, v *Verdict, now time.
 	default:
 		st, note = IssueClosed, "Gone: "+Clip(v.Note, MaxCheckNote)
 	}
-	return settle(tx, ctx, chain, st, note, reopen, now)
+	ok, err := settle(tx, ctx, chain, st, note, reopen, now)
+	if v != nil {
+		v.Settled = ok
+	}
+	return err
 }
 
 // handOver queues next, the run that carries on the fix check of a verify
-// context, if its issue is still verifying under chain.
-func handOver(tx *sql.Tx, ctxJSON, chain string, next Queued) error {
+// context, if its issue is still verifying under chain; true when it did.
+func handOver(tx *sql.Tx, ctxJSON, chain string, next Queued) (bool, error) {
 	var c RunContext
 	if json.Unmarshal([]byte(ctxJSON), &c) != nil || c.Verify == nil || chain == "" {
-		return nil
+		return false, nil
 	}
 	var n int
 	if err := tx.QueryRow(`SELECT count(*) FROM issues WHERE id = ? AND status = 'verifying' AND check_chain = ?`,
 		c.Verify.IssueID, chain).Scan(&n); err != nil || n == 0 {
-		return err
+		return false, err
 	}
 	next.Chain = chain
-	return insertQueued(tx, next)
+	return true, insertQueued(tx, next)
 }
 
 // settle moves the issue named by a verify context to st, if that issue is
-// still verifying under chain.
-func settle(tx *sql.Tx, ctxJSON, chain string, st IssueStatus, note string, reopen bool, now time.Time) error {
+// still verifying under chain; true when it did.
+func settle(tx *sql.Tx, ctxJSON, chain string, st IssueStatus, note string, reopen bool, now time.Time) (bool, error) {
 	if ctxJSON == "" {
-		return nil
+		return false, nil
 	}
 	var c RunContext
 	if json.Unmarshal([]byte(ctxJSON), &c) != nil || c.Verify == nil || c.Verify.IssueID == "" || chain == "" {
-		return nil
+		return false, nil
 	}
-	_, err := tx.Exec(`UPDATE issues SET status=?, check_note=?, check_chain='', updated=?,
+	res, err := tx.Exec(`UPDATE issues SET status=?, check_note=?, check_chain='', updated=?,
 		reopened = CASE WHEN ? THEN ? ELSE reopened END
 		WHERE id=? AND status='verifying' AND check_chain=?`,
 		string(st), note, ts(now), reopen, ts(now), c.Verify.IssueID, chain)
-	return err
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	return n > 0, err
 }

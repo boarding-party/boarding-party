@@ -430,12 +430,9 @@ func (s *server) getRun(w http.ResponseWriter, r *http.Request) {
 	}
 	if run.Kind == store.RunReplay {
 		out["cost"] = 0.0 // a replay runs no model
-		cop, err := s.copilotOf(run)
-		if err != nil {
-			fail(w, err)
-			return
-		}
-		if cop != nil {
+		if cop, err := s.copilotOf(run); err != nil {
+			log.Printf("api: run %s copilot: %v", run.ID, err)
+		} else if cop != nil {
 			out["copilot"] = cop
 		}
 	} else if u, err := s.svc.Usage(run.ID); err != nil {

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/boarding-party/boardingparty/internal/store"
@@ -31,10 +32,15 @@ func (s *Service) SetIssueStatus(id string, st store.IssueStatus, reason string,
 	return fmt.Errorf("%w: status must be open, confirmed, not_a_bug or fixed, got %q", ErrInvalid, st)
 }
 
-// markFixed checks the fix: by replaying the journey step of the newest
-// report linked to one that can still be replayed, or else with a run of
-// the persona and story of the issue's latest report whose persona and story
-// still exist, to look for the problem again.
+// How a fix gets checked when the issue is marked fixed (CheckBy).
+const (
+	CheckByReplay = "replay" // a replay of the journey step that shows it
+	CheckByRun    = "run"    // an AI run of the story that found it
+	CheckByNobody = "none"   // nobody: the persona or story is gone
+)
+
+// markFixed checks the fix with the run checkFor picks, or marks the issue
+// fixed unchecked when there is none.
 func (s *Service) markFixed(id string, now time.Time) error {
 	is, err := s.Store.Issue(id)
 	if err != nil {
@@ -43,26 +49,60 @@ func (s *Service) markFixed(id string, now time.Time) error {
 	if is.Status == store.IssueVerifying {
 		return nil
 	}
-	reports, err := s.Store.IssueReports(id)
+	q, ok, err := s.checkFor(is, now)
 	if err != nil {
 		return err
+	}
+	if !ok {
+		return s.Store.NoCheck(id, store.NoCheckNobody, now)
+	}
+	_, err = s.Store.StartCheck(id, q, now)
+	return err
+}
+
+// CheckBy says how marking issue id fixed would check the fix: CheckByReplay,
+// CheckByRun or CheckByNobody. It queues nothing.
+func (s *Service) CheckBy(id string) (string, error) {
+	is, err := s.Store.Issue(id)
+	if err != nil {
+		return "", err
+	}
+	q, ok, err := s.checkFor(is, time.Now().UTC())
+	switch {
+	case err != nil:
+		return "", err
+	case !ok:
+		return CheckByNobody, nil
+	case q.Kind == store.RunReplay:
+		return CheckByReplay, nil
+	}
+	return CheckByRun, nil
+}
+
+// checkFor is the run that checks issue is's fix: a replay of the journey
+// step of the newest report linked to one that can still be replayed, or
+// else a run of the persona and story of the latest report whose persona and
+// story still exist, to look for the problem again. False when there is none.
+func (s *Service) checkFor(is store.Issue, now time.Time) (store.Queued, bool, error) {
+	reports, err := s.Store.IssueReports(is.ID)
+	if err != nil {
+		return store.Queued{}, false, err
 	}
 	for _, rp := range reports { // newest first
 		if rp.JourneyID == "" || rp.JourneyStep < 1 {
 			continue
 		}
 		q, ok, err := s.replayCheck(is, rp, now)
-		if err != nil {
-			return err
-		}
-		if ok {
-			_, err = s.Store.StartCheck(id, q, now)
-			return err
+		if err != nil || ok {
+			return q, ok, err
 		}
 	}
 	p, err := s.Store.Project()
+	if errors.Is(err, store.ErrNotFound) {
+		return store.Queued{}, false, nil // no project yet: no persona to check it
+	}
 	if err != nil {
-		return fmt.Errorf("load project: %w", err)
+		return store.Queued{}, false, fmt.Errorf("load project: %w", err)
 	}
 	for _, rp := range reports { // newest first
 		role, story, err := find(p, rp.Persona, rp.Story)
@@ -70,21 +110,19 @@ func (s *Service) markFixed(id string, now time.Time) error {
 			continue
 		}
 		ctx, err := json.Marshal(store.RunContext{Kind: "verify", Verify: &store.ContextVerify{
-			IssueID: id, Summary: store.Clip(rp.Summary, maxVerifyText), Step: store.Clip(rp.Step, maxVerifyText),
+			IssueID: is.ID, Summary: store.Clip(rp.Summary, maxVerifyText), Step: store.Clip(rp.Step, maxVerifyText),
 			Evidence: store.Clip(rp.Evidence, maxVerifyText)}})
 		if err != nil {
-			return err
+			return store.Queued{}, false, err
 		}
 		qid, err := randHex(16)
 		if err != nil {
-			return err
+			return store.Queued{}, false, err
 		}
-		q := store.Queued{ID: qid, Chain: qid, Persona: rp.Persona, Role: role, Story: story, Context: ctx,
-			Reason: "Checks the fix: " + store.Clip(is.Summary, maxCheckReason), Created: now}
-		_, err = s.Store.StartCheck(id, q, now)
-		return err
+		return store.Queued{ID: qid, Chain: qid, Persona: rp.Persona, Role: role, Story: story, Context: ctx,
+			Reason: "Checks the fix: " + store.Clip(is.Summary, maxCheckReason), Created: now}, true, nil
 	}
-	return s.Store.NoCheck(id, store.NoCheckNobody, now)
+	return store.Queued{}, false, nil
 }
 
 // replayCheck is the queued replay that checks issue's fix at report rp's
@@ -116,18 +154,40 @@ func (s *Service) replayCheck(is store.Issue, rp store.Report, now time.Time) (s
 		Kind: store.RunReplay, JourneyID: j.ID, Revision: rev.N, Seed: seed}, true, nil
 }
 
-// replayVerdict is a fix-check replay's verdict on step v.JourneyStep, or
-// handOver when the replay never showed whether the problem is there.
-func replayVerdict(v store.ContextVerify, res ReplayResult) (verdict store.Verdict, handOver bool) {
+// After a fix-check replay: nothing more, the same replay again, or an AI run.
+type checkNext int
+
+const (
+	nextNone checkNext = iota
+	nextRepeat
+	nextAI
+)
+
+// replayVerdict is a fix-check replay's verdict on step v.JourneyStep, and
+// what runs next when the replay has not settled it. A first failure at the
+// step is run again with the same inputs, as a journey's own failure is,
+// unless the replay resumed from a wait: what arrived (such as a one-time
+// link) may be used up.
+func replayVerdict(v store.ContextVerify, res ReplayResult, resumed bool) (store.Verdict, checkNext) {
 	n := v.JourneyStep
 	switch {
+	case res.Status == "failed" && res.Step == n && !v.Repeat && !resumed:
+		return store.Verdict{ByReplay: true}, nextRepeat
 	case res.Status == "failed" && res.Step == n:
+		twice := ""
+		if v.Repeat {
+			twice = " twice with the same inputs"
+		}
 		return store.Verdict{Reached: true, StillThere: true, ByReplay: true,
-			Note: fmt.Sprintf("The replay failed at step %d again: %s", n, store.Clip(res.StepName, 200))}, false
+			Note: fmt.Sprintf("The replay failed at step %d (%s)%s: %s", n, store.Clip(res.StepName, 200), twice, store.Clip(res.Error, 300))}, nextNone
 	case res.Status == "passed" || ((res.Status == "failed" || res.Status == "waiting") && res.Step > n):
-		return store.Verdict{Reached: true, ByReplay: true, Note: fmt.Sprintf("The replay got past step %d.", n)}, false
+		note := fmt.Sprintf("The replay got past step %d.", n)
+		if v.Repeat {
+			note = fmt.Sprintf("The replay got past step %d when run again with the same inputs, after failing there once.", n)
+		}
+		return store.Verdict{Reached: true, ByReplay: true, Note: note}, nextNone
 	}
-	return store.Verdict{ByReplay: true}, true
+	return store.Verdict{ByReplay: true}, nextAI
 }
 
 // replayNote says what a fix-check replay of revision rev saw before it
@@ -146,39 +206,52 @@ func replayNote(rev int, v store.ContextVerify, res ReplayResult) string {
 }
 
 // FixCheckVerdict is the verdict of replay run r on the fix it checks, with
-// the AI run that takes over when the replay cannot tell; nil when r checks
+// the run that takes over when the replay has not settled it: the same
+// replay again, or an AI run when the replay cannot tell. Nil when r checks
 // no fix.
 func FixCheckVerdict(r store.Run, res ReplayResult, now time.Time) (*store.Verdict, error) {
 	var c store.RunContext
 	if json.Unmarshal(r.Context, &c) != nil || c.Verify == nil || c.Verify.JourneyStep < 1 {
 		return nil, nil
 	}
-	v, hand := replayVerdict(*c.Verify, res)
-	if !hand {
+	v, next := replayVerdict(*c.Verify, res, c.Resume != nil)
+	if next == nextNone {
 		return &v, nil
-	}
-	cv := *c.Verify
-	cv.JourneyID, cv.Revision, cv.JourneyStep = "", 0, 0
-	cv.ReplayNote = replayNote(r.Revision, *c.Verify, res)
-	ctx, err := json.Marshal(store.RunContext{Kind: "verify", Verify: &cv})
-	if err != nil {
-		return nil, err
 	}
 	qid, err := randHex(16)
 	if err != nil {
 		return nil, err
 	}
-	v.Next = &store.Queued{ID: qid, Chain: r.Chain, Follows: r.ID, Persona: r.Persona, Role: r.Role, Story: r.Story, Context: ctx,
-		Reason: "Checks the fix after a replay: " + store.Clip(cv.Summary, maxCheckReason), Created: now}
+	cv := *c.Verify
+	q := store.Queued{ID: qid, Chain: r.Chain, Follows: r.ID, Persona: r.Persona, Role: r.Role, Story: r.Story, Created: now}
+	if next == nextRepeat {
+		cv.Repeat = true
+		q.Reason = "Checks the fix again with the same inputs: " + store.Clip(cv.Summary, maxCheckReason)
+		q.Kind, q.JourneyID, q.Revision, q.Seed = store.RunReplay, r.JourneyID, r.Revision, r.Seed
+	} else {
+		cv.JourneyID, cv.Revision, cv.JourneyStep, cv.Repeat = "", 0, 0, false
+		cv.ReplayNote = replayNote(r.Revision, *c.Verify, res)
+		q.Reason = "Checks the fix after a replay: " + store.Clip(cv.Summary, maxCheckReason)
+	}
+	if q.Context, err = json.Marshal(store.RunContext{Kind: "verify", Verify: &cv}); err != nil {
+		return nil, err
+	}
+	v.Next = &q
 	return &v, nil
 }
 
-// FixCheckDecided records on the journey what a fix-check replay decided.
+// FixCheckDecided records on the journey what a fix-check replay decided,
+// if its verdict settled anything.
 func FixCheckDecided(st *store.Store, r store.Run, v *store.Verdict, now time.Time) error {
+	if !v.Settled {
+		return nil
+	}
 	var c store.RunContext
 	_ = json.Unmarshal(r.Context, &c)
 	what := "Gone"
 	switch {
+	case v.Next != nil && v.Next.Kind == store.RunReplay:
+		what = fmt.Sprintf("failed at step %d; checking again with the same inputs", c.Verify.JourneyStep)
 	case v.Next != nil:
 		what = "handed to an AI run"
 	case v.StillThere:
@@ -193,6 +266,45 @@ func FixCheckDecided(st *store.Store, r store.Run, v *store.Verdict, now time.Ti
 	}
 	return st.AddDecision(store.Decision{JourneyID: j.ID, RunID: r.ID, Kind: "fix check", Actor: store.ActorDirector,
 		Reason: "Issue " + c.Verify.IssueID + ": " + what, RevBefore: j.LiveRev, RevAfter: j.LiveRev, Created: now})
+}
+
+// FixCheckFallback hands queued item q, a fix-check replay that can no
+// longer be replayed (its journey paused or deleted, its revision or story
+// gone), to an AI run of the same story in its place. False, changing
+// nothing, when q is no such replay.
+func (s *Service) FixCheckFallback(q store.Queued, now time.Time) (bool, error) {
+	var c store.RunContext
+	if q.Kind != store.RunReplay || json.Unmarshal(q.Context, &c) != nil || c.Verify == nil || c.Verify.JourneyStep < 1 {
+		return false, nil
+	}
+	var why string
+	switch _, _, _, err := s.replayable(q.JourneyID, q.Revision); {
+	case errors.Is(err, store.ErrNotFound):
+		why = "the journey was deleted"
+	case errors.Is(err, ErrStaleJourney):
+		why = strings.TrimPrefix(err.Error(), ErrStaleJourney.Error()+": ")
+	case err != nil:
+		return false, err
+	default:
+		return false, nil // it can be replayed: whatever stopped it, it is not the journey
+	}
+	cv := *c.Verify
+	cv.JourneyID, cv.Revision, cv.JourneyStep, cv.Repeat = "", 0, 0, false
+	cv.ReplayNote = fmt.Sprintf("Revision %d of the journey could not be replayed: %s.", q.Revision, why)
+	ctx, err := json.Marshal(store.RunContext{Kind: "verify", Verify: &cv})
+	if err != nil {
+		return false, err
+	}
+	qid, err := randHex(16)
+	if err != nil {
+		return false, err
+	}
+	next := store.Queued{ID: qid, Chain: q.Chain, Persona: q.Persona, Role: q.Role, Story: q.Story, Context: ctx,
+		Reason: "Checks the fix: " + store.Clip(cv.Summary, maxCheckReason), Created: now}
+	if _, err := s.Store.ReplaceQueued(q.ID, next); err != nil && !errors.Is(err, store.ErrNotFound) {
+		return false, err
+	}
+	return true, nil
 }
 
 // FinishChecked is Finish for a run that checks a fix: v is its verdict.

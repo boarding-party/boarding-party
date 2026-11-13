@@ -3,6 +3,7 @@ package runs
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strconv"
 	"strings"
 	"testing"
@@ -130,21 +131,87 @@ func fixCheckRow(t *testing.T, svc *Service, j store.Journey, runID, reason stri
 
 func TestReplayFixCheckStillThere(t *testing.T) {
 	svc, _ := newSvc(t)
-	id, j, _ := linked(t, svc)
+	id, j, n := linked(t, svc)
 	r := fixCheck(t, svc, id)
-	if err := svc.FinishReplay(r.Token, ReplayResult{Status: "failed", Step: 3, StepName: "Pay", Error: "expected £540", Seed: r.Seed}, at); err != nil {
+	fail := ReplayResult{Status: "failed", Step: 3, StepName: "Pay", Error: "expected £540", Seed: r.Seed}
+	if err := svc.FinishReplay(r.Token, fail, at); err != nil {
+		t.Fatal(err)
+	}
+	// One failure at the step is checked again with the same inputs, as a
+	// journey's own failure is.
+	if is := issueNow(t, svc, id); is.Status != store.IssueVerifying || is.CheckChain != r.Chain {
+		t.Fatalf("one failure settled the check: %+v", is)
+	}
+	q, _ := svc.Store.Queue()
+	if len(q) != 1 || q[0].Kind != store.RunReplay || q[0].Chain != r.Chain || q[0].Follows != r.ID || q[0].JourneyID != j.ID ||
+		q[0].Revision != n || q[0].Seed != r.Seed || q[0].Persona != "ann" || q[0].Story != "checkout" || q[0].Role != "buyer" {
+		t.Fatalf("queue %+v", q)
+	}
+	if c := ctxOf(t, q[0].Context); c.Verify == nil || !c.Verify.Repeat || c.Verify.JourneyStep != 3 || c.Verify.IssueID != id {
+		t.Fatalf("context %+v", c.Verify)
+	}
+	fixCheckRow(t, svc, j, r.ID, "Issue "+id+": failed at step 3; checking again with the same inputs")
+	r2, err := svc.StartQueued(context.Background(), q[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	fail.Seed = r2.Seed
+	if err := svc.FinishReplay(r2.Token, fail, at); err != nil {
 		t.Fatal(err)
 	}
 	is := issueNow(t, svc, id)
-	if is.Status != store.IssueOpen || is.CheckNote != "Still there: The replay failed at step 3 again: Pay" || is.Reopened.IsZero() {
+	if is.Status != store.IssueOpen || is.CheckNote != "Still there: The replay failed at step 3 (Pay) twice with the same inputs: expected £540" || is.Reopened.IsZero() {
 		t.Fatalf("issue %+v", is)
 	}
-	fixCheckRow(t, svc, j, r.ID, "Issue "+id+": Still there")
 	if jj, _ := svc.Store.Journey(j.ID); jj.Passed+jj.Failed != 0 {
 		t.Fatalf("a fix-check replay counted on the journey's record: %+v", jj)
 	}
 	if q, _ := svc.Store.Queue(); len(q) != 0 {
 		t.Fatalf("queue %+v", q)
+	}
+}
+
+func TestReplayFixCheckRepeatGetsPast(t *testing.T) {
+	svc, _ := newSvc(t)
+	id, _, _ := linked(t, svc)
+	r := fixCheck(t, svc, id)
+	if err := svc.FinishReplay(r.Token, ReplayResult{Status: "failed", Step: 3, StepName: "Pay", Error: "timeout", Seed: r.Seed}, at); err != nil {
+		t.Fatal(err)
+	}
+	q, _ := svc.Store.Queue()
+	r2, err := svc.StartQueued(context.Background(), q[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.FinishReplay(r2.Token, ReplayResult{Status: "passed", Seed: r2.Seed}, at); err != nil {
+		t.Fatal(err)
+	}
+	if is := issueNow(t, svc, id); is.Status != store.IssueClosed ||
+		is.CheckNote != "Gone: The replay got past step 3 when run again with the same inputs, after failing there once." {
+		t.Fatalf("issue %+v", is)
+	}
+}
+
+func TestFixCheckDecisionOnlyWhenSettled(t *testing.T) {
+	svc, _ := newSvc(t)
+	id, j, _ := linked(t, svc)
+	r := fixCheck(t, svc, id)
+	// The user reopens the issue while the replay runs: the replay's
+	// verdict no longer counts, so the journey records nothing.
+	if err := svc.SetIssueStatus(id, store.IssueOpen, "", at); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.FinishReplay(r.Token, ReplayResult{Status: "passed", Seed: r.Seed}, at); err != nil {
+		t.Fatal(err)
+	}
+	if is := issueNow(t, svc, id); is.Status != store.IssueOpen {
+		t.Fatalf("issue %+v", is)
+	}
+	ds, _ := svc.Store.Decisions(j.ID)
+	for _, d := range ds {
+		if d.Kind == "fix check" {
+			t.Fatalf("a fix check that settled nothing was recorded: %+v", d)
+		}
 	}
 }
 
@@ -252,19 +319,38 @@ func TestFixCheckReplayContinuationSettles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := svc.FinishReplay(r2.Token, ReplayResult{Status: "failed", Step: 3, StepName: "Pay", Seed: r.Seed}, at); err != nil {
+	if err := svc.FinishReplay(r2.Token, ReplayResult{Status: "failed", Step: 3, StepName: "Pay", Error: "expected £540", Seed: r.Seed}, at); err != nil {
 		t.Fatal(err)
 	}
-	if is := issueNow(t, svc, id); is.Status != store.IssueOpen {
+	// Not run again: what arrived at the wait (such as a one-time link) may be used up.
+	if is := issueNow(t, svc, id); is.Status != store.IssueOpen || is.CheckNote != "Still there: The replay failed at step 3 (Pay): expected £540" {
 		t.Fatalf("issue %+v", is)
 	}
 }
 
 func TestDroppedFixCheckReplaySettles(t *testing.T) {
-	for _, how := range []string{"taken off the queue", "journey deleted"} {
+	svc, _ := newSvc(t)
+	id, _, _ := linked(t, svc)
+	if err := svc.SetIssueStatus(id, store.IssueFixed, "", at); err != nil {
+		t.Fatal(err)
+	}
+	q, _ := svc.Store.Queue()
+	if err := svc.Store.DeleteQueued(q[0].ID); err != nil {
+		t.Fatal(err)
+	}
+	if is := issueNow(t, svc, id); is.Status != store.IssueFixed || is.CheckNote != "Could not check: the check was taken off the queue." {
+		t.Fatalf("issue %+v", is)
+	}
+}
+
+func TestUnplayableFixCheckFallsBackToAI(t *testing.T) {
+	for how, note := range map[string]string{
+		"journey paused":  "could not be replayed: it is paused.",
+		"journey deleted": "could not be replayed: the journey was deleted.",
+	} {
 		t.Run(how, func(t *testing.T) {
 			svc, _ := newSvc(t)
-			id, j, _ := linked(t, svc)
+			id, j, n := linked(t, svc)
 			if err := svc.SetIssueStatus(id, store.IssueFixed, "", at); err != nil {
 				t.Fatal(err)
 			}
@@ -273,15 +359,71 @@ func TestDroppedFixCheckReplaySettles(t *testing.T) {
 			if how == "journey deleted" {
 				err = svc.Store.DeleteJourney(j.ID, store.Decision{Kind: "deleted", Actor: "kate", Created: at})
 			} else {
-				err = svc.Store.DeleteQueued(q[0].ID)
+				err = svc.Store.SetJourneyState(j.ID, store.JourneyPaused, store.Decision{Kind: "paused", Actor: "kate", Created: at})
 			}
 			if err != nil {
 				t.Fatal(err)
 			}
-			if is := issueNow(t, svc, id); is.Status != store.IssueFixed || is.CheckNote != "Could not check: the check was taken off the queue." {
+			if _, err := svc.StartQueued(context.Background(), q[0]); !errors.Is(err, ErrInvalid) {
+				t.Fatalf("start = %v", err)
+			}
+			ok, err := svc.FixCheckFallback(q[0], at)
+			if err != nil || !ok {
+				t.Fatalf("fallback = %v, %v", ok, err)
+			}
+			got, _ := svc.Store.Queue()
+			if len(got) != 1 || got[0].Kind == store.RunReplay || got[0].Chain != q[0].Chain || got[0].Persona != "ann" ||
+				got[0].Story != "checkout" || got[0].Role != "buyer" || got[0].JourneyID != "" {
+				t.Fatalf("queue %+v", got)
+			}
+			c := ctxOf(t, got[0].Context)
+			if c.Verify == nil || c.Verify.IssueID != id || c.Verify.JourneyStep != 0 ||
+				c.Verify.ReplayNote != "Revision "+strconv.Itoa(n)+" of the journey "+note {
+				t.Fatalf("context %+v", c.Verify)
+			}
+			if is := issueNow(t, svc, id); is.Status != store.IssueVerifying || is.CheckChain != q[0].Chain {
 				t.Fatalf("issue %+v", is)
 			}
 		})
+	}
+}
+
+func TestFixCheckFallbackLeavesOtherItems(t *testing.T) {
+	svc, _ := newSvc(t)
+	j := recorded(t, svc, 1)
+	q, err := svc.EnqueueReplay(j.ID, 0, 7, "kate", at)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := svc.FixCheckFallback(q, at); err != nil || ok {
+		t.Fatalf("a plain replay fell back: %v, %v", ok, err)
+	}
+	if got, _ := svc.Store.Queue(); len(got) != 1 || got[0].ID != q.ID {
+		t.Fatalf("queue %+v", got)
+	}
+}
+
+func TestCheckBy(t *testing.T) {
+	svc, _ := newSvc(t)
+	id, j, _ := linked(t, svc)
+	plain := report(t, svc, "r2", "ann", "checkout", "", at)
+	gone := report(t, svc, "r3", "zed", "checkout", "", at)
+	for _, c := range []struct{ id, want string }{{id, CheckByReplay}, {plain, CheckByRun}, {gone, CheckByNobody}} {
+		if got, err := svc.CheckBy(c.id); err != nil || got != c.want {
+			t.Errorf("CheckBy(%s) = %q, %v; want %q", c.id, got, err, c.want)
+		}
+	}
+	if err := svc.Store.SetJourneyState(j.ID, store.JourneyPaused, store.Decision{Kind: "paused", Actor: "kate", Created: at}); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := svc.CheckBy(id); got != CheckByRun {
+		t.Errorf("paused journey: CheckBy = %q", got)
+	}
+	if q, _ := svc.Store.Queue(); len(q) != 0 {
+		t.Fatalf("CheckBy queued %+v", q)
+	}
+	if _, err := svc.CheckBy("nope"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("unknown issue: %v", err)
 	}
 }
 

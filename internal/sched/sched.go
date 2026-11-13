@@ -34,6 +34,9 @@ type Starter interface {
 	Gate(now time.Time) error
 	// LeadGate returns runs.ErrLeadOverBudget when the budget of persona's lead is spent.
 	LeadGate(p project.Project, persona string, now time.Time) error
+	// FixCheckFallback hands q, a fix-check replay that can no longer be
+	// replayed, to an AI run in its place; false when q is no such replay.
+	FixCheckFallback(q store.Queued, now time.Time) (bool, error)
 }
 
 // Scheduler hands stories off, resolves waits and starts queued runs, one at
@@ -474,6 +477,14 @@ func (s *Scheduler) drain(ctx context.Context) error {
 			}
 			return nil // the item stays for a later tick
 		case errors.Is(err, runs.ErrInvalid):
+			fell, ferr := s.Runs.FixCheckFallback(q, s.now())
+			if ferr != nil {
+				return ferr
+			}
+			if fell {
+				log.Printf("queued fix check %s/%s goes to an AI run: %v", q.Persona, q.Story, err)
+				continue
+			}
 			if derr := s.Store.DeleteQueued(q.ID); derr != nil && !errors.Is(derr, store.ErrNotFound) {
 				return derr
 			}
