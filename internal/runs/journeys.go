@@ -148,6 +148,40 @@ func (s *Service) CheckJourneyDecided(r store.Run) error {
 	return nil
 }
 
+// PauseJourney stops a journey's replays until it is resumed; nothing else
+// runs for its persona and story either. A copilot run already under way
+// still lands its decision; the journey stays paused.
+func (s *Service) PauseJourney(id, actor string) error {
+	return s.Store.SetJourneyState(id, store.JourneyPaused, store.Decision{Kind: "paused",
+		Reason: "Paused by " + actor, Actor: actor, Created: time.Now().UTC()})
+}
+
+// ResumeJourney makes a journey live again.
+func (s *Service) ResumeJourney(id, actor string) error {
+	return s.Store.SetJourneyState(id, store.JourneyLive, store.Decision{Kind: "resumed",
+		Reason: "Resumed by " + actor, Actor: actor, Created: time.Now().UTC()})
+}
+
+// RollbackJourney makes the code of full revision n live again, as a new
+// revision.
+func (s *Service) RollbackJourney(id string, n int, actor string) (store.Revision, error) {
+	if n < 1 {
+		return store.Revision{}, fmt.Errorf("%w: revision must be 1 or more", ErrInvalid)
+	}
+	_, rev, err := s.Store.Rollback(id, n, store.Decision{Kind: "rolled back",
+		Reason: fmt.Sprintf("Rolled back to revision %d by %s", n, actor), Actor: actor, Created: time.Now().UTC()})
+	if errors.Is(err, store.ErrBugRevision) {
+		return store.Revision{}, fmt.Errorf("%w: %v", ErrInvalid, err)
+	}
+	return rev, err
+}
+
+// DeleteJourney deletes a journey and its revisions; its decisions stay.
+func (s *Service) DeleteJourney(id, actor string) error {
+	return s.Store.DeleteJourney(id, store.Decision{Kind: "deleted",
+		Reason: "Deleted by " + actor, Actor: actor, Created: time.Now().UTC()})
+}
+
 func checkText(code, reason string) error {
 	if strings.TrimSpace(reason) == "" {
 		return errors.New("reason is required")

@@ -34,6 +34,10 @@ var auditActions = map[string]string{
 	"PUT /api/children/{name}":               "child.adopt",
 	"DELETE /api/children/{name}":            "child.delete",
 	"POST /api/journeys/{id}/replay":         "journey.replay",
+	"POST /api/journeys/{id}/pause":          "journey.pause",
+	"POST /api/journeys/{id}/resume":         "journey.resume",
+	"POST /api/journeys/{id}/rollback":       "journey.rollback",
+	"DELETE /api/journeys/{id}":              "journey.delete",
 }
 
 func validActor(a string) bool {

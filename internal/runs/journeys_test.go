@@ -162,3 +162,59 @@ func TestSaveJourneyRefusesTokens(t *testing.T) {
 		}
 	}
 }
+
+func TestPauseResumeRows(t *testing.T) {
+	svc, _ := newSvc(t)
+	j := recorded(t, svc, 1)
+	if err := svc.PauseJourney(j.ID, "kate@shop.test"); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := svc.Store.Journey(j.ID); got.State != store.JourneyPaused {
+		t.Fatalf("state %s", got.State)
+	}
+	if err := svc.ResumeJourney(j.ID, "kate@shop.test"); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := svc.Store.Journey(j.ID); got.State != store.JourneyLive {
+		t.Fatalf("state %s", got.State)
+	}
+	ds, _ := svc.Store.Decisions(j.ID)
+	if ds[0].Kind != "resumed" || ds[0].Reason != "Resumed by kate@shop.test" || ds[0].Actor != "kate@shop.test" ||
+		ds[1].Kind != "paused" || ds[1].Reason != "Paused by kate@shop.test" {
+		t.Fatalf("decisions %+v", ds)
+	}
+	if err := svc.PauseJourney("nope", "kate"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("missing journey: %v", err)
+	}
+}
+
+func TestRollbackJourneyRow(t *testing.T) {
+	svc, _ := newSvc(t)
+	j := recorded(t, svc, 2)
+	rev, err := svc.RollbackJourney(j.ID, 1, "kate")
+	if err != nil || rev.N != 3 {
+		t.Fatalf("%+v %v", rev, err)
+	}
+	ds, _ := svc.Store.Decisions(j.ID)
+	if ds[0].Kind != "rolled back" || ds[0].Reason != "Rolled back to revision 1 by kate" || ds[0].Actor != "kate" {
+		t.Fatalf("decision %+v", ds[0])
+	}
+	if _, err := svc.RollbackJourney(j.ID, 0, "kate"); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("revision 0: %v", err)
+	}
+	if _, err := svc.RollbackJourney(j.ID, 9, "kate"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("revision 9: %v", err)
+	}
+}
+
+func TestDeleteJourneyRow(t *testing.T) {
+	svc, _ := newSvc(t)
+	j := recorded(t, svc, 1)
+	if err := svc.DeleteJourney(j.ID, "kate"); err != nil {
+		t.Fatal(err)
+	}
+	ds, _ := svc.Store.Decisions(j.ID)
+	if ds[0].Kind != "deleted" || ds[0].Reason != "Deleted by kate" || ds[0].Actor != "kate" {
+		t.Fatalf("decision %+v", ds[0])
+	}
+}

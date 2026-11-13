@@ -278,6 +278,76 @@ func (s *Store) SetJourneyState(id string, to JourneyState, d Decision) error {
 	return tx.Commit()
 }
 
+// ErrBugRevision means a bug revision was asked to go live.
+var ErrBugRevision = errors.New("a bug revision reproduces one bug and never goes live")
+
+// Rollback copies full revision n as the journey's next revision, which goes
+// live, and records d, in one transaction. The new revision's reason is d's.
+// ErrNotFound for no such journey or revision; ErrBugRevision for a bug one.
+func (s *Store) Rollback(id string, n int, d Decision) (Journey, Revision, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return Journey{}, Revision{}, err
+	}
+	defer tx.Rollback()
+	j, err := scanJourney(tx.QueryRow(`SELECT `+journeyCols+` FROM journeys WHERE id = ?`, id))
+	if err != nil {
+		return Journey{}, Revision{}, err
+	}
+	old, err := scanRevision(tx.QueryRow(`SELECT `+revisionCols+` FROM journey_revisions WHERE journey_id = ? AND n = ?`, id, n))
+	if err != nil {
+		return Journey{}, Revision{}, err
+	}
+	if old.Kind == RevisionBug {
+		return Journey{}, Revision{}, ErrBugRevision
+	}
+	r := Revision{JourneyID: id, Kind: RevisionFull, Code: old.Code, Reason: d.Reason, RunID: d.RunID, Parent: j.LiveRev, Created: d.Created}
+	if err := tx.QueryRow(`SELECT COALESCE(MAX(n), 0) + 1 FROM journey_revisions WHERE journey_id = ?`, id).Scan(&r.N); err != nil {
+		return Journey{}, Revision{}, err
+	}
+	if _, err := tx.Exec(`INSERT INTO journey_revisions(journey_id, n, kind, code, reason, run_id, parent, created)
+		VALUES(?,?,?,?,?,?,?,?)`, r.JourneyID, r.N, string(r.Kind), r.Code, r.Reason, r.RunID, r.Parent, ts(r.Created)); err != nil {
+		return Journey{}, Revision{}, err
+	}
+	d.JourneyID, d.RevBefore, d.RevAfter = id, j.LiveRev, r.N
+	j.LiveRev = r.N
+	if _, err := tx.Exec(`UPDATE journeys SET live_rev = ? WHERE id = ?`, j.LiveRev, id); err != nil {
+		return Journey{}, Revision{}, err
+	}
+	if err := insertDecision(tx, &d); err != nil {
+		return Journey{}, Revision{}, err
+	}
+	return j, r, tx.Commit()
+}
+
+// DeleteJourney deletes a journey, its revisions and its queued replays, and
+// records d; every decision about it stays. ErrNotFound if it is not there.
+func (s *Store) DeleteJourney(id string, d Decision) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	j, err := scanJourney(tx.QueryRow(`SELECT `+journeyCols+` FROM journeys WHERE id = ?`, id))
+	if err != nil {
+		return err
+	}
+	for _, q := range []string{
+		`DELETE FROM journeys WHERE id = ?`,
+		`DELETE FROM journey_revisions WHERE journey_id = ?`,
+		`DELETE FROM queue WHERE journey_id = ?`,
+	} {
+		if _, err := tx.Exec(q, id); err != nil {
+			return err
+		}
+	}
+	d.JourneyID, d.RevBefore, d.RevAfter = id, j.LiveRev, 0
+	if err := insertDecision(tx, &d); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 // ActorModel is the actor of decisions an AI run made.
 const ActorModel = "model"
 

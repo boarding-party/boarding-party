@@ -164,3 +164,99 @@ func TestEnsureJourneyAndRunDecided(t *testing.T) {
 		t.Fatalf("decided: %v %v", ok, err)
 	}
 }
+
+func TestRollbackCopiesOldCode(t *testing.T) {
+	s := open(t)
+	addRev(t, s, RevisionFull, "a", t0)
+	j, _ := addRev(t, s, RevisionFull, "b", t0.Add(time.Minute))
+	at := t0.Add(time.Hour)
+	j, rev, err := s.Rollback(j.ID, 1, Decision{Kind: "rolled back", Reason: "Rolled back to revision 1 by kate", Actor: "kate", Created: at})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rev.N != 3 || rev.Kind != RevisionFull || rev.Code != "a" || rev.Parent != 2 || rev.Reason != "Rolled back to revision 1 by kate" || j.LiveRev != 3 {
+		t.Fatalf("journey %+v rev %+v", j, rev)
+	}
+	if got, _ := s.Journey(j.ID); got.LiveRev != 3 || !got.LastExplored.Equal(t0.Add(time.Minute)) {
+		t.Fatalf("stored journey %+v (a rollback is not exploring)", got)
+	}
+	ds, _ := s.Decisions(j.ID)
+	if ds[0].Kind != "rolled back" || ds[0].RevBefore != 2 || ds[0].RevAfter != 3 || ds[0].Actor != "kate" {
+		t.Fatalf("decision %+v", ds[0])
+	}
+	if _, _, err := s.Rollback(j.ID, 9, Decision{Kind: "rolled back", Actor: "kate", Created: at}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("missing revision: %v", err)
+	}
+	if _, _, err := s.Rollback("nope", 1, Decision{Kind: "rolled back", Actor: "kate", Created: at}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("missing journey: %v", err)
+	}
+}
+
+func TestRollbackRefusesBugRevision(t *testing.T) {
+	s := open(t)
+	addRev(t, s, RevisionFull, "a", t0)
+	j, _ := addRev(t, s, RevisionBug, "b", t0.Add(time.Minute))
+	if _, _, err := s.Rollback(j.ID, 2, Decision{Kind: "rolled back", Actor: "kate", Created: t0}); err == nil || errors.Is(err, ErrNotFound) {
+		t.Fatalf("rollback to a bug revision: %v", err)
+	}
+	if revs, _ := s.Revisions(j.ID); len(revs) != 2 {
+		t.Fatalf("revisions %+v", revs)
+	}
+}
+
+func TestDeleteJourneyKeepsDecisions(t *testing.T) {
+	s := open(t)
+	j, _ := addRev(t, s, RevisionFull, "a", t0)
+	if err := s.DeleteJourney(j.ID, Decision{Kind: "deleted", Reason: "Deleted by kate", Actor: "kate", Created: t0.Add(time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Journey(j.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("journey still there: %v", err)
+	}
+	if revs, _ := s.Revisions(j.ID); len(revs) != 0 {
+		t.Fatalf("revisions kept: %+v", revs)
+	}
+	ds, _ := s.Decisions(j.ID)
+	if len(ds) != 2 || ds[0].Kind != "deleted" || ds[0].Actor != "kate" || ds[0].RevBefore != 1 || ds[1].Kind != "recorded" {
+		t.Fatalf("decisions %+v", ds)
+	}
+	if err := s.DeleteJourney(j.ID, Decision{Kind: "deleted", Actor: "kate", Created: t0}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("second delete: %v", err)
+	}
+}
+
+func TestDeleteJourneyDropsQueuedReplays(t *testing.T) {
+	s := open(t)
+	j, _ := addRev(t, s, RevisionFull, "a", t0)
+	for _, q := range []Queued{
+		{ID: "rp", Persona: "megan", Story: "invoice", Kind: RunReplay, JourneyID: j.ID, Seed: 3, Created: t0},
+		{ID: "ai", Persona: "megan", Story: "invoice", Created: t0},
+	} {
+		if err := s.Enqueue(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.DeleteJourney(j.ID, Decision{Kind: "deleted", Actor: "kate", Created: t0}); err != nil {
+		t.Fatal(err)
+	}
+	if q, _ := s.Queue(); len(q) != 1 || q[0].ID != "ai" {
+		t.Fatalf("queue %+v", q)
+	}
+}
+
+func TestSetJourneyStateRecords(t *testing.T) {
+	s := open(t)
+	j, _ := addRev(t, s, RevisionFull, "a", t0)
+	if err := s.SetJourneyState(j.ID, JourneyPaused, Decision{Kind: "paused", Reason: "Paused by kate", Actor: "kate", Created: t0}); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.Journey(j.ID); got.State != JourneyPaused {
+		t.Fatalf("state %s", got.State)
+	}
+	if ds, _ := s.Decisions(j.ID); ds[0].Kind != "paused" || ds[0].RevBefore != 1 || ds[0].RevAfter != 1 {
+		t.Fatalf("decision %+v", ds[0])
+	}
+	if err := s.SetJourneyState("nope", JourneyLive, Decision{Kind: "resumed", Actor: "kate", Created: t0}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("missing journey: %v", err)
+	}
+}
