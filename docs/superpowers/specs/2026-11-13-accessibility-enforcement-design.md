@@ -24,7 +24,7 @@ How each is enforced:
 | Setting | Enforced by |
 |---|---|
 | Zoom | Viewport halved, device scale factor doubled: the page lays out as at 200% browser zoom |
-| Keyboard only | The tool gate removes click, hover, drag, drop, select, fill, element typing and JS evaluation; adds `browser_type_focused`, which types into the focused element |
+| Keyboard only | The tool gate removes click, hover, drag, drop, select, fill, element typing and JS evaluation, refuses `javascript:` URLs, and adds `browser_type_focused`, which types into the focused element at a person's pace |
 | Screen reader | Image responses omitted: the agent works from the accessibility snapshot only. Screenshots are still saved for evidence |
 | Eyesight | Chrome's vision deficiency emulation on every page (screenshots and the live screen show it) |
 | Display | Context options: `reducedMotion`, `forcedColors` + `contrast: more`, `colorScheme: dark` |
@@ -45,11 +45,18 @@ settings are the persona's, and the agent cannot undo them.
   `tools/list` and refuses blocked `tools/call`s with a reason the agent can
   act on.
 - `bp-browser` also records the persona's settings in
-  `/tmp/bp-browser-settings.json`; `bp-replay --self` uses them when given no
-  flags, so an AI run's self-replay renders like the scheduled replay.
+  `/tmp/bp-pw/settings.json`; `bp-replay --self` uses them, flags on its
+  command line winning setting by setting, so an AI run's self-replay renders
+  like the scheduled replay.
 
 ## Not doing
 
 - Taking the snapshot away from eyesight personas: actions need its refs.
   The agent is told to judge legibility from the screenshots it sees.
 - Simulating age, tremor or cognitive load.
+- Holding a determined agent to the gate. The agent has a shell in the pod,
+  so it could drive Chrome over its local CDP port or open a saved
+  screenshot. The gate stops the model drifting back to clicking or looking;
+  the prompt forbids going around it.
+- Keyboard-only replays. A journey is code; its replay renders like the
+  persona's browser but its clicks are the journey's own.

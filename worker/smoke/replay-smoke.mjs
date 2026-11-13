@@ -114,7 +114,9 @@ writeFileSync(recorded, JSON.stringify({ device: 'desktop', assistive: 'zoom', v
 r = await run(['--journey', looks, '--self'], { BP_SETTINGS: recorded });
 if (r.code !== 0 || r.res?.status !== 'passed') fail('recorded settings: ' + r.out);
 r = await run(['--journey', looks, '--self', '--device', 'desktop'], { BP_SETTINGS: recorded });
-if (r.res?.status !== 'failed') fail('flags on the command line must win over recorded settings: ' + r.out);
+if (r.code !== 0 || r.res?.status !== 'passed') fail('one flag dropped the other recorded settings: ' + r.out);
+r = await run(['--journey', looks, '--self', '--assistive', 'none'], { BP_SETTINGS: recorded });
+if (r.res?.status !== 'failed') fail('a flag on the command line must win over its recorded setting: ' + r.out);
 
 // Run mode: bp-replay spends its one-time claim for its URLs; the code
 // comes from the director; the result and evidence go back.

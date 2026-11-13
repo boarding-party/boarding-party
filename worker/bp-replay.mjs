@@ -54,7 +54,7 @@ function parse(argv) {
 const opts = parse(process.argv.slice(2));
 const LOOK = ['device', 'assistive', 'vision', 'display'];
 // look is the persona's settings given on the command line.
-const look = Object.fromEntries(LOOK.filter((k) => opts[k]).map((k) => [k, opts[k]]));
+const look = Object.fromEntries(LOOK.filter((k) => opts[k] !== undefined).map((k) => [k, opts[k]]));
 if (opts.child) {
   await child();
 } else if (opts.self) {
@@ -79,7 +79,7 @@ function runChild({ file, seed, settings = {}, outDir, profile, saveProfile, cdp
   const args = [self, '--child', '--file', file, '--seed', String(seed), '--out', outDir];
   if (resume) args.push('--resume', resume);
   if (today) args.push('--today', today);
-  for (const k of LOOK) if (settings[k]) args.push('--' + k, settings[k]);
+  for (const k of LOOK) if (settings[k] && settings[k] !== 'none') args.push('--' + k, settings[k]);
   if (profile) args.push('--profile', profile);
   if (saveProfile) args.push('--save-profile', saveProfile);
   if (cdp) args.push('--cdp', '1');
@@ -106,7 +106,8 @@ async function selfMode() {
   let seed = seedOf(opts.seed);
   for (let i = 0; opts.seed === undefined && i < 100 && edgeReplay(seed); i++) seed = seedOf(undefined);
   const outDir = mkdtempSync(join(tmpdir(), 'bp-self-'));
-  const settings = Object.keys(look).length ? look : readSettings(process.env.BP_SETTINGS || '/tmp/bp-pw/settings.json');
+  // What the command line gives wins, setting by setting.
+  const settings = { ...readSettings(process.env.BP_SETTINGS || '/tmp/bp-pw/settings.json'), ...look };
   const res = await runChild({ file: opts.journey, seed, settings, outDir });
   process.stdout.write(JSON.stringify(res) + '\n');
   const want = opts['expect-fail-step'] ? Number(opts['expect-fail-step']) : 0;

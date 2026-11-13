@@ -95,8 +95,19 @@ if (!pressed.result.content[0].text.includes('"browser_press_key"')) fail('an al
 const typed = await ask(3, 'tools/call', { name: 'browser_type_focused', arguments: { text: 'Tom\'s £5 "café"', submit: true } });
 const sent = typed.result.content[0].text;
 if (!sent.includes('browser_run_code_unsafe') || !sent.includes('keyboard.type') || !sent.includes('Enter')) fail('typing was not sent as keyboard.type: ' + sent);
+if (!/delay/.test(sent)) fail('typing goes in at machine speed: ' + sent);
 const code = JSON.parse(sent.slice('called '.length)).arguments.code;
 if (!code.includes(JSON.stringify('Tom\'s £5 "café"'))) fail('typed text not quoted safely: ' + code);
+// A javascript: URL is a click by another name.
+const js = await ask('j', 'tools/call', { name: 'browser_navigate', arguments: { url: '  JavaScript:document.body.click()' } });
+if (!js.result?.isError || !/keyboard/.test(js.result.content[0].text)) fail('a javascript: URL got through: ' + JSON.stringify(js));
+const nav = await ask('n', 'tools/call', { name: 'browser_navigate', arguments: { url: 'https://example.test/' } });
+if (nav.result?.isError) fail('a plain navigation was refused: ' + JSON.stringify(nav));
+// Malformed arguments are refused, not fatal.
+const bad = await ask('b', 'tools/call', { name: 'browser_type_focused', arguments: null });
+if (!bad.result?.isError) fail('malformed arguments were not refused: ' + JSON.stringify(bad));
+const still = await ask('s', 'tools/list', {});
+if (!still.result) fail('the gate died on malformed arguments');
 gate.kill();
 
 // A screen reader's browser sends no images.

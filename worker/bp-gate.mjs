@@ -27,7 +27,7 @@ const blocked = new Set(rules.block);
 const ADDED = {
   browser_type_focused: {
     name: 'browser_type_focused',
-    description: 'Type text into the element that has keyboard focus, key by key, as a keyboard user does. Move focus first with browser_press_key (Tab, Shift+Tab, arrow keys).',
+    description: 'Type text into the element that has keyboard focus, key by key at a person\'s pace. Move focus first with browser_press_key (Tab, Shift+Tab, arrow keys).',
     inputSchema: {
       type: 'object',
       properties: {
@@ -42,21 +42,33 @@ const ADDED = {
 const added = rules.add.map((n) => ADDED[n]);
 
 // rewrite turns a call to an added tool into the Playwright MCP call that
-// does it, or returns an error text.
-function rewrite(name, args = {}) {
+// does it, or returns an error text. Typing keeps the 60-180 ms between keys
+// that every other persona's typing has (humanise.mjs).
+function rewrite(name, args) {
   if (name === 'browser_type_focused') {
-    if (typeof args.text !== 'string') return { error: 'text must be a string' };
+    if (typeof args?.text !== 'string') return { error: 'text must be a string' };
     const enter = args.submit ? ` await page.keyboard.press('Enter');` : '';
-    return { name: 'browser_run_code_unsafe', arguments: { code: `async (page) => { await page.keyboard.type(${JSON.stringify(args.text)});${enter} }` } };
+    return { name: 'browser_run_code_unsafe', arguments: { code: `async (page) => { const delay = () => 60 + Math.random() * 120;`
+      + ` for (const key of ${JSON.stringify(args.text)}) { await page.keyboard.type(key); await page.waitForTimeout(delay()); }${enter} }` } };
   }
   return null;
+}
+
+// sneaks reports a call that would do what a blocked tool does: a
+// javascript: URL runs script in the page, so it is refused wherever script
+// is.
+function sneaks(name, args) {
+  return name === 'browser_navigate' && blocked.has('browser_evaluate') && /^\s*javascript:/i.test(String(args?.url ?? ''));
 }
 
 const childArgs = argv.slice(sep + 2);
 if (rules.imageResponses) childArgs.push(`--image-responses=${rules.imageResponses}`);
 const child = spawn(argv[sep + 1], childArgs, { stdio: ['pipe', 'pipe', 'inherit'] });
 child.on('error', (e) => { console.error('bp-gate: could not start the browser server:', e.message); process.exit(1); });
-child.on('exit', (code, signal) => process.exit(code ?? (signal ? 1 : 0)));
+// Exit once the child's last reply is through, with its exit code.
+let exitCode = null;
+child.on('exit', (code, signal) => { exitCode = code ?? (signal ? 1 : 0); });
+child.stdin.on('error', () => {}); // the child is gone; its exit ends us
 
 const toClient = (m) => process.stdout.write(JSON.stringify(m) + '\n');
 const toServer = (m) => child.stdin.write(JSON.stringify(m) + '\n');
@@ -71,8 +83,9 @@ createInterface({ input: process.stdin }).on('line', (line) => {
   if (m.method === 'tools/call' && m.id !== undefined) {
     const name = m.params?.name;
     if (blocked.has(name)) return refuse(m.id, `${name} is not available: ${rules.why}.`);
+    if (sneaks(name, m.params?.arguments)) return refuse(m.id, `javascript: URLs are not available: ${rules.why}.`);
     if (added.some((t) => t.name === name)) {
-      const r = rewrite(name, m.params.arguments);
+      const r = rewrite(name, m.params?.arguments);
       if (r.error) return refuse(m.id, `${name}: ${r.error}.`);
       m = { ...m, params: { ...m.params, name: r.name, arguments: r.arguments } };
     }
@@ -87,4 +100,7 @@ createInterface({ input: child.stdout }).on('line', (line) => {
     m.result.tools = [...m.result.tools.filter((t) => !blocked.has(t.name)), ...added];
   }
   toClient(m);
+}).on('close', () => {
+  if (exitCode !== null) process.exit(exitCode);
+  child.on('exit', (code, signal) => process.exit(code ?? (signal ? 1 : 0)));
 });
