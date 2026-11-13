@@ -69,9 +69,11 @@ func (s *Scheduler) fire(ctx context.Context, now time.Time) error {
 	}
 	// Only pause and budget count as gated; any other gate error is the
 	// scheduler failing, so every fire stays unsettled for a later tick.
+	// Over budget, stories that would replay still fire: replays never spend.
 	gerr := s.Runs.Gate(now)
-	gated := errors.Is(gerr, runs.ErrPaused) || errors.Is(gerr, runs.ErrOverBudget)
-	if gerr != nil && !gated {
+	gated := errors.Is(gerr, runs.ErrPaused)
+	onlyReplays := errors.Is(gerr, runs.ErrOverBudget)
+	if gerr != nil && !gated && !onlyReplays {
 		return fmt.Errorf("gate: %w", gerr)
 	}
 	var busy, waiting map[string]bool
@@ -93,16 +95,26 @@ func (s *Scheduler) fire(ctx context.Context, now time.Time) error {
 			if !gated && busy[f.Persona] && f.RetryWhenBusy {
 				continue // unsettled: offered again once the persona is free
 			}
-			story := ""
+			var c choice
 			if !gated && !busy[f.Persona] {
-				if story, err = s.pick(f, waiting); err != nil {
+				if c, err = s.pick(p, f, waiting, now, onlyReplays); err != nil {
 					errs = append(errs, fmt.Errorf("source %s: %w", src.Name(), err))
 					continue // unsettled: offered again next tick
 				}
 			}
+			story := c.story
 			if story != "" {
 				q := store.Queued{ID: s.newID(), Persona: f.Persona, Role: f.Role, Story: story, Reason: f.Reason,
 					Context: f.Context, Created: now}
+				if c.replay != nil {
+					seed, err := runs.NewSeed()
+					if err != nil {
+						errs = append(errs, err)
+						continue
+					}
+					q.Kind, q.JourneyID, q.Seed = store.RunReplay, c.replay.ID, seed
+					q.Reason = "Scheduled replay: " + roleNamed(p, f.Role).Activity
+				}
 				if err := s.Store.Enqueue(q); err != nil {
 					errs = append(errs, fmt.Errorf("source %s: queue %s/%s: %w", src.Name(), f.Persona, story, err))
 					continue // unsettled: offered again next tick
@@ -157,20 +169,69 @@ func (s *Scheduler) waitingStories() (map[string]bool, error) {
 	return out, nil
 }
 
-// pick returns the first story of f the persona can start, "" if none.
-func (s *Scheduler) pick(f Fire, waiting map[string]bool) (string, error) {
+// choice is the story a fire runs, and the journey it replays (nil: an AI
+// run).
+type choice struct {
+	story  string
+	replay *store.Journey
+}
+
+// pick returns the first story of f the persona can start, "" if none. A
+// story whose journey is paused or repairing is not eligible: nothing runs
+// for it, never an AI run instead. A scheduled fire (no context) replays a
+// story's live journey until the role's explore interval has passed since
+// its last fresh AI run; onlyReplays (over budget) takes only such stories.
+func (s *Scheduler) pick(p project.Project, f Fire, waiting map[string]bool, now time.Time, onlyReplays bool) (choice, error) {
+	role := roleNamed(p, f.Role)
 	for _, st := range f.Stories {
 		if waiting[f.Persona+"/"+st] {
 			continue
 		}
 		last, err := s.Store.LastRun(f.Persona, st)
 		if err != nil && !errors.Is(err, store.ErrNotFound) {
-			return "", err
+			return choice{}, err
 		}
 		if err == nil && last.State == store.RunStuck {
 			continue
 		}
-		return st, nil
+		j, err := s.Store.JourneyFor(f.Persona, st)
+		if errors.Is(err, store.ErrNotFound) {
+			if onlyReplays {
+				continue
+			}
+			return choice{story: st}, nil
+		}
+		if err != nil {
+			return choice{}, err
+		}
+		if j.State == store.JourneyPaused || j.State == store.JourneyRepairing {
+			continue
+		}
+		if f.Context == nil && storyOf(role, st).Replays() && j.LiveRev > 0 && now.Sub(j.LastExplored) < role.ExploreEvery() {
+			return choice{story: st, replay: &j}, nil
+		}
+		if onlyReplays {
+			continue
+		}
+		return choice{story: st}, nil
 	}
-	return "", nil
+	return choice{}, nil
+}
+
+func roleNamed(p project.Project, name string) project.Role {
+	for _, r := range p.Roles {
+		if r.Name == name {
+			return r
+		}
+	}
+	return project.Role{}
+}
+
+func storyOf(r project.Role, name string) project.Story {
+	for _, st := range r.Stories {
+		if st.Name == name {
+			return st
+		}
+	}
+	return project.Story{}
 }

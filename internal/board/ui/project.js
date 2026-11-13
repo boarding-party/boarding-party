@@ -43,7 +43,7 @@ function leadToJSON(l) {
   return out;
 }
 const newTrigger = (kind = '') => ({ kind, from: '', subject: '', keywords: [], linkHost: '', title: '', lead: '2' });
-const newStory = () => ({ id: nid(), name: '', goal: '', model: '', handoffs: [], trigger: newTrigger(), freshBrowser: false });
+const newStory = () => ({ id: nid(), name: '', goal: '', model: '', handoffs: [], trigger: newTrigger(), freshBrowser: false, replay: true });
 
 // leadMinutes turns a Go duration such as "5m" or "1h30m" into minutes for
 // the editor; an empty lead is the director's default of 2.
@@ -86,7 +86,7 @@ function triggerToJSON(t) {
   }
   return null;
 }
-const newRole = () => ({ id: nid(), name: '', description: '', canWatchRecordings: false, activity: '', personas: [newPersona()], stories: [newStory()] });
+const newRole = () => ({ id: nid(), name: '', description: '', canWatchRecordings: false, activity: '', explore: '', personas: [newPersona()], stories: [newStory()] });
 
 // A story's handoffs are kept as the draft ids of the stories they point
 // at, so renaming a role or story carries through and removing one drops
@@ -113,6 +113,7 @@ function fromProject(p) {
       description: r.description || '',
       canWatchRecordings: !!r.canWatchRecordings,
       activity: r.activity || '',
+      explore: r.explore || '',
       personas: (r.personas || []).map((pe) => ({
         id: nid(),
         name: pe.name || '',
@@ -121,7 +122,7 @@ function fromProject(p) {
         identity: Object.entries(pe.identity || {}).map(([k, v]) => ({ id: nid(), k, v: String(v) })),
         lead: leadFromProject(pe.lead),
       })),
-      stories: (r.stories || []).map((s) => ({ id: nid(), name: s.name || '', goal: s.goal || '', model: s.model || '', handoffs: s.handoffs || [], trigger: triggerFromProject(s.trigger), freshBrowser: !!s.freshBrowser })),
+      stories: (r.stories || []).map((s) => ({ id: nid(), name: s.name || '', goal: s.goal || '', model: s.model || '', handoffs: s.handoffs || [], trigger: triggerFromProject(s.trigger), freshBrowser: !!s.freshBrowser, replay: s.replay !== false })),
     })),
   };
   const ids = new Map();
@@ -177,6 +178,7 @@ function toJSON(d) {
       description: r.description.trim(),
       canWatchRecordings: r.canWatchRecordings,
       ...(r.activity.trim() ? { activity: r.activity.trim() } : {}),
+      ...(r.explore.trim() ? { explore: r.explore.trim() } : {}),
       personas: r.personas.map((pe) => ({
         name: pe.name.trim(),
         ...(Object.values(pe.profile).some(Boolean) ? { profile: Object.fromEntries(Object.entries(pe.profile).filter(([, v]) => v)) } : {}),
@@ -187,7 +189,7 @@ function toJSON(d) {
       stories: r.stories.map((s) => {
         const h = handoffs(s);
         const t = triggerToJSON(s.trigger);
-        return { name: s.name.trim(), goal: s.goal.trim(), ...(s.model ? { model: s.model } : {}), ...(h.length ? { handoffs: h } : {}), ...(t ? { trigger: t } : {}), ...(s.freshBrowser ? { freshBrowser: true } : {}) };
+        return { name: s.name.trim(), goal: s.goal.trim(), ...(s.model ? { model: s.model } : {}), ...(h.length ? { handoffs: h } : {}), ...(t ? { trigger: t } : {}), ...(s.freshBrowser ? { freshBrowser: true } : {}), ...(s.replay ? {} : { replay: false }) };
       }),
     })),
   };
@@ -279,14 +281,14 @@ export function ProjectPage({ section = 'general', roleN = '', onSaved, onDirty 
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(toJSON(draft)),
       });
-      // The server canonicalises each role's activity; show what it kept.
+      // The server canonicalises each role's activity and explore; show what it kept.
       let next = draft;
       try {
         const saved = await api('api/project');
         const roles = (saved && saved.roles) || [];
         if (roles.length === draft.roles.length) {
           next = structuredClone(draft);
-          next.roles.forEach((r, i) => { r.activity = roles[i].activity || ''; });
+          next.roles.forEach((r, i) => { r.activity = roles[i].activity || ''; r.explore = roles[i].explore || ''; });
           setDraft(next);
         }
       } catch (_) { /* the save worked; keep what was typed */ }
@@ -538,6 +540,12 @@ function RoleCard({ role, n, profileFields, roles, onChange, onRemove }) {
           onInput=${(e) => { const v = e.currentTarget.value; onChange((r) => { r.activity = v; }); }} />
         <span class="hint">How often personas in this role act on their own. Examples: daily at 09:00 · every 2 h, 09:00–17:30 · 2–4 times a day, 07:00–23:00. Leave empty to run them only by hand or hand-off.</span>
       </div>
+      <div class="field">
+        <label for=${id + '-explore'}>Fresh AI run</label>
+        <input id=${id + '-explore'} value=${role.explore} placeholder="weekly"
+          onInput=${(e) => { const v = e.currentTarget.value; onChange((r) => { r.explore = v; }); }} />
+        <span class="hint">How often each story gets a fresh AI run. In between, scheduled runs replay the story's recorded journey, which costs nothing. Examples: daily · every 3 days · every 12 h. Empty is weekly.</span>
+      </div>
       <label class="check">
         <input type="checkbox" checked=${role.canWatchRecordings}
           onChange=${(e) => { const v = e.currentTarget.checked; onChange((r) => { r.canWatchRecordings = v; }); }} />
@@ -728,6 +736,11 @@ function StoryRow({ story, targets, onChange, onRemove }) {
         <input type="checkbox" checked=${story.freshBrowser}
           onChange=${(e) => { const v = e.currentTarget.checked; onChange((s) => { s.freshBrowser = v; }); }} />
         <span>Start with an empty browser <span class="hint">For a first visit. Otherwise the persona keeps its cookies and site data from its last run, like a person coming back.</span></span>
+      </label>
+      <label class="check">
+        <input type="checkbox" checked=${story.replay}
+          onChange=${(e) => { const v = e.currentTarget.checked; onChange((s) => { s.replay = v; }); }} />
+        <span>Replay its journey on schedule <span class="hint">Once the story has a recorded journey, scheduled runs play it back between fresh AI runs. Turn off to keep every scheduled run an AI run.</span></span>
       </label>
     </div>`;
 }

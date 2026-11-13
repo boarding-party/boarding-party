@@ -172,6 +172,9 @@ type Role struct {
 	// Activity is when the role's personas are active, such as
 	// "every 30 min, 09:00–17:30". Stored in canonical form. Optional.
 	Activity string `json:"activity,omitempty"`
+	// Explore is how often each story gets a fresh AI run; scheduled runs
+	// in between replay its journey. Canonical form; empty is weekly.
+	Explore string `json:"explore,omitempty"`
 	// MadeBy is the lead that made this role's child persona. The director
 	// sets it on merged child roles; a project file may not.
 	MadeBy string `json:"madeBy,omitempty"`
@@ -207,6 +210,9 @@ type Story struct {
 	// FreshBrowser starts every run of this story with an empty browser
 	// instead of the persona's saved cookies and site storage.
 	FreshBrowser bool `json:"freshBrowser,omitempty"`
+	// Replay false keeps scheduled runs of this story AI runs even when it
+	// has a live journey. Unset is true.
+	Replay *bool `json:"replay,omitempty"`
 }
 
 // Handoff points at a story of another role that this story passes work to.
@@ -327,6 +333,13 @@ func (p Project) validate() error {
 			return fmt.Errorf("role %q: %w", r.Name, err)
 		}
 		r.Activity = pat.String()
+		if r.Explore != "" {
+			d, err := ParseExplore(r.Explore)
+			if err != nil {
+				return fmt.Errorf("role %q: %w", r.Name, err)
+			}
+			r.Explore = exploreText(d)
+		}
 		for _, pe := range r.Personas {
 			if pe.Name == "" {
 				return fmt.Errorf("role %q: persona needs a name", r.Name)

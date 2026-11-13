@@ -53,7 +53,7 @@ func (s *Service) EnqueueReplay(journeyID string, revision int, seed int64, acto
 		return store.Queued{}, fmt.Errorf("%w: seed must be 1 to %d", ErrInvalid, MaxSeed)
 	}
 	if seed == 0 {
-		if seed, err = randomSeed(); err != nil {
+		if seed, err = NewSeed(); err != nil {
 			return store.Queued{}, err
 		}
 	}
@@ -106,7 +106,8 @@ func (s *Service) replayable(journeyID string, revision int) (store.Journey, str
 	return j, role, rev, nil
 }
 
-func randomSeed() (int64, error) {
+// NewSeed draws a replay seed, 1 to MaxSeed.
+func NewSeed() (int64, error) {
 	var b [8]byte
 	if _, err := rand.Read(b[:]); err != nil {
 		return 0, err

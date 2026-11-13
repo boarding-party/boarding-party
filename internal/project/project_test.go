@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"sigs.k8s.io/yaml"
 )
@@ -363,5 +364,52 @@ func TestRoleActivity(t *testing.T) {
 	_, err = Load([]byte(base + "sometimes\n"))
 	if err == nil || !strings.Contains(err.Error(), `role "buyer": activity "sometimes"`) {
 		t.Errorf("err = %v", err)
+	}
+}
+
+func TestParseExplore(t *testing.T) {
+	for in, want := range map[string]time.Duration{
+		"": 168 * time.Hour, "daily": 24 * time.Hour, "Weekly": 168 * time.Hour, "every 3 days": 72 * time.Hour,
+		"every 1 day": 24 * time.Hour, "every 90 days": 90 * 24 * time.Hour, "every 12 h": 12 * time.Hour,
+		"every 1 hour": time.Hour, "every 2160 hours": 2160 * time.Hour,
+	} {
+		got, err := ParseExplore(in)
+		if err != nil || got != want {
+			t.Errorf("ParseExplore(%q) = %v, %v; want %v", in, got, err, want)
+		}
+	}
+	for _, in := range []string{"every 0 days", "monthly", "every 91 days", "every 2161 h", "every -1 h", "every x days", "every 3"} {
+		if _, err := ParseExplore(in); err == nil {
+			t.Errorf("ParseExplore(%q) accepted", in)
+		}
+	}
+	base := "name: p\nsites: [\"https://x.test\"]\nroles:\n  - name: buyer\n    explore: "
+	for in, canon := range map[string]string{"daily": "daily", "every 7 days": "weekly", "every 3 days": "every 3 days",
+		"every 12 hours": "every 12 h", "every 48 h": "every 2 days", "weekly": "weekly"} {
+		p, err := Load([]byte(base + in + "\n"))
+		if err != nil {
+			t.Fatalf("%s: %v", in, err)
+		}
+		if got := p.Roles[0].Explore; got != canon {
+			t.Errorf("explore %q stored as %q, want %q", in, got, canon)
+		}
+	}
+	if _, err := Load([]byte(base + "monthly\n")); err == nil || !strings.Contains(err.Error(), `role "buyer": explore "monthly"`) {
+		t.Errorf("monthly: %v", err)
+	}
+	p, _ := Load([]byte("name: p\nsites: [\"https://x.test\"]\nroles:\n  - name: buyer\n"))
+	if p.Roles[0].Explore != "" || p.Roles[0].ExploreEvery() != 168*time.Hour {
+		t.Errorf("default explore %q %v", p.Roles[0].Explore, p.Roles[0].ExploreEvery())
+	}
+}
+
+func TestStoryReplays(t *testing.T) {
+	no := false
+	if !(Story{}).Replays() || (Story{Replay: &no}).Replays() {
+		t.Fatal("Replays: nil means yes, false means no")
+	}
+	p, err := Load([]byte("name: p\nsites: [\"https://x.test\"]\nroles:\n  - name: buyer\n    stories:\n      - name: s\n        goal: g\n        replay: false\n"))
+	if err != nil || p.Roles[0].Stories[0].Replays() {
+		t.Fatalf("replay: false %v", err)
 	}
 }
