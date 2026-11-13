@@ -34,13 +34,24 @@ func withJourney(t *testing.T, svc *runs.Service) store.Journey {
 	return j
 }
 
-func TestReplayWorkerRoutes(t *testing.T) {
-	srv, wsrv, svc := setupBoth(t, 1<<20)
-	j := withJourney(t, svc)
-	r, err := svc.StartReplay(context.Background(), j.ID, 0, 5, "owner")
+// startReplay queues a replay of j and starts it, as the scheduler does.
+func startReplay(t *testing.T, svc *runs.Service, j store.Journey, seed int64) store.Run {
+	t.Helper()
+	q, err := svc.EnqueueReplay(j.ID, 0, seed, "owner", time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}
+	r, err := svc.StartQueued(context.Background(), q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return r
+}
+
+func TestReplayWorkerRoutes(t *testing.T) {
+	srv, wsrv, svc := setupBoth(t, 1<<20)
+	j := withJourney(t, svc)
+	r := startReplay(t, svc, j, 5)
 	resp := do(t, "GET", wsrv.URL+"/journey/"+r.Token, "")
 	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != 200 || string(body) != journeyJS || !strings.HasPrefix(resp.Header.Get("Content-Type"), "text/plain") {
@@ -110,7 +121,7 @@ func TestJourneysRoute(t *testing.T) {
 	}
 }
 
-func TestReplayRouteStartsRun(t *testing.T) {
+func TestReplayJourneyQueues(t *testing.T) {
 	srv, svc := setup(t, 1<<20)
 	j := withJourney(t, svc)
 	req, _ := http.NewRequest("POST", srv.URL+"/api/journeys/"+j.ID+"/replay", strings.NewReader(`{"revision":1,"seed":9}`))
@@ -122,12 +133,15 @@ func TestReplayRouteStartsRun(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer resp.Body.Close()
-	var run store.Run
-	if err := json.NewDecoder(resp.Body).Decode(&run); err != nil || resp.StatusCode != 201 {
+	var got struct{ Queued store.Queued }
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil || resp.StatusCode != 202 {
 		t.Fatalf("%d %v", resp.StatusCode, err)
 	}
-	if run.Kind != store.RunReplay || run.Revision != 1 || run.Seed != 9 || run.Token != "" {
-		t.Fatalf("run %+v", run)
+	if q := got.Queued; q.ID == "" || q.Kind != store.RunReplay || q.Revision != 1 || q.Seed != 9 || q.JourneyID != j.ID {
+		t.Fatalf("queued %+v", q)
+	}
+	if qs, _ := svc.Store.Queue(); len(qs) != 1 {
+		t.Fatalf("queue %+v", qs)
 	}
 	ds, _ := svc.Store.Decisions(j.ID)
 	if ds[0].Kind != "replayed" || ds[0].Actor != "kate@shop.test" {
@@ -150,11 +164,14 @@ func TestReplayRouteRefusesStale(t *testing.T) {
 	if resp.StatusCode != 409 || !strings.Contains(string(body), "no revision 7") {
 		t.Fatalf("%d %s", resp.StatusCode, body)
 	}
-	if r := do(t, "POST", srv.URL+"/api/journeys/nope/replay", `{}`); r.StatusCode != 404 && r.StatusCode != 415 {
-		t.Fatalf("missing journey = %d", r.StatusCode)
+	req, _ = http.NewRequest("POST", srv.URL+"/api/journeys/nope/replay", strings.NewReader(`{}`))
+	req.Header.Set("Authorization", "Bearer "+testToken)
+	req.Header.Set("Content-Type", "application/json")
+	if r, err := http.DefaultClient.Do(req); err != nil || r.StatusCode != 404 {
+		t.Fatalf("missing journey = %v %v", r, err)
 	}
-	if runs, _ := svc.Store.Runs(10); len(runs) != 0 {
-		t.Fatalf("runs made: %+v", runs)
+	if qs, _ := svc.Store.Queue(); len(qs) != 0 {
+		t.Fatalf("queued: %+v", qs)
 	}
 }
 
@@ -163,10 +180,7 @@ func TestReplayRouteRefusesStale(t *testing.T) {
 func TestReplayTokenGetsNoUsageOrFiles(t *testing.T) {
 	_, wsrv, svc := setupBoth(t, 1<<20)
 	j := withJourney(t, svc)
-	r, err := svc.StartReplay(context.Background(), j.ID, 0, 5, "owner")
-	if err != nil {
-		t.Fatal(err)
-	}
+	r := startReplay(t, svc, j, 5)
 	if got := do(t, "PUT", wsrv.URL+"/usage/"+r.Token, `{"byModel":{"claude-opus-5-5":{"output":1000000}}}`).StatusCode; got != 404 {
 		t.Errorf("usage with a replay token = %d, want 404", got)
 	}

@@ -419,7 +419,9 @@ func (s *Scheduler) drain(ctx context.Context) error {
 			return nil
 		case errors.Is(err, runs.ErrLeadOverBudget):
 			// Only this lead's work waits for tomorrow; try the next item.
-		case errors.Is(err, runs.ErrPaused), errors.Is(err, runs.ErrOverBudget):
+		case errors.Is(err, runs.ErrOverBudget):
+			// AI items wait for tomorrow; a replay behind them spends nothing.
+		case errors.Is(err, runs.ErrPaused):
 			return nil // the item stays until the gate opens
 		case errors.Is(err, runs.ErrBusy):
 			return nil // the item stays for a later tick
@@ -430,6 +432,9 @@ func (s *Scheduler) drain(ctx context.Context) error {
 					s.blocked = map[string]string{}
 				}
 				s.blocked[q.ID] = err.Error()
+			}
+			if errors.Is(err, runs.ErrNoAgentKey) {
+				continue // a replay behind it needs no key
 			}
 			return nil // the item stays for a later tick
 		case errors.Is(err, runs.ErrInvalid):

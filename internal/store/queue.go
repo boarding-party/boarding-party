@@ -19,9 +19,15 @@ type Queued struct {
 	Context json.RawMessage `json:"context,omitempty"`
 	Reason  string          `json:"reason"` // board text, e.g. "Handed off by Ada (book)"
 	Created time.Time       `json:"created"`
+	// Kind is "" for an AI run and RunReplay for a replay of revision
+	// Revision (0: the live one when it starts) with Seed.
+	Kind      string `json:"kind,omitempty"`
+	JourneyID string `json:"journeyId,omitempty"`
+	Revision  int    `json:"revision,omitempty"`
+	Seed      int64  `json:"seed,omitempty"`
 }
 
-const queueCols = `id, persona, role, story, chain, follows, via, context, reason, created`
+const queueCols = `id, persona, role, story, chain, follows, via, context, reason, created, kind, journey_id, revision, seed`
 
 type execer interface {
 	Exec(query string, args ...any) (sql.Result, error)
@@ -31,8 +37,9 @@ func insertQueued(x execer, q Queued) error {
 	if q.ID == "" {
 		return errors.New("queued run needs an id")
 	}
-	_, err := x.Exec(`INSERT INTO queue(`+queueCols+`) VALUES(?,?,?,?,?,?,?,?,?,?)`,
-		q.ID, q.Persona, q.Role, q.Story, q.Chain, q.Follows, q.Via, string(q.Context), q.Reason, ts(q.Created))
+	_, err := x.Exec(`INSERT INTO queue(`+queueCols+`) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		q.ID, q.Persona, q.Role, q.Story, q.Chain, q.Follows, q.Via, string(q.Context), q.Reason, ts(q.Created),
+		q.Kind, q.JourneyID, q.Revision, q.Seed)
 	return err
 }
 
@@ -51,7 +58,8 @@ func (s *Store) Queue() ([]Queued, error) {
 		var q Queued
 		var ctx string
 		var created int64
-		if err := rows.Scan(&q.ID, &q.Persona, &q.Role, &q.Story, &q.Chain, &q.Follows, &q.Via, &ctx, &q.Reason, &created); err != nil {
+		if err := rows.Scan(&q.ID, &q.Persona, &q.Role, &q.Story, &q.Chain, &q.Follows, &q.Via, &ctx, &q.Reason, &created,
+			&q.Kind, &q.JourneyID, &q.Revision, &q.Seed); err != nil {
 			return nil, err
 		}
 		if ctx != "" {

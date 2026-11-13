@@ -226,6 +226,14 @@ var runsAddedColumns = []addedColumn{
 	{"seed", "seed INTEGER NOT NULL DEFAULT 0"},
 }
 
+// queueAddedColumns are the queue columns added after the table first shipped.
+var queueAddedColumns = []addedColumn{
+	{"kind", "kind TEXT NOT NULL DEFAULT ''"},
+	{"journey_id", "journey_id TEXT NOT NULL DEFAULT ''"},
+	{"revision", "revision INTEGER NOT NULL DEFAULT 0"},
+	{"seed", "seed INTEGER NOT NULL DEFAULT 0"},
+}
+
 // waitsAddedColumns are the waits columns added after the table first shipped.
 var waitsAddedColumns = []addedColumn{
 	{"after_id", "after_id TEXT NOT NULL DEFAULT ''"},
@@ -264,6 +272,10 @@ func addColumns(db *sql.DB) (added bool, err error) {
 	if err != nil {
 		return false, err
 	}
+	addedQueue, err := addMissing(tx, "queue", queueAddedColumns)
+	if err != nil {
+		return false, err
+	}
 	if addedBugs["issue_id"] {
 		// Each existing report becomes its own open issue, under the bug's id.
 		if _, err := tx.Exec(`INSERT INTO issues(id, summary, status, created, updated)
@@ -275,7 +287,7 @@ func addColumns(db *sql.DB) (added bool, err error) {
 	if _, err := tx.Exec(`CREATE INDEX IF NOT EXISTS runs_chain ON runs(chain)`); err != nil {
 		return false, err
 	}
-	return len(addedRuns)+len(addedWaits)+len(addedBugs) > 0, tx.Commit()
+	return len(addedRuns)+len(addedWaits)+len(addedBugs)+len(addedQueue) > 0, tx.Commit()
 }
 
 // addMissing adds the columns table lacks and returns the names it added. A

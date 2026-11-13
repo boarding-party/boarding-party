@@ -430,7 +430,7 @@ function StartRun({ project, active, status, onStarted, onClose }) {
   const revisions = journey ? journey.revisions : [];
   const replay = how === 'replay' && revisions.length > 0;
   const pickedRev = revisions.some((r) => r.n === rev) ? rev : (journey && journey.liveRev) || (revisions[0] && revisions[0].n) || 0;
-  const disabled = busy || !p || !s || (replay && (!pickedRev || !!active));
+  const disabled = busy || !p || !s || (replay && !pickedRev);
 
   const submit = async (e) => {
     e.preventDefault();
@@ -450,7 +450,7 @@ function StartRun({ project, active, status, onStarted, onClose }) {
         });
       await onStarted();
       onClose();
-      if (run && run.id) location.hash = runHref(run.id); // a queued run has no id yet
+      if (run && run.id) location.hash = runHref(run.id); // a queued run (every replay) has no id yet
     } catch (e2) {
       setErr(e2.message); // 400 invalid is shown verbatim
       onStarted();
@@ -494,12 +494,11 @@ function StartRun({ project, active, status, onStarted, onClose }) {
         </select>
         <p class="hint">Plays the recorded steps back in a browser with fresh test data. No model, so it costs nothing.</p>
       </div>` : null}
-      ${active && replay ? html`<div class="note">A run is active (<a href=${runHref(active.id)}>${active.persona} · ${active.story}</a>). Replays don't wait in Up next yet: start this one when it finishes.</div>`
-        : active ? html`<div class="note">A run is active (<a href=${runHref(active.id)}>${active.persona} · ${active.story}</a>). A new run waits in Up next and starts when it finishes.</div>` : null}
+      ${active ? html`<div class="note">A run is active (<a href=${runHref(active.id)}>${active.persona} · ${active.story}</a>). A new run waits in Up next and starts when it finishes.</div>` : null}
       ${err ? html`<div class="note bad" role="alert">${err.charAt(0).toUpperCase() + err.slice(1)}</div>` : null}
       <div class="row end">
         <button class="btn" type="button" onClick=${onClose}>Cancel</button>
-        <button class="btn primary" type="submit" disabled=${disabled}>${replay ? (busy ? 'Starting…' : 'Start replay') : busy ? (active ? 'Adding…' : 'Starting…') : (active ? 'Add to queue' : 'Start run')}</button>
+        <button class="btn primary" type="submit" disabled=${disabled}>${busy ? (active ? 'Adding…' : 'Starting…') : active ? 'Add to queue' : replay ? 'Start replay' : 'Start run'}</button>
       </div>
     </form>`;
 }

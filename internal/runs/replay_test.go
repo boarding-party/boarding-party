@@ -26,14 +26,43 @@ func recorded(t *testing.T, svc *Service, n int) store.Journey {
 	return j
 }
 
-func TestStartReplayRunsTheLiveRevision(t *testing.T) {
-	svc, fl := newSvc(t)
-	j := recorded(t, svc, 2)
-	r, err := svc.StartReplay(context.Background(), j.ID, 0, 0, "kate@shop.test")
+// replay queues a replay of journeyID and starts it, as the scheduler does.
+func replay(t *testing.T, svc *Service, journeyID string, revision int, seed int64, actor string) store.Run {
+	t.Helper()
+	q, err := svc.EnqueueReplay(journeyID, revision, seed, actor, time.Now().UTC())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if r.Kind != store.RunReplay || r.Revision != 2 || r.Seed == 0 || r.JourneyID != j.ID || r.Persona != "ann" || r.Story != "checkout" ||
+	r, err := svc.StartQueued(context.Background(), q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return r
+}
+
+func TestEnqueueReplayThenStart(t *testing.T) {
+	svc, fl := newSvc(t)
+	j := recorded(t, svc, 2)
+	q, err := svc.EnqueueReplay(j.ID, 0, 0, "kate@shop.test", time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if q.Kind != store.RunReplay || q.JourneyID != j.ID || q.Revision != 0 || q.Seed < 1 || q.Seed > MaxSeed ||
+		q.Persona != "ann" || q.Story != "checkout" || q.Role != "buyer" || q.Chain != "" {
+		t.Fatalf("queued %+v", q)
+	}
+	if got, _ := svc.Store.Queue(); len(got) != 1 || got[0].Seed != q.Seed {
+		t.Fatalf("queue %+v", got)
+	}
+	ds, _ := svc.Store.Decisions(j.ID)
+	if ds[0].Kind != "replayed" || ds[0].Actor != "kate@shop.test" || ds[0].RunID != "" || ds[0].Reason != "Replay of revision 2 asked" {
+		t.Fatalf("decision %+v", ds[0])
+	}
+	r, err := svc.StartQueued(context.Background(), q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Kind != store.RunReplay || r.Revision != 2 || r.Seed != q.Seed || r.JourneyID != j.ID || r.Persona != "ann" || r.Story != "checkout" ||
 		r.Role != "buyer" || r.State != store.RunRunning || len(fl.started) != 1 {
 		t.Fatalf("run %+v started %v", r, fl.started)
 	}
@@ -41,59 +70,88 @@ func TestStartReplayRunsTheLiveRevision(t *testing.T) {
 	if got.Kind != store.RunReplay || got.Revision != 2 || got.Seed != r.Seed || got.JourneyID != j.ID {
 		t.Fatalf("stored %+v", got)
 	}
-	ds, _ := svc.Store.Decisions(j.ID)
-	if ds[0].Kind != "replayed" || ds[0].Actor != "kate@shop.test" || ds[0].RunID != r.ID || ds[0].Reason != "Replayed revision 2" {
-		t.Fatalf("decision %+v", ds[0])
+	if qs, _ := svc.Store.Queue(); len(qs) != 0 {
+		t.Fatalf("item not taken: %+v", qs)
 	}
 	if _, err := svc.Store.FinishRun(r.ID, store.RunDone, "x", time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	old, err := svc.StartReplay(context.Background(), j.ID, 1, 99, "owner")
-	if err != nil || old.Revision != 1 || old.Seed != 99 {
-		t.Fatalf("old revision %+v %v", old, err)
+	old := replay(t, svc, j.ID, 1, 99, "owner")
+	if old.Revision != 1 || old.Seed != 99 {
+		t.Fatalf("old revision %+v", old)
 	}
 }
 
-func TestStartReplayRefusesStaleJourney(t *testing.T) {
+func TestEnqueueReplayRefusesStaleJourney(t *testing.T) {
 	svc, fl := newSvc(t)
 	j := recorded(t, svc, 2)
-	if _, err := svc.StartReplay(context.Background(), j.ID, 9, 0, "owner"); !errors.Is(err, ErrStaleJourney) {
+	if _, err := svc.EnqueueReplay(j.ID, 9, 0, "owner", time.Now()); !errors.Is(err, ErrStaleJourney) {
 		t.Fatalf("revision 9 of 2: %v", err)
 	}
-	if _, err := svc.StartReplay(context.Background(), "nope", 0, 0, "owner"); !errors.Is(err, store.ErrNotFound) {
+	if _, err := svc.EnqueueReplay("nope", 0, 0, "owner", time.Now()); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("missing journey: %v", err)
+	}
+	if _, err := svc.EnqueueReplay(j.ID, 0, MaxSeed+1, "owner", time.Now()); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("seed past MaxSeed: %v", err)
 	}
 	p, _ := svc.Store.Project()
 	p.Roles[0].Stories = []project.Story{{Name: "refund", Goal: "g"}}
 	if err := svc.Store.PutProject(p); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := svc.StartReplay(context.Background(), j.ID, 0, 0, "owner"); !errors.Is(err, ErrStaleJourney) {
+	if _, err := svc.EnqueueReplay(j.ID, 0, 0, "owner", time.Now()); !errors.Is(err, ErrStaleJourney) {
 		t.Fatalf("story removed: %v", err)
 	}
 	if runs, _ := svc.Store.Runs(10); len(runs) != 0 || len(fl.started) != 0 {
 		t.Fatalf("a refused replay made runs %+v", runs)
 	}
+	if qs, _ := svc.Store.Queue(); len(qs) != 0 {
+		t.Fatalf("a refused replay queued %+v", qs)
+	}
 }
 
-func TestStartReplayNeedsALiveRevision(t *testing.T) {
+func TestEnqueueReplayNeedsALiveRevision(t *testing.T) {
 	svc, _ := newSvc(t)
 	j, err := svc.Store.EnsureJourney("ann", "checkout", time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := svc.StartReplay(context.Background(), j.ID, 0, 0, "owner"); !errors.Is(err, ErrStaleJourney) {
+	if _, err := svc.EnqueueReplay(j.ID, 0, 0, "owner", time.Now()); !errors.Is(err, ErrStaleJourney) {
 		t.Fatalf("journey without a live revision: %v", err)
+	}
+}
+
+// A journey paused (or its story removed) while its replay waits in the
+// queue: the item is refused as invalid, so the scheduler drops it.
+func TestQueuedReplayOfPausedJourneyIsDropped(t *testing.T) {
+	svc, fl := newSvc(t)
+	j := recorded(t, svc, 1)
+	q, err := svc.EnqueueReplay(j.ID, 0, 0, "owner", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Store.SetJourneyState(j.ID, store.JourneyPaused, store.Decision{Kind: "paused", Reason: "Paused by owner", Actor: "owner", Created: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.StartQueued(context.Background(), q); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("paused journey: %v", err)
+	}
+	if _, err := svc.EnqueueReplay(j.ID, 0, 0, "owner", time.Now()); !errors.Is(err, ErrStaleJourney) {
+		t.Fatalf("enqueue of a paused journey: %v", err)
+	}
+	q.JourneyID = "gone"
+	if _, err := svc.StartQueued(context.Background(), q); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("missing journey: %v", err)
+	}
+	if runs, _ := svc.Store.Runs(10); len(runs) != 0 || len(fl.started) != 0 {
+		t.Fatalf("runs %+v", runs)
 	}
 }
 
 func TestFinishReplayPassedAndFailed(t *testing.T) {
 	svc, fl := newSvc(t)
 	j := recorded(t, svc, 1)
-	r, err := svc.StartReplay(context.Background(), j.ID, 0, 0, "owner")
-	if err != nil {
-		t.Fatal(err)
-	}
+	r := replay(t, svc, j.ID, 0, 0, "owner")
 	if err := svc.FinishReplay(r.Token, ReplayResult{Status: "passed", Seed: r.Seed}, time.Now()); err != nil {
 		t.Fatal(err)
 	}
@@ -104,10 +162,7 @@ func TestFinishReplayPassedAndFailed(t *testing.T) {
 	if err := svc.FinishReplay(r.Token, ReplayResult{Status: "passed"}, time.Now()); !errors.Is(err, ErrNotActive) {
 		t.Fatalf("second report: %v", err)
 	}
-	r2, err := svc.StartReplay(context.Background(), j.ID, 0, 0, "owner")
-	if err != nil {
-		t.Fatal(err)
-	}
+	r2 := replay(t, svc, j.ID, 0, 0, "owner")
 	if err := svc.FinishReplay(r2.Token, ReplayResult{Status: "failed", Step: 4, StepName: "Fill the business", Error: "locator not found"}, time.Now()); err != nil {
 		t.Fatal(err)
 	}
@@ -136,10 +191,7 @@ func TestReplayWithoutResultFails(t *testing.T) {
 	for _, phase := range []string{"Failed", "Done", "gone"} {
 		svc, fl := newSvc(t)
 		j := recorded(t, svc, 1)
-		r, err := svc.StartReplay(context.Background(), j.ID, 0, 0, "owner")
-		if err != nil {
-			t.Fatal(err)
-		}
+		r := replay(t, svc, j.ID, 0, 0, "owner")
 		fl.phases = map[string]phaseInfo{}
 		if phase != "gone" {
 			fl.phases[r.Session] = phaseInfo{phase: phase, msg: "pod died"}
@@ -164,28 +216,29 @@ func TestReplayIgnoresBudgetButNotPause(t *testing.T) {
 	if _, err := svc.Start(context.Background(), "ann", "checkout"); !errors.Is(err, ErrOverBudget) {
 		t.Fatalf("AI run over budget: %v", err)
 	}
-	r, err := svc.StartReplay(context.Background(), j.ID, 0, 0, "owner")
-	if err != nil {
-		t.Fatalf("replay over budget: %v", err)
-	}
+	r := replay(t, svc, j.ID, 0, 0, "owner")
 	if _, err := svc.Store.FinishRun(r.ID, store.RunDone, "x", time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	if err := svc.Store.SetPaused(true); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := svc.StartReplay(context.Background(), j.ID, 0, 0, "owner"); !errors.Is(err, ErrPaused) {
+	q, err := svc.EnqueueReplay(j.ID, 0, 0, "owner", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.StartQueued(context.Background(), q); !errors.Is(err, ErrPaused) {
 		t.Fatalf("paused replay: %v", err)
+	}
+	if qs, _ := svc.Store.Queue(); len(qs) != 1 {
+		t.Fatalf("a paused board drops the item: %+v", qs)
 	}
 }
 
 func TestFinishReplayKeepsTheResult(t *testing.T) {
 	svc, _ := newSvc(t)
 	j := recorded(t, svc, 1)
-	r, err := svc.StartReplay(context.Background(), j.ID, 0, 3, "owner")
-	if err != nil {
-		t.Fatal(err)
-	}
+	r := replay(t, svc, j.ID, 0, 3, "owner")
 	if err := svc.FinishReplay(r.Token, ReplayResult{Status: "passed", Seed: 3, Inputs: map[string]any{"int1": 4}}, time.Now()); err != nil {
 		t.Fatal(err)
 	}
@@ -206,10 +259,7 @@ func TestFinishReplayKeepsTheResult(t *testing.T) {
 func TestReplayTimesOutSooner(t *testing.T) {
 	svc, fl := newSvc(t)
 	j := recorded(t, svc, 1)
-	r, err := svc.StartReplay(context.Background(), j.ID, 0, 0, "owner")
-	if err != nil {
-		t.Fatal(err)
-	}
+	r := replay(t, svc, j.ID, 0, 0, "owner")
 	fl.phases = map[string]phaseInfo{r.Session: {phase: "Running"}} // the pod idles after bp-replay
 	if err := svc.Reconcile(context.Background(), r.Started.Add(ReplayTimeout-time.Second), time.Hour); err != nil {
 		t.Fatal(err)

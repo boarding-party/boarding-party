@@ -227,6 +227,9 @@ func (s *Service) Start(ctx context.Context, persona, story string) (store.Run, 
 // the run, so a refused start (busy, no fence) leaves it queued. It returns
 // store.ErrNotFound if the item was already taken.
 func (s *Service) StartQueued(ctx context.Context, q store.Queued) (store.Run, error) {
+	if q.Kind == store.RunReplay {
+		return s.startReplay(ctx, q)
+	}
 	return s.start(ctx, q.Persona, q.Story, &q, nil)
 }
 

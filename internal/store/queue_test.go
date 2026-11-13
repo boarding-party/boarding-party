@@ -228,3 +228,19 @@ INSERT INTO waits(run_id, kind, subject, status) VALUES('w1','email','Hi','open'
 		t.Fatalf("%+v %v", w, err)
 	}
 }
+
+func TestQueueKeepsReplayFields(t *testing.T) {
+	s := reopen(t, filepath.Join(t.TempDir(), "bp.db"))
+	q := Queued{ID: "q1", Persona: "ann", Role: "buyer", Story: "checkout", Reason: "Scheduled replay",
+		Kind: RunReplay, JourneyID: "j1", Revision: 2, Seed: 77, Created: time.Unix(5, 0).UTC()}
+	if err := s.Enqueue(q); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.Queue()
+	if err != nil || len(got) != 1 {
+		t.Fatalf("%+v %v", got, err)
+	}
+	if got[0].Kind != RunReplay || got[0].JourneyID != "j1" || got[0].Revision != 2 || got[0].Seed != 77 {
+		t.Fatalf("queued %+v", got[0])
+	}
+}

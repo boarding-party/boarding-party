@@ -827,3 +827,40 @@ func TestReplayQueuesNothing(t *testing.T) {
 		t.Fatalf("a replay queued %+v and started %d runs", q, len(rs)-1)
 	}
 }
+
+// Over budget, AI items wait for tomorrow but a replay queued behind them
+// still starts: replays never spend.
+func TestDrainStartsReplayPastOverBudgetItem(t *testing.T) {
+	f := newFix(t, schedYAML)
+	f.starter.errs = []error{runs.ErrOverBudget, nil}
+	for i, kind := range []string{"", store.RunReplay} {
+		if err := f.st.Enqueue(store.Queued{ID: fmt.Sprintf("q%d", i), Persona: "Ada", Role: "patient", Story: "lone",
+			Kind: kind, JourneyID: "j", Seed: 4, Created: now.Add(time.Duration(i) * time.Second)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	f.tick()
+	if calls := f.starter.Calls(); len(calls) != 2 || calls[1].ID != "q1" {
+		t.Fatalf("calls = %+v", calls)
+	}
+	if q := f.queue(); len(q) != 1 || q[0].ID != "q0" {
+		t.Fatalf("queue = %+v, want the AI item left", q)
+	}
+}
+
+// Without an agent key AI items wait, and a replay behind them (which needs
+// no key) still starts.
+func TestDrainStartsReplayPastItemWithoutAgentKey(t *testing.T) {
+	f := newFix(t, schedYAML)
+	f.starter.errs = []error{fmt.Errorf("%w: set it", runs.ErrNoAgentKey), nil}
+	for i, kind := range []string{"", store.RunReplay} {
+		if err := f.st.Enqueue(store.Queued{ID: fmt.Sprintf("q%d", i), Persona: "Ada", Role: "patient", Story: "lone",
+			Kind: kind, JourneyID: "j", Seed: 4, Created: now.Add(time.Duration(i) * time.Second)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	f.tick()
+	if q := f.queue(); len(q) != 1 || q[0].ID != "q0" {
+		t.Fatalf("queue = %+v, want the AI item left", q)
+	}
+}

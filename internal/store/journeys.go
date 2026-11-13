@@ -256,6 +256,28 @@ func (s *Store) AddDecision(d Decision) error {
 	return tx.Commit()
 }
 
+// SetJourneyState moves a journey to state to and records d, in one
+// transaction. ErrNotFound if there is no such journey.
+func (s *Store) SetJourneyState(id string, to JourneyState, d Decision) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	j, err := scanJourney(tx.QueryRow(`SELECT `+journeyCols+` FROM journeys WHERE id = ?`, id))
+	if err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`UPDATE journeys SET state = ? WHERE id = ?`, string(to), id); err != nil {
+		return err
+	}
+	d.JourneyID, d.RevBefore, d.RevAfter = id, j.LiveRev, j.LiveRev
+	if err := insertDecision(tx, &d); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 // ActorModel is the actor of decisions an AI run made.
 const ActorModel = "model"
 

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log"
 	"net/http"
 	"time"
 
@@ -86,8 +87,8 @@ func (s *server) listJourneys(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
-// replayJourney starts a replay run of a journey revision (0 or absent: the
-// live one) for the person in X-BP-Actor.
+// replayJourney queues a replay of a journey revision (0 or absent: the
+// live one when it starts) for the person in X-BP-Actor.
 func (s *server) replayJourney(w http.ResponseWriter, r *http.Request) {
 	if !mediaTypeIs(r, jsonType) {
 		http.Error(w, "content type must be application/json", http.StatusUnsupportedMediaType)
@@ -103,21 +104,28 @@ func (s *server) replayJourney(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad json", http.StatusBadRequest)
 		return
 	}
-	actor := r.Header.Get("X-BP-Actor")
-	if actor == "" {
-		actor = "local"
-	}
-	run, err := s.svc.StartReplay(r.Context(), r.PathValue("id"), req.Revision, req.Seed, actor)
+	q, err := s.svc.EnqueueReplay(r.PathValue("id"), req.Revision, req.Seed, actorOf(r), time.Now().UTC())
 	switch {
 	case errors.Is(err, runs.ErrStaleJourney):
 		http.Error(w, err.Error(), http.StatusConflict)
 		return
-	case err != nil && run.ID != "" && !errors.Is(err, runs.ErrBusy):
-		http.Error(w, "failed to launch the replay: "+err.Error(), http.StatusBadGateway)
-		return
-	case err != nil:
+	case err != nil && q.ID == "":
 		fail(w, err)
 		return
+	case err != nil:
+		log.Printf("replay of journey %s queued; recording the decision: %v", q.JourneyID, err)
 	}
-	writeJSON(w, http.StatusCreated, redact(run))
+	if s.svc.OnFinish != nil {
+		s.svc.OnFinish() // wake the scheduler
+	}
+	writeJSON(w, http.StatusAccepted, map[string]any{"queued": q})
+}
+
+// actorOf is who acts on the board: X-BP-Actor, or "local" for the CLI's
+// own board.
+func actorOf(r *http.Request) string {
+	if a := r.Header.Get("X-BP-Actor"); a != "" {
+		return a
+	}
+	return "local"
 }

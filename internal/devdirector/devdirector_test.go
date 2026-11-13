@@ -221,12 +221,25 @@ func TestDevDirectorReplaysAJourney(t *testing.T) {
 		t.Fatalf("journeys %s %v", b, err)
 	}
 	resp, b := do(t, d, "POST", "/api/journeys/"+js[0].ID+"/replay", "application/json", d.Token, `{}`)
-	if resp.StatusCode != 201 {
+	if resp.StatusCode != 202 {
 		t.Fatalf("replay %d %s", resp.StatusCode, b)
 	}
-	var run store.Run
-	_ = json.Unmarshal(b, &run)
 	deadline := time.Now().Add(5 * time.Second)
+	var run store.Run
+	for time.Now().Before(deadline) && run.ID == "" {
+		_, b = do(t, d, "GET", "/api/runs", "", d.Token, "")
+		var rs []store.Run
+		_ = json.Unmarshal(b, &rs)
+		for _, r := range rs {
+			if r.Kind == store.RunReplay {
+				run = r
+			}
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if run.ID == "" {
+		t.Fatal("the queued replay never started")
+	}
 	for time.Now().Before(deadline) {
 		_, b = do(t, d, "GET", "/api/runs/"+run.ID, "", d.Token, "")
 		var got struct {

@@ -330,6 +330,9 @@ func start(ctx context.Context, dir string, projectYAML []byte, duration time.Du
 		Rewind:    rewind.New(filepath.Join(dir, "rewind"), 48<<20),
 	}
 	l.Svc = svc
+	// No scheduler here: queued replays start whenever a run ends or one is
+	// queued. The seeded AI items stay put.
+	svc.OnFinish = func() { go startReplays(ctx, svc) }
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {
 		st.Close()
@@ -364,6 +367,26 @@ func start(ctx context.Context, dir string, projectYAML []byte, duration time.Du
 	}()
 	go svc.Watch(ctx, time.Second, 10*time.Minute)
 	return &Director{Base: "http://" + ln.Addr().String(), Token: token, srv: srv, st: st, dir: dir}, nil
+}
+
+// startReplays starts the first queued replay that can start.
+func startReplays(ctx context.Context, svc *runs.Service) {
+	queue, err := svc.Store.Queue()
+	if err != nil {
+		return
+	}
+	for _, q := range queue {
+		if q.Kind != store.RunReplay {
+			continue
+		}
+		_, err := svc.StartQueued(ctx, q)
+		if err == nil || errors.Is(err, runs.ErrBusy) {
+			return
+		}
+		if errors.Is(err, runs.ErrInvalid) {
+			_ = svc.Store.DeleteQueued(q.ID)
+		}
+	}
 }
 
 // devJourney is the code of the journey a dev director starts with.
