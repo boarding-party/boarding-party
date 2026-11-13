@@ -174,12 +174,6 @@ github.com/stretchr/testify v1.11.1 h1:7s2iGBzp5EwR7/aIZr8ao5+dra3wiQyKjjFuvgVKu
 github.com/stretchr/testify v1.11.1/go.mod h1:wZwfW3scLgRK+23gO65QZefKpKQRnfz6sD981Nm4B6U=
 github.com/teambition/rrule-go v1.8.2 h1:lIjpjvWTj9fFUZCmuoVDrKVOtdiyzbzc93qTmRVe/J8=
 github.com/teambition/rrule-go v1.8.2/go.mod h1:Ieq5AbrKGciP1V//Wq8ktsTXwSwJHDD5mD/wLBGl3p4=
-github.com/tiny-systems/tiny v0.12.1 h1:nl86Pc3nGd5fEA5NIUsqJgst5CDEv2m8PG/zTBFh/r0=
-github.com/tiny-systems/tiny v0.12.1/go.mod h1:TFfK5Hev+oEwOR2VDOTCySc+ZGtAsUO24x2g6dMKtVM=
-github.com/tiny-systems/tiny v0.13.0 h1:POaiIybY+1sqQ292dDp9IEr/ANOYz9B+nDKIPRe9GDw=
-github.com/tiny-systems/tiny v0.13.0/go.mod h1:TFfK5Hev+oEwOR2VDOTCySc+ZGtAsUO24x2g6dMKtVM=
-github.com/tiny-systems/tiny v0.15.0 h1:mzlL4WtIz+pDzhxkVE/eyNTCZikGwhsytgNMFO8G2HA=
-github.com/tiny-systems/tiny v0.15.0/go.mod h1:TFfK5Hev+oEwOR2VDOTCySc+ZGtAsUO24x2g6dMKtVM=
 github.com/tiny-systems/tiny v0.15.1 h1:g7kK9WSTZ02fleHB8yzlk8qj7ujXVnIJPoUT5Uj5AFo=
 github.com/tiny-systems/tiny v0.15.1/go.mod h1:TFfK5Hev+oEwOR2VDOTCySc+ZGtAsUO24x2g6dMKtVM=
 github.com/x448/float16 v0.8.4 h1:qLwI1I70+NjRFUR3zs1JPUCgaCXSh3SW62uAKT1mSBM=

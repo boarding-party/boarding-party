@@ -279,7 +279,11 @@ personas:
 ```
 
 The project editor offers these as dropdowns, and `traits` stays for anything
-else. While a run is going, its page shows the browser live. Each watcher pulls roughly 0.5-1 MB/s through the port-forward while a run is active.
+else.
+
+Every persona's browser also uses the project's `locale` (a language tag,
+`en-GB` unless set) and `timezone` (`Europe/London` unless set). Pages see that
+language and clock, so a UK site shows UK dates. While a run is going, its page shows the browser live. Each watcher pulls roughly 0.5-1 MB/s through the port-forward while a run is active.
 
 Every command works on one cluster and namespace. Leave out `--context` and
 `-n` in a terminal and the CLI asks: first the kubeconfig context (your

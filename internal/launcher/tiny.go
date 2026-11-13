@@ -304,7 +304,8 @@ func podStage(p corev1.Pod) (string, string) {
 // browserArgs builds the bp-browser arguments. tiny's CRD rejects MCP args
 // with whitespace, quotes or backslashes, so the persona's device and
 // accessibility settings go as stable keys (--bp-device, --bp-assistive,
-// --bp-vision, --bp-display) that the worker turns into browser settings.
+// --bp-vision, --bp-display) that the worker turns into browser settings,
+// with the project's language and time zone (--bp-locale, --bp-timezone).
 func (t *Tiny) browserArgs(r store.Run, p project.Project) []string {
 	args := []string{"--live-url=" + t.DirectorURL + "/live/" + r.Token,
 		"--files-url=" + t.DirectorURL + "/files/" + r.Token + "/",
@@ -312,7 +313,7 @@ func (t *Tiny) browserArgs(r store.Run, p project.Project) []string {
 		"--profile-url=" + t.DirectorURL + "/profile/" + r.Token,
 		"--console-url=" + t.DirectorURL + "/console/" + r.Token,
 		"--headless", "--isolated", "--no-sandbox", "--browser=chromium", "--output-dir=/workspace/out"}
-	return append(append(args, settingArgs("--bp-", personaProfile(r, p))...), "--caps=devtools,storage")
+	return append(append(args, settingArgs("--bp-", r, p)...), "--caps=devtools,storage")
 }
 
 var errOldTinyReplay = errors.New("tiny on this cluster is older than v0.15 and cannot run replays; update it with tiny init, then start the replay again")
@@ -325,15 +326,17 @@ func (t *Tiny) replayCommand(r store.Run, p project.Project) []string {
 	cmd := []string{"bp-replay",
 		"--claim-url=" + t.DirectorURL + "/claim/" + r.Claim,
 		"--seed=" + strconv.FormatInt(r.Seed, 10)}
-	return append(cmd, settingArgs("--", personaProfile(r, p))...)
+	return append(cmd, settingArgs("--", r, p)...)
 }
 
-// settingArgs are the persona's browser settings as --<prefix><key>=<value>
-// flags, in a stable order.
-func settingArgs(prefix string, pr project.Profile) []string {
-	set := pr.BrowserSettings()
+// settingArgs are the run's browser settings as --<prefix><key>=<value>
+// flags, in a stable order: the persona's, then the project's language and
+// time zone.
+func settingArgs(prefix string, r store.Run, p project.Project) []string {
+	set := personaProfile(r, p).BrowserSettings()
+	set["locale"], set["timezone"] = p.BrowserLocale(), p.Location().String()
 	var out []string
-	for _, k := range []string{"device", "assistive", "vision", "display"} {
+	for _, k := range []string{"device", "assistive", "vision", "display", "locale", "timezone"} {
 		if v, ok := set[k]; ok {
 			out = append(out, prefix+k+"="+v)
 		}

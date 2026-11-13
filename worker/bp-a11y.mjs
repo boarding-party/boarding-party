@@ -41,10 +41,11 @@ const VISION = {
 const half = (s) => s && { width: Math.round(s.width / 2), height: Math.round(s.height / 2) };
 
 // contextOptions is the browser context for settings {device, assistive,
-// display}; devices is Playwright's descriptor table. Zoom lays the page
-// out as 200% browser zoom does: half the CSS viewport at twice the pixel
-// density.
-export function contextOptions({ device = '', assistive = '', display = '' } = {}, devices) {
+// display, locale, timezone}; devices is Playwright's descriptor table. Zoom
+// lays the page out as 200% browser zoom does: half the CSS viewport at twice
+// the pixel density. locale (a BCP 47 tag) and timezone (an IANA zone) are
+// the project's: how pages format dates and numbers, and the clock they read.
+export function contextOptions({ device = '', assistive = '', display = '', locale = '', timezone = '' } = {}, devices) {
   const d = PHONES[device] && devices[PHONES[device]];
   const out = {};
   if (d) {
@@ -57,6 +58,8 @@ export function contextOptions({ device = '', assistive = '', display = '' } = {
     if (out.screen) out.screen = half(out.screen);
     out.deviceScaleFactor = (out.deviceScaleFactor || 1) * 2;
   }
+  if (locale) out.locale = locale;
+  if (timezone) out.timezoneId = timezone;
   return { ...out, ...(DISPLAY[display] || {}) };
 }
 
@@ -86,12 +89,15 @@ export function toolRules(assistive = '') {
   return { block: [...GLOBAL_BLOCK], add: [], imageResponses: '', why: 'the browser is set to the persona\'s device and settings' };
 }
 
+// SETTINGS are the keys of a run's browser settings.
+export const SETTINGS = ['device', 'assistive', 'vision', 'display', 'locale', 'timezone'];
+
 // readSettings reads the settings bp-pw-setup recorded for the run, or {}.
 export function readSettings(path) {
   try {
     const s = JSON.parse(readFileSync(path, 'utf8'));
     const out = {};
-    for (const k of ['device', 'assistive', 'vision', 'display']) if (typeof s[k] === 'string' && s[k]) out[k] = s[k];
+    for (const k of SETTINGS) if (typeof s[k] === 'string' && s[k]) out[k] = s[k];
     return out;
   } catch {
     return {};

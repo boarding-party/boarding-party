@@ -39,6 +39,11 @@ eq([hc.forcedColors, hc.contrast], ['active', 'more'], 'high contrast');
 eq(contextOptions({ display: 'dark' }, devices).colorScheme, 'dark', 'dark mode');
 eq(contextOptions({ display: 'nonsense' }, devices), { viewport: { width: 1280, height: 800 } }, 'unknown display');
 
+// Language and time zone.
+const lz = contextOptions({ locale: 'en-GB', timezone: 'Europe/London' }, devices);
+eq([lz.locale, lz.timezoneId], ['en-GB', 'Europe/London'], 'language and time zone');
+if ('locale' in contextOptions({}, devices) || 'timezoneId' in contextOptions({}, devices)) fail('an unset language or time zone was set');
+
 // Eyesight.
 eq(['blurred', 'low-contrast', 'deuteranopia', 'protanopia', 'tritanopia', 'achromatopsia', 'none', 'x'].map(visionType),
   ['blurredVision', 'reducedContrast', 'deuteranopia', 'protanopia', 'tritanopia', 'achromatopsia', '', ''], 'vision types');
@@ -122,12 +127,12 @@ if (!JSON.parse(srOut.split('\n')[0]).result.argv.includes('--image-responses=om
 // The run's config: device, zoom, display and eyesight in one file.
 const out = mkdtempSync(join(tmpdir(), 'bp-pw-setup-'));
 const setup = spawn('node', [here('../bp-pw-setup.mjs'), `--out=${out}`, '--device=desktop', '--assistive=zoom', '--vision=achromatopsia',
-  '--display=reduced-motion', `--base=${here('../pw-config.json')}`], { stdio: ['ignore', 'inherit', 'inherit'] });
+  '--display=reduced-motion', '--locale=en-GB', '--timezone=Europe/London', `--base=${here('../pw-config.json')}`], { stdio: ['ignore', 'inherit', 'inherit'] });
 if (await new Promise((r) => setup.on('exit', r)) !== 0) fail('bp-pw-setup failed');
 const cfg = JSON.parse(readFileSync(join(out, 'pw-config.json'), 'utf8'));
-eq(cfg.browser.contextOptions, { viewport: { width: 640, height: 400 }, deviceScaleFactor: 2, reducedMotion: 'reduce' }, 'config context');
+eq(cfg.browser.contextOptions, { viewport: { width: 640, height: 400 }, deviceScaleFactor: 2, locale: 'en-GB', timezoneId: 'Europe/London', reducedMotion: 'reduce' }, 'config context');
 if (!cfg.browser.launchOptions.args.includes('--remote-debugging-port=9222')) fail('the base launch options were lost');
-eq(readSettings(join(out, 'settings.json')), { device: 'desktop', assistive: 'zoom', vision: 'achromatopsia', display: 'reduced-motion' }, 'settings file');
+eq(readSettings(join(out, 'settings.json')), { device: 'desktop', assistive: 'zoom', vision: 'achromatopsia', display: 'reduced-motion', locale: 'en-GB', timezone: 'Europe/London' }, 'settings file');
 eq(readSettings(join(out, 'missing.json')), {}, 'no settings file');
 
 // The eyesight init page greys out a red box for achromatopsia.

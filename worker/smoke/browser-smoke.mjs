@@ -2,7 +2,7 @@
 // with the persona's settings, loaded the way Playwright MCP loads them.
 // A keyboard-only persona with reduced motion gets no click tool (nor a
 // javascript: URL), types into the focused field, and the page sees reduced
-// motion. A zoomed persona with no colour vision gets a 200% layout and grey
+// motion, in the project's language and time zone. A zoomed persona with no colour vision gets a 200% layout and grey
 // screenshots.
 import http from 'node:http';
 import { spawn } from 'node:child_process';
@@ -15,11 +15,12 @@ const fail = (m) => { console.error('FAIL ' + m); process.exit(1); };
 
 const page = `<!doctype html><title>form</title>
 <label>Name <input id="n"></label>
-<p id="m"></p><p id="w"></p>
+<p id="m"></p><p id="w"></p><p id="l"></p>
 <div style="width:120px;height:120px;background:rgb(255,0,0)"></div>
 <script>
 document.getElementById('m').textContent = matchMedia('(prefers-reduced-motion: reduce)').matches ? 'motion reduced' : 'motion full';
 document.getElementById('w').textContent = 'width ' + innerWidth;
+document.getElementById('l').textContent = 'speaks ' + navigator.language + ' in ' + Intl.DateTimeFormat().resolvedOptions().timeZone + ', dates ' + new Date(Date.UTC(2026, 10, 3, 12)).toLocaleDateString();
 </script>`;
 const srv = http.createServer((req, res) => { res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }); res.end(page); });
 await new Promise((r) => srv.listen(0, '127.0.0.1', r));
@@ -60,7 +61,7 @@ async function session(settings, cwd) {
 }
 
 // Keyboard only, reduced motion.
-const kb = await session(['--bp-assistive=keyboard-only', '--bp-display=reduced-motion'], mkdtempSync(join(tmpdir(), 'bp-kb-')));
+const kb = await session(['--bp-assistive=keyboard-only', '--bp-display=reduced-motion', '--bp-locale=en-GB', '--bp-timezone=Asia/Tokyo'], mkdtempSync(join(tmpdir(), 'bp-kb-')));
 const names = (await kb.ask('tools/list', {})).result.tools.map((t) => t.name);
 for (const t of ['browser_click', 'browser_type', 'browser_resize', 'browser_evaluate']) if (names.includes(t)) fail(`${t} is listed for a keyboard-only persona`);
 for (const t of ['browser_press_key', 'browser_type_focused', 'browser_snapshot']) if (!names.includes(t)) fail(`${t} is missing`);
@@ -75,9 +76,10 @@ if (typed.error) fail('typing failed: ' + typed.text);
 let snap = await kb.call('browser_snapshot', {});
 if (!snap.text.includes('Zoë £5')) fail('the typed text is not in the field: ' + snap.text.slice(0, 800));
 if (!snap.text.includes('motion reduced')) fail('the page does not see reduced motion: ' + snap.text.slice(0, 800));
+if (!snap.text.includes('speaks en-GB in Asia/Tokyo, dates 03/11/2026')) fail('the page does not see the language and time zone: ' + snap.text.slice(0, 800));
 if (!snap.text.includes('width 1280')) fail('the default desktop is not 1280 wide: ' + snap.text.slice(0, 800));
 const settings = JSON.parse(readFileSync('/tmp/bp-pw/settings.json', 'utf8'));
-if (settings.assistive !== 'keyboard-only' || settings.display !== 'reduced-motion') fail('settings not recorded: ' + JSON.stringify(settings));
+if (settings.assistive !== 'keyboard-only' || settings.display !== 'reduced-motion' || settings.locale !== 'en-GB' || settings.timezone !== 'Asia/Tokyo') fail('settings not recorded: ' + JSON.stringify(settings));
 kb.kill();
 
 // Zoom, no colour vision: the eyesight init page and the context options as

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"golang.org/x/net/publicsuffix"
+	"golang.org/x/text/language"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/util/validation"
 
@@ -48,6 +49,10 @@ type Project struct {
 	// Timezone is the IANA zone that role schedules are read in. Optional;
 	// empty means DefaultTimezone.
 	Timezone string `json:"timezone,omitempty"`
+	// Locale is the BCP 47 language tag the personas' browsers use, which
+	// sets how pages format dates and numbers and the Accept-Language they
+	// send. Optional; empty means DefaultLocale.
+	Locale string `json:"locale,omitempty"`
 	// DailyBudget caps a day's spend, in US dollars. Optional; nil means
 	// DefaultDailyBudget.
 	DailyBudget *float64 `json:"dailyBudget,omitempty"`
@@ -56,9 +61,20 @@ type Project struct {
 // Time zone and budget defaults and bounds.
 const (
 	DefaultTimezone    = "Europe/London"
+	DefaultLocale      = "en-GB"
 	DefaultDailyBudget = 5.0
 	MaxDailyBudget     = 1000.0
 )
+
+// BrowserLocale returns the project's language tag in canonical form (fr_fr
+// becomes fr-FR), DefaultLocale when unset.
+func (p Project) BrowserLocale() string {
+	tag, err := language.Parse(p.Locale)
+	if p.Locale == "" || err != nil {
+		return DefaultLocale // unreachable for a validated project with a locale
+	}
+	return tag.String()
+}
 
 // Location returns the project's time zone, DefaultTimezone when unset.
 func (p Project) Location() *time.Location {
@@ -300,6 +316,11 @@ func (p Project) validate() error {
 	if p.Timezone != "" {
 		if _, err := time.LoadLocation(p.Timezone); err != nil {
 			return fmt.Errorf("timezone %q is not a time zone, such as Europe/London", p.Timezone)
+		}
+	}
+	if p.Locale != "" {
+		if _, err := language.Parse(p.Locale); err != nil {
+			return fmt.Errorf("locale %q is not a language tag, such as en-GB", p.Locale)
 		}
 	}
 	if b := p.DailyBudget; b != nil && (!(*b > 0) || *b > MaxDailyBudget) {

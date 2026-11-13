@@ -16,8 +16,9 @@
 //     waiting.
 //
 // SETTINGS are the persona's device and accessibility settings, stable keys
-// from the director: --device KEY --assistive KEY --vision KEY --display KEY
-// (bp-a11y.mjs turns them into browser settings).
+// from the director: --device KEY --assistive KEY --vision KEY --display KEY,
+// and the project's --locale TAG --timezone ZONE (bp-a11y.mjs turns them
+// into browser settings).
 //
 // The run's URLs carry its token, and everything in the pod, the journey
 // too, can read every process's command line and environment. So the pod's
@@ -32,7 +33,7 @@ import { join } from 'node:path';
 import { randomInt } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { edgeReplay } from './bp-data.mjs';
-import { contextOptions, visionType, readSettings } from './bp-a11y.mjs';
+import { contextOptions, visionType, readSettings, SETTINGS } from './bp-a11y.mjs';
 
 const log = (...a) => console.error('bp-replay:', ...a);
 const self = fileURLToPath(import.meta.url);
@@ -52,7 +53,7 @@ function parse(argv) {
 }
 
 const opts = parse(process.argv.slice(2));
-const LOOK = ['device', 'assistive', 'vision', 'display'];
+const LOOK = SETTINGS;
 // look is the persona's settings given on the command line.
 const look = Object.fromEntries(LOOK.filter((k) => opts[k] !== undefined).map((k) => [k, opts[k]]));
 if (opts.child) {

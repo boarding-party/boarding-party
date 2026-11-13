@@ -102,6 +102,7 @@ function fromProject(p) {
     nodePool: p.nodePool || '',
     runtimeClass: p.runtimeClass || '',
     timezone: p.timezone || '',
+    locale: p.locale || '',
     dailyBudget: p.dailyBudget != null ? String(p.dailyBudget) : '',
     // Not edited here, but carried so a save never drops it.
     resources: p.resources || null,
@@ -170,6 +171,7 @@ function toJSON(d) {
     nodePool: d.nodePool.trim(),
     ...(d.runtimeClass.trim() ? { runtimeClass: d.runtimeClass.trim() } : {}),
     ...(d.timezone.trim() ? { timezone: d.timezone.trim() } : {}),
+    ...(d.locale.trim() ? { locale: d.locale.trim() } : {}),
     ...(d.dailyBudget.trim() !== '' && isFinite(Number(d.dailyBudget)) ? { dailyBudget: Number(d.dailyBudget) } : {}),
     ...(d.resources ? { resources: d.resources } : {}),
     ...(d.allowFrom.length || d.authServId.trim() ? { inbox: { allowFrom: d.allowFrom, ...(d.authServId.trim() ? { authServId: d.authServId.trim() } : {}) } } : {}),
@@ -434,6 +436,13 @@ export function ProjectPage({ section = 'general', roleN = '', onSaved, onDirty 
             <label for="pj-tz">Time zone</label>
             <input id="pj-tz" value=${draft.timezone} placeholder="Europe/London"
               onInput=${(e) => { const v = e.currentTarget.value; edit((d) => { d.timezone = v; }); }} />
+            <span class="hint">Role schedules follow it, and so does the clock in the personas' browser.</span>
+          </div>
+          <div class="field">
+            <label for="pj-locale">Language</label>
+            <input id="pj-locale" value=${draft.locale} placeholder="en-GB"
+              onInput=${(e) => { const v = e.currentTarget.value; edit((d) => { d.locale = v; }); }} />
+            <span class="hint">The language the personas' browser asks for. Pages use it to format dates and numbers, so en-GB shows 03/11/2026 and en-US shows 11/3/2026.</span>
           </div>
         </div>
       </div>`;
@@ -457,7 +466,7 @@ export function ProjectPage({ section = 'general', roleN = '', onSaved, onDirty 
 
       <div class="projgrid">
         <nav class="subnav" aria-label="Project sections">
-          ${link('#/project/general', 'General', section === 'general', changed('name', 'model', 'nodePool', 'runtimeClass', 'timezone', 'dailyBudget'))}
+          ${link('#/project/general', 'General', section === 'general', changed('name', 'model', 'nodePool', 'runtimeClass', 'timezone', 'locale', 'dailyBudget'))}
           ${link('#/project/sites', 'Sites and hosts', section === 'sites', changed('sites', 'extraHosts'))}
           ${link('#/project/agent', 'Agent key', section === 'agent', false)}
           ${link('#/project/inbox', 'Inbox', section === 'inbox', changed('inbox'))}

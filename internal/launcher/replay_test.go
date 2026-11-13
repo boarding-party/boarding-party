@@ -42,7 +42,7 @@ func TestLauncherStartsReplayAsCommandSession(t *testing.T) {
 	}
 	d := tn.DirectorURL
 	for _, want := range []string{"--claim-url=" + d + "/claim/claim5", "--seed=77", "--device=iphone-15", "--assistive=zoom",
-		"--vision=protanopia", "--display=reduced-motion"} {
+		"--vision=protanopia", "--display=reduced-motion", "--locale=en-GB", "--timezone=Europe/London"} {
 		if !slices.Contains(s.Command, want) {
 			t.Errorf("command %v lacks %s", s.Command, want)
 		}

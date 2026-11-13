@@ -99,7 +99,8 @@ downloads every file it lists into `/workspace/files/` (30 s in total, best effo
 `/tmp/bp-files.log` and never stop the browser from starting).
 
 SETTINGS are the persona's device and accessibility settings, as stable keys from the director's profile
-catalogue. `bp-a11y.mjs` turns them into browser settings, for AI runs and replays alike:
+catalogue, plus the project's language and time zone. `bp-a11y.mjs` turns them into browser settings, for AI
+runs and replays alike:
 
 | Flag | Keys | Browser |
 |---|---|---|
@@ -109,6 +110,8 @@ catalogue. `bp-a11y.mjs` turns them into browser settings, for AI runs and repla
 | | `screen-reader` | `--image-responses=omit`: the agent works from the accessibility snapshot. Screenshots are still saved |
 | `--bp-vision` | `blurred`, `low-contrast`, `deuteranopia`, `protanopia`, `tritanopia`, `achromatopsia` | Chrome's vision deficiency emulation on every tab (an init page) |
 | `--bp-display` | `reduced-motion`, `high-contrast`, `dark` | `reducedMotion`, `forcedColors` with `contrast: more`, `colorScheme: dark` |
+| `--bp-locale` | a BCP 47 tag, such as `en-GB` (the project's `locale`, default `en-GB`) | `locale`: `navigator.language`, `Accept-Language`, date and number formats |
+| `--bp-timezone` | an IANA zone, such as `Europe/London` (the project's `timezone`) | `timezoneId` |
 
 `bp-gate` refuses `browser_resize` and `browser_emulate_media` to every persona: the browser is set to the
 persona, and the agent may not undo it. A refused call returns an error result that says what to use instead.
@@ -125,7 +128,7 @@ Smoke tests: `docker run --rm bp-worker:dev node /opt/bp/smoke/screen-smoke.mjs`
 with Playwright and no model. Two modes:
 
 - `bp-replay --journey <file> --self [--seed N] [--expect-fail-step N] [SETTINGS]`: an AI run proves the
-  journey it wrote. With no SETTINGS (`--device`, `--assistive`, `--vision`, `--display`) it uses the persona's,
+  journey it wrote. With no SETTINGS (`--device`, `--assistive`, `--vision`, `--display`, `--locale`, `--timezone`) it uses the run's,
   from `/tmp/bp-pw/settings.json`. A fresh browser (no CDP port, so it never clashes with the run's own browser), one JSON line on
   stdout (`{"status":"passed"|"failed","step","stepName","error","seed","inputs","durationMs"}`), exit 0 only when
   the result proves the revision: passed, or failed exactly at `--expect-fail-step`.

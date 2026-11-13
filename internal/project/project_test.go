@@ -347,6 +347,28 @@ func TestProjectTimezoneAndBudget(t *testing.T) {
 	}
 }
 
+// The browser speaks the project's language: en-GB unless set, canonical
+// when set, refused when it is no language tag.
+func TestProjectLocale(t *testing.T) {
+	base := "name: p\nsites: [\"https://x.test\"]\n"
+	p, err := Load([]byte(base))
+	if err != nil || p.BrowserLocale() != "en-GB" {
+		t.Fatalf("default: %v %q", err, p.BrowserLocale())
+	}
+	for in, want := range map[string]string{"en-US": "en-US", "fr_fr": "fr-FR", "cy": "cy"} {
+		p, err := Load([]byte(base + "locale: " + in + "\n"))
+		if err != nil || p.BrowserLocale() != want {
+			t.Errorf("%s: %v %q, want %q", in, err, p.BrowserLocale(), want)
+		}
+	}
+	for _, in := range []string{"English", "'en GB'", "en-GB-x-'quote'"} {
+		_, err := Load([]byte(base + "locale: " + in + "\n"))
+		if err == nil || !strings.Contains(err.Error(), "is not a language tag, such as en-GB") {
+			t.Errorf("%s: got %v", in, err)
+		}
+	}
+}
+
 func yamlToJSON(s string) ([]byte, error) { return yaml.YAMLToJSON([]byte(s)) }
 
 func TestRoleActivity(t *testing.T) {

@@ -118,6 +118,21 @@ if (r.code !== 0 || r.res?.status !== 'passed') fail('one flag dropped the other
 r = await run(['--journey', looks, '--self', '--assistive', 'none'], { BP_SETTINGS: recorded });
 if (r.res?.status !== 'failed') fail('a flag on the command line must win over its recorded setting: ' + r.out);
 
+// The project's language and time zone reach the page, given or recorded.
+const speaks = join(dir, 'speaks.mjs');
+writeFileSync(speaks, `export default async function journey({ page, bp }) {
+  await bp.step('Read the date', async () => {
+    await page.setContent('<p>hi</p>');
+    const got = await page.evaluate(() => [navigator.language, Intl.DateTimeFormat().resolvedOptions().timeZone, new Date(Date.UTC(2026, 10, 3, 12)).toLocaleDateString()].join(' '));
+    if (got !== 'en-GB Asia/Tokyo 03/11/2026') throw new Error('language, zone, date: ' + got);
+  });
+}`);
+r = await run(['--journey', speaks, '--self', '--locale', 'en-GB', '--timezone', 'Asia/Tokyo']);
+if (r.code !== 0 || r.res?.status !== 'passed') fail('language and time zone on the command line: ' + r.out);
+writeFileSync(recorded, JSON.stringify({ locale: 'en-GB', timezone: 'Asia/Tokyo' }));
+r = await run(['--journey', speaks, '--self'], { BP_SETTINGS: recorded });
+if (r.code !== 0 || r.res?.status !== 'passed') fail('recorded language and time zone: ' + r.out);
+
 // Run mode: bp-replay spends its one-time claim for its URLs; the code
 // comes from the director; the result and evidence go back.
 let nclaim = 0;

@@ -1,7 +1,7 @@
 #!/bin/sh
 # MCP stdio launcher: starts the screen streamer once per pod, then execs
 # Playwright MCP behind the tool gate, with the browser set to the persona's
-# device and accessibility settings.
+# device and accessibility settings, in the project's language and time zone.
 # Nothing may be written to stdout here; it belongs to the MCP protocol.
 live=""
 files=""
@@ -11,6 +11,8 @@ device=""
 assistive=""
 vision=""
 display=""
+locale=""
+timezone=""
 usageonly=""
 consoleurl=""
 n=$#
@@ -26,6 +28,8 @@ while [ "$n" -gt 0 ]; do
     --bp-assistive=*) assistive="${a#--bp-assistive=}" ;;
     --bp-vision=*) vision="${a#--bp-vision=}" ;;
     --bp-display=*) display="${a#--bp-display=}" ;;
+    --bp-locale=*) locale="${a#--bp-locale=}" ;;
+    --bp-timezone=*) timezone="${a#--bp-timezone=}" ;;
     --usage-only) usageonly=1 ;;
     *) set -- "$@" "$a" ;;
   esac
@@ -114,11 +118,11 @@ if [ -n "$proxy" ]; then
 fi
 
 # The run's config: the persona's device, zoom, display settings and
-# eyesight (bp-pw-setup also records them for bp-replay --self). A browser
+# eyesight, and the project's language and time zone (bp-pw-setup also records them for bp-replay --self). A browser
 # that is not the persona's would make every finding misleading, so a failed
 # setup stops here rather than starting a default browser.
 if ! node /opt/bp/bp-pw-setup.mjs --out=/tmp/bp-pw "--device=$device" "--assistive=$assistive" \
-    "--vision=$vision" "--display=$display" >>/tmp/bp-pw-setup.log 2>&1; then
+    "--vision=$vision" "--display=$display" "--locale=$locale" "--timezone=$timezone" >>/tmp/bp-pw-setup.log 2>&1; then
   echo "bp-browser: could not set up the persona's browser; see /tmp/bp-pw-setup.log" >&2
   exit 1
 fi

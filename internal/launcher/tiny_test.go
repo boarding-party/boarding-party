@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -101,7 +102,7 @@ func TestStartCreatesSessionWithBothMCPServers(t *testing.T) {
 		t.Errorf("pw = %v", pw)
 	}
 	want := []string{"--live-url=http://bp-director.bp.svc:8080/live/tok123", "--files-url=http://bp-director.bp.svc:8080/files/tok123/", "--usage-url=http://bp-director.bp.svc:8080/usage/tok123", "--profile-url=http://bp-director.bp.svc:8080/profile/tok123", "--console-url=http://bp-director.bp.svc:8080/console/tok123", "--headless", "--isolated", "--no-sandbox", "--browser=chromium",
-		"--output-dir=/workspace/out", "--caps=devtools,storage"}
+		"--output-dir=/workspace/out", "--bp-locale=en-GB", "--bp-timezone=Europe/London", "--caps=devtools,storage"}
 	if strings.Join(pw.Args, " ") != strings.Join(want, " ") {
 		t.Errorf("args = %v", pw.Args)
 	}
@@ -551,8 +552,14 @@ func TestStartLaunchesPersonaSettings(t *testing.T) {
 	if args = strings.Join(pwArgs(t, project.Profile{Device: "desktop-large"}), " "); !strings.Contains(args, "--bp-device=desktop-large") {
 		t.Errorf("desktop args = %s", args)
 	}
-	if args = strings.Join(pwArgs(t, project.Profile{}), " "); strings.Contains(args, "--bp-") || strings.Contains(args, "--viewport-size") {
+	if args = strings.Join(pwArgs(t, project.Profile{}), " "); strings.Contains(args, "--bp-device") || strings.Contains(args, "--bp-assistive") || strings.Contains(args, "--viewport-size") {
 		t.Errorf("no-profile args = %s", args)
+	}
+	// Every browser speaks the project's language in its time zone.
+	for _, f := range []string{"--bp-locale=en-GB", "--bp-timezone=Europe/London"} {
+		if !strings.Contains(args, f) {
+			t.Errorf("missing %s in %s", f, args)
+		}
 	}
 	args = strings.Join(pwArgs(t, project.Profile{Assistive: "keyboard-only", Vision: "blurred", Display: "dark", Age: "65-plus"}), " ")
 	for _, f := range []string{"--bp-assistive=keyboard-only", "--bp-vision=blurred", "--bp-display=dark"} {
@@ -565,6 +572,22 @@ func TestStartLaunchesPersonaSettings(t *testing.T) {
 	}
 	if args = strings.Join(pwArgs(t, project.Profile{Assistive: "none"}), " "); strings.Contains(args, "--bp-assistive") {
 		t.Errorf("no assistive technology still passed: %s", args)
+	}
+}
+
+func TestStartLaunchesProjectLocaleAndZone(t *testing.T) {
+	tn := newTiny()
+	p := profileProject(project.Profile{})
+	p.Locale, p.Timezone = "fr-FR", "America/New_York"
+	name, err := tn.Start(context.Background(), store.Run{ID: "eeeeeeee12", Token: "tk", Role: "visitor", Persona: "ann"}, p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	args := getSession(t, tn, name).Spec.MCPServers[1].Args
+	for _, f := range []string{"--bp-locale=fr-FR", "--bp-timezone=America/New_York"} {
+		if !slices.Contains(args, f) {
+			t.Errorf("missing %s in %v", f, args)
+		}
 	}
 }
 
