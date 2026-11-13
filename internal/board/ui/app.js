@@ -13,7 +13,7 @@ import { Coverage, LEAD_STORY, isLead } from './coverage.js';
 import { ConsoleCard, ConsoleBefore, fenced } from './console.js';
 import { Timeline } from './timeline.js';
 import { Shot } from './shot.js';
-import { JourneysPage, JourneyPage } from './journeys.js';
+import { JourneysPage, JourneyPage, journeyHref } from './journeys.js';
 
 const ACTIVE = new Set(['pending', 'running']);
 // LOCAL is the CLI's own board, which listens on loopback only; anywhere
@@ -301,6 +301,9 @@ const fmtMoney = (n) => '$' + (Number(n) || 0).toFixed(2);
 
 // fmtCost is a run's cost; a fraction of a cent reads as "< $0.01".
 const fmtCost = (n) => (n > 0 && n < 0.005 ? '< $0.01' : '≈ ' + fmtMoney(n));
+
+// runCost is what a run cost; a replay runs no model, so it is exactly $0.
+const runCost = (r, n) => (r.kind === 'replay' ? '$0' : fmtCost(n));
 
 // fmtReset is a clock time in the project's zone: the budget reset, or when
 // a scheduled persona acts next.
@@ -726,7 +729,7 @@ function RunCard({ r, madeBy }) {
       </div>
       <div class="rc-body">
         <div class="rc-who"><a href=${runHref(r.id)} onClick=${(e) => e.stopPropagation()}>${r.persona}</a>${who ? html` <span class="muted">${who}</span>` : null}</div>
-        <div class="rc-meta"><span class="rc-story">${lead ? 'Lead run' : r.story}</span><span title=${fmtFull(r.started)}>${started ? started.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) : ''}</span>${took ? html`<span>${took}</span>` : null}${typeof r.cost === 'number' ? html`<span>${fmtCost(r.cost)}</span>` : null}</div>
+        <div class="rc-meta"><span class="rc-story">${lead ? 'Lead run' : r.story}</span><span title=${fmtFull(r.started)}>${started ? started.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) : ''}</span>${took ? html`<span>${took}</span>` : null}${typeof r.cost === 'number' ? html`<span>${runCost(r, r.cost)}</span>` : null}</div>
         ${r.state === 'waiting' && r.wait && r.wait.status === 'open'
           ? html`<p class="rc-out wait">Waiting for ${r.wait.waitingFor}, gives up ${fmtWhen(r.wait.deadline)}</p>`
           : html`<p class="rc-out" title=${out}>${out || html`<span class="muted">${active ? 'In progress' : 'No outcome recorded'}</span>`}</p>`}
@@ -752,7 +755,7 @@ function RunsTable({ runs }) {
                 ${r.state === 'waiting' && r.wait && r.wait.status === 'open'
                   ? html`<div class="waitline small muted">Waiting for ${r.wait.waitingFor} · gives up ${fmtWhen(r.wait.deadline)}</div>` : null}</td>
               <td class="when" title=${fmtFull(r.started)}>${fmtWhen(r.started)}</td>
-              <td class="when num">${typeof r.cost === 'number' ? fmtCost(r.cost) : '—'}</td>
+              <td class="when num">${typeof r.cost === 'number' ? runCost(r, r.cost) : '—'}</td>
               <td class="outcome" title=${firstLine(r.outcome)}>${firstLine(r.outcome) || html`<span class="muted">${ACTIVE.has(r.state) ? 'In progress' : '—'}</span>`}</td>
             </tr>`)}
         </tbody>
@@ -1108,7 +1111,7 @@ function RunPage({ id, onChange }) {
           <li>${run.role || 'Persona'}</li>
           <li>Started ${fmtFull(run.started)}</li>
           ${took ? html`<li><b>${took}</b>${active ? ' so far' : ''}</li>` : null}
-          ${typeof data.cost === 'number' ? html`<li><b>${fmtCost(data.cost)}</b></li>` : null}
+          ${typeof data.cost === 'number' ? html`<li><b>${runCost(run, data.cost)}</b></li>` : null}
           ${usage ? html`<li><b>${usage.turns || 0}</b> ${usage.turns === 1 ? 'turn' : 'turns'}</li>` : null}
           <li><a href="#bugs" onClick=${(e) => { e.preventDefault(); document.getElementById('bugs').scrollIntoView({ block: 'start' }); }}><b>${bugs.length}</b> ${bugs.length === 1 ? 'bug' : 'bugs'}</a></li>
           ${run.story !== LEAD_STORY ? html`<li><a href="#console" class=${conErrors ? 'bad-text' : ''} onClick=${(e) => { e.preventDefault(); document.getElementById('console').scrollIntoView({ block: 'start' }); }}><b>${conErrors}</b> console ${conErrors === 1 ? 'error' : 'errors'}</a></li>` : null}
@@ -1142,7 +1145,7 @@ function RunPage({ id, onChange }) {
           ${run.story !== LEAD_STORY ? html`<${ConsoleCard} events=${events} blocked=${blocked} started=${run.started} active=${active} focus=${conFocus} />` : null}
         </div>
         <div class="stack">
-          ${replay ? html`<${ReplayCard} run=${run} artifacts=${artifacts} />` : null}
+          ${replay ? html`<${ReplayCard} run=${run} artifacts=${artifacts} copilot=${data.copilot} />` : null}
           ${chain || queued ? html`<${Chain} links=${links} current=${run.id} queued=${queued || []} />` : null}
           ${blocked.length ? html`<${BlockedHosts} hosts=${blocked} />` : null}
           <div class="card">
@@ -1161,7 +1164,7 @@ function RunPage({ id, onChange }) {
               ${took ? html`<dt>Duration</dt><dd>${took}</dd>` : null}
               ${usage && usage.byModel ? html`<dt>Model</dt><dd>${fmtModels(usage.byModel)}</dd>` : null}
               ${usage ? html`<dt>Tokens</dt><dd>${fmtUsage(usage)}</dd>` : null}
-              ${typeof data.cost === 'number' ? html`<dt>Cost</dt><dd>${fmtCost(data.cost)}</dd>` : null}
+              ${typeof data.cost === 'number' ? html`<dt>Cost</dt><dd>${runCost(run, data.cost)}</dd>` : null}
               ${run.session ? html`<dt>Session</dt><dd><code>${run.session}</code></dd>` : null}
             </dl>
           </div>
@@ -1178,11 +1181,26 @@ function RunPage({ id, onChange }) {
 }
 
 // ReplayCard shows what a replay ran: the journey revision, its seed and
-// the test data drawn from it, and the screen where it stopped. Values are
-// shown as text: they come from agent-written code.
-function ReplayCard({ run, artifacts }) {
+// the test data drawn from it, the screen where it stopped and, when it
+// failed, the copilot it called. Values are shown as text: they come from
+// agent-written code.
+function ReplayCard({ run, artifacts, copilot }) {
   const has = (n) => artifacts.includes(n);
   const [res, setRes] = useState(null);
+  const [again, setAgain] = useState(null); // {ok, text} after "Replay with these inputs"
+  const [busy, setBusy] = useState(false);
+  const replayAgain = async () => {
+    setBusy(true); setAgain(null);
+    try {
+      await api(`api/journeys/${encodeURIComponent(run.journeyId)}/replay`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ revision: run.revision, seed: run.seed }) });
+      setAgain({ ok: true, text: 'Replay queued.' });
+    } catch (e) {
+      setAgain({ ok: false, text: e.message });
+    } finally {
+      setBusy(false);
+    }
+  };
   const kept = has('replay-result.json');
   useEffect(() => {
     if (!kept) return undefined;
@@ -1196,8 +1214,10 @@ function ReplayCard({ run, artifacts }) {
     <div class="card replaycard">
       <h2>Replay</h2>
       <dl class="facts">
-        <dt>Journey</dt><dd>Revision ${run.revision}</dd>
+        <dt>Journey</dt><dd>${run.journeyId ? html`<a href=${journeyHref(run.journeyId)}>${run.persona}, ${run.story}, revision ${run.revision}</a>` : `Revision ${run.revision}`}</dd>
         <dt>Seed</dt><dd><code>${run.seed}</code></dd>
+        ${copilot ? html`<dt>Copilot</dt><dd><a href=${runHref(copilot.runId)}>${COPILOT_STATE[copilot.state] || copilot.state}</a>${copilot.decision
+          ? html`<span class="copilotsays">Decided <b>${copilot.decision.kind}</b>${copilot.decision.reason ? `: ${copilot.decision.reason}` : ''}</span>` : null}</dd>` : null}
         ${res && res.durationMs ? html`<dt>Took</dt><dd>${fmtDuration(res.durationMs)}</dd>` : null}
       </dl>
       ${inputs.length ? html`<h3>Test data</h3>
@@ -1205,8 +1225,15 @@ function ReplayCard({ run, artifacts }) {
         : res ? html`<p class="muted small">This journey drew no test data.</p>` : null}
       ${has('failed-step.png') ? html`<h3>Where it stopped</h3>
         <a href=${artifactURL(run.id, 'failed-step.png')} target="_blank" rel="noopener"><img class="failedstep" src=${artifactURL(run.id, 'failed-step.png')} alt="The screen at the step that failed" /></a>` : null}
+      ${run.journeyId && run.seed ? html`<div class="row againrow">
+        <button type="button" class="btn" disabled=${busy} onClick=${replayAgain}>Replay with these inputs</button>
+        ${again ? html`<span class=${'small ' + (again.ok ? 'ok-text' : 'bad-text')} role=${again.ok ? 'status' : 'alert'}>${again.text}</span>` : null}
+      </div>` : null}
     </div>`;
 }
+
+// COPILOT_STATE names a copilot run's state on a replay's card.
+const COPILOT_STATE = { pending: 'Starting', running: 'Running', waiting: 'Waiting', done: 'Done', failed: 'Failed', stuck: 'Stuck' };
 
 // waitText says what a run waited for and how that ended.
 function waitText(w) {

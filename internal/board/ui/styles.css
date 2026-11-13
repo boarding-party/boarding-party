@@ -593,3 +593,8 @@ pre.diff { padding: 6px 0; margin-top: 8px; }
 .jdecisions li:first-child { border-top: 0; }
 .jdecisions .dwhy { grid-column: 2; color: var(--muted); overflow-wrap: anywhere; white-space: pre-wrap; }
 @media (max-width: 560px) { .jdecisions li { grid-template-columns: minmax(0, 1fr); } .jdecisions .dwhy { grid-column: 1; } }
+/* Replay card: the copilot it called, and replaying the same inputs. */
+.copilotsays { display: block; color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
+.againrow { margin-top: 12px; }
+.againrow .ok-text { color: var(--ok); }
+.againrow .bad-text { color: var(--bad); }

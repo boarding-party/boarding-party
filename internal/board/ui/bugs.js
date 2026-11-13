@@ -6,6 +6,7 @@
 import { useState } from './vendor/hooks.module.js';
 import { html, api, fmtWhen, parseTime, artifactURL, runHref, usePoll, useParams, setParams, SEVERITY_TAG, SHOT_TOKEN } from './lib.js';
 import { Shot } from './shot.js';
+import { journeyHref } from './journeys.js';
 
 const POLL_MS = 15000;
 const CHECK_POLL_MS = 5000; // while a fix check is under way
@@ -261,6 +262,7 @@ export function IssuePage({ id }) {
             </form>` : null}
           ${actErr ? html`<div class="note bad" role="alert">${actErr}</div>` : null}
           <p class="small muted" style="margin:10px 0 0">${verifying ? 'Changing the status now ignores the check under way.'
+            : reports.some((r) => r.journeyId) ? 'Mark fixed replays the journey step that shows it. No model runs unless the replay cannot tell.'
             : 'Mark fixed queues the story that found it, so a persona can look for it again.'}</p>
         </div>
       </div>
@@ -281,6 +283,7 @@ function Report({ r }) {
       <span class="small muted">${fmtWhen(r.created)}</span>
       <span class="meta"><a href=${runHref(r.run_id)}>${r.persona || 'Unknown persona'}, ${r.story || 'unknown story'}</a></span>
       ${r.step ? html`<span class="meta"><b>Step:</b> ${r.step}</span>` : null}
+      ${r.journeyId ? html`<span class="meta"><a href=${journeyHref(r.journeyId)}>Journey revision ${r.journeyRev}, step ${r.journeyStep}</a></span>` : null}
       ${r.evidence ? html`<span class="meta"><b>Evidence:</b> ${r.evidence}</span>` : null}
       ${r.note ? html`<span class="meta"><b>Note:</b> ${r.note}</span>` : null}
     </div>
