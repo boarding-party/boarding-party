@@ -402,7 +402,8 @@ const devJourney = `export default async function journey({ page, data, bp, expe
 `
 
 // seedJourney gives the first persona's first story a journey with two
-// revisions, so Start run can offer a replay.
+// revisions, so Start run can offer a replay, and two past replays of it:
+// one on schedule and one that checked a fix.
 func seedJourney(st *store.Store, p project.Project, now time.Time) error {
 	if len(p.Roles) == 0 || len(p.Roles[0].Personas) == 0 || len(p.Roles[0].Stories) == 0 {
 		return nil
@@ -410,11 +411,44 @@ func seedJourney(st *store.Store, p project.Project, now time.Time) error {
 	persona, story := p.Roles[0].Personas[0].Name, p.Roles[0].Stories[0].Name
 	settled := strings.Replace(devJourney, "  await bp.step('Check the counter'",
 		"  await expect(page.getByTestId('todo-item')).toHaveCount(n);\n  await bp.step('Check the counter'", 1)
+	var j store.Journey
 	for i, reason := range []string{"First recording of the story.", "The counter check now waits for the list to settle."} {
 		at := now.Add(time.Duration(i-2) * time.Hour)
 		code := []string{devJourney, settled}[i]
-		if _, _, err := st.AddRevision(persona, story, store.Revision{Kind: store.RevisionFull, Code: code, Reason: reason, Created: at},
+		var err error
+		if j, _, err = st.AddRevision(persona, story, store.Revision{Kind: store.RevisionFull, Code: code, Reason: reason, Created: at},
 			store.Decision{Kind: "recorded", Reason: reason, Actor: store.ActorModel, Created: at, Explored: true}); err != nil {
+			return err
+		}
+	}
+	role := p.Roles[0].Name
+	found := store.Run{ID: "devfound", Token: "devfound-token", Persona: persona, Role: role, Story: story, State: store.RunDone,
+		Outcome: "Found the counter off by one (sample run).", Started: now.Add(-5 * time.Hour), Finished: now.Add(-5*time.Hour + 3*time.Minute), Chain: "devfound"}
+	if err := st.CreateRun(found); err != nil {
+		return err
+	}
+	if err := st.AddBug(store.Bug{ID: "devbug", RunID: found.ID, Summary: "The counter shows one todo too many", Step: "Check the counter",
+		Severity: "medium", Created: found.Finished}); err != nil {
+		return err
+	}
+	bugs, err := st.Bugs(found.ID)
+	if err != nil {
+		return err
+	}
+	fix, err := json.Marshal(store.RunContext{Kind: "verify", Verify: &store.ContextVerify{IssueID: bugs[0].IssueID,
+		Summary: bugs[0].Summary, JourneyID: j.ID, Revision: j.LiveRev, JourneyStep: 3}})
+	if err != nil {
+		return err
+	}
+	for i, r := range []store.Run{
+		{ID: "devreplay", State: store.RunDone, Outcome: "Passed"},
+		{ID: "devfixcheck", State: store.RunFailed, Outcome: "Failed at step 3: Check the counter", Context: fix},
+	} {
+		at := now.Add(time.Duration(i-1)*30*time.Minute - 10*time.Minute)
+		r.Token, r.Persona, r.Role, r.Story, r.Chain = r.ID+"-token", persona, role, story, r.ID
+		r.Started, r.Finished = at, at.Add(time.Minute)
+		r.Kind, r.JourneyID, r.Revision, r.Seed = store.RunReplay, j.ID, j.LiveRev, int64(1000+i)
+		if err := st.CreateRun(r); err != nil {
 			return err
 		}
 	}

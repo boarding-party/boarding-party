@@ -231,7 +231,7 @@ func TestDevDirectorReplaysAJourney(t *testing.T) {
 		var rs []store.Run
 		_ = json.Unmarshal(b, &rs)
 		for _, r := range rs {
-			if r.Kind == store.RunReplay {
+			if r.Kind == store.RunReplay && !strings.HasPrefix(r.ID, "dev") { // not a seeded one
 				run = r
 			}
 		}

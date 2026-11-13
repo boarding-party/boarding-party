@@ -3,8 +3,8 @@
 //
 // Journey code is agent-written and untrusted: it is shown only as text
 // through htm/Preact, never as markup.
-import { useState } from './vendor/hooks.module.js';
-import { html, api, fmtWhen, runHref, usePoll, confirmDialog } from './lib.js';
+import { useState, useMemo } from './vendor/hooks.module.js';
+import { html, api, fmtWhen, runHref, issueHref, fixCheckOf, usePoll, confirmDialog } from './lib.js';
 
 const POLL_MS = 15000;
 const MAX_DIFF_LINES = 2000;
@@ -119,10 +119,12 @@ function hunks(d) {
 }
 
 function Diff({ before, after }) {
-  const d = lineDiff(before, after);
+  // Kept across polls: the page refreshes every POLL_MS with the same code.
+  const d = useMemo(() => lineDiff(before, after), [before, after]);
+  const shown = useMemo(() => (d ? hunks(d) : null), [d]);
   if (!d) return html`<p class="muted small">Too long to compare here.</p>`;
   if (!d.some((l) => l.op !== ' ')) return html`<p class="muted small">Same code as the revision before.</p>`;
-  return html`<pre class="diff">${hunks(d).map((l, k) => (l.fold
+  return html`<pre class="diff">${shown.map((l, k) => (l.fold
     ? html`<span key=${k} class="dl fold">${l.fold} unchanged ${l.fold === 1 ? 'line' : 'lines'}</span>`
     : html`<span key=${k} class=${'dl' + (l.op === '+' ? ' add' : l.op === '-' ? ' del' : '')}>${l.op} ${l.text}</span>`))}</pre>`;
 }
@@ -148,12 +150,16 @@ function Revision({ r, prev, live }) {
 const RESULT = (r) => (r.state === 'done' ? ['ok', 'Passed'] : r.state === 'failed' ? ['bad', 'Failed'] : r.state === 'waiting' ? ['wait', 'Waiting']
   : r.state === 'stuck' ? ['bad', 'Stuck'] : ['run', 'Running']);
 
-// Strip is the last replays as a row of squares, oldest on the left.
+// Strip is the last replays as a row of squares, oldest on the left. A fix
+// check is a hollow square: it checks a bug, not the journey's health.
 function Strip({ runs }) {
   if (!runs.length) return null;
-  return html`<div class="strip" role="img" aria-label=${`Last ${runs.length} replays: ${runs.filter((r) => r.state === 'done').length} passed`}>
-    ${[...runs].reverse().map((r) => html`<a key=${r.id} href=${runHref(r.id)} class=${'sq ' + RESULT(r)[0]} title=${`${RESULT(r)[1]}, ${fmtWhen(r.started)}`}></a>`)}
-  </div>`;
+  const checks = runs.filter((r) => fixCheckOf(r)).length;
+  return html`<div class="strip" role="img" aria-label=${`Last ${runs.length} replays: ${runs.filter((r) => r.state === 'done').length} passed${checks ? `, ${checks} of them fix checks` : ''}`}>
+    ${[...runs].reverse().map((r) => html`<a key=${r.id} href=${runHref(r.id)} class=${'sq ' + RESULT(r)[0] + (fixCheckOf(r) ? ' fx' : '')}
+      title=${`${fixCheckOf(r) ? 'Fix check, ' : ''}${RESULT(r)[1]}, ${fmtWhen(r.started)}`}></a>`)}
+  </div>
+  ${checks ? html`<p class="small muted striphint">Hollow squares are fix checks.</p>` : null}`;
 }
 
 export function JourneyPage({ id }) {
@@ -275,6 +281,7 @@ export function JourneyPage({ id }) {
               <ul class="jruns">${runs.slice(0, 8).map((r) => html`<li key=${r.id}>
                 <span class=${'tag ' + RESULT(r)[0]}>${RESULT(r)[1]}</span>
                 <a href=${runHref(r.id)}>Revision ${r.revision}</a>
+                ${fixCheckOf(r) ? html`<a class="tag idle" href=${issueHref(fixCheckOf(r).issueId)}>Fix check</a>` : null}
                 <span class="small muted">${fmtWhen(r.started)}</span>
                 ${r.outcome && r.state !== 'done' ? html`<span class="small muted jout">${r.outcome.split('\n')[0]}</span>` : null}
               </li>`)}</ul>` : html`<p class="muted small">No replays yet.</p>`}

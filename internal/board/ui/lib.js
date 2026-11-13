@@ -112,6 +112,10 @@ export function fmtWhen(s) {
 
 export const artifactURL = (runID, name) => `api/runs/${encodeURIComponent(runID)}/artifacts/${encodeURIComponent(name)}`;
 export const runHref = (id) => `#/runs/${encodeURIComponent(id)}`;
+export const issueHref = (id) => `#/bugs/${encodeURIComponent(id)}`;
+
+// fixCheckOf is what a run checks when it checks a fix, or null.
+export const fixCheckOf = (run) => (run && run.context && run.context.verify) || null;
 
 // A page keeps its view (filters, the open item, a moment in a run) in the
 // hash after "?", as in #/runs?view=coverage&persona=Ann, so a link opens

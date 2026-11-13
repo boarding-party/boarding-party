@@ -5,8 +5,8 @@
 // Never use innerHTML or dangerouslySetInnerHTML here.
 import { render } from './vendor/preact.module.js';
 import { useState, useEffect, useRef, useCallback } from './vendor/hooks.module.js';
-import { html, api, directorDown, confirmDialog, DialogHost, parseTime, sameDay, fmtWhen, artifactURL, runHref, usePoll, useParams, routeParams, setParams, PARAMS_EVENT, SEVERITY_TAG, SHOT_TOKEN } from './lib.js';
-import { BugsPage, IssuePage, issueHref, openCount } from './bugs.js';
+import { html, api, directorDown, confirmDialog, DialogHost, parseTime, sameDay, fmtWhen, artifactURL, runHref, issueHref, fixCheckOf, usePoll, useParams, routeParams, setParams, PARAMS_EVENT, SEVERITY_TAG, SHOT_TOKEN } from './lib.js';
+import { BugsPage, IssuePage, openCount } from './bugs.js';
 import { ProjectPage } from './project.js';
 import { LeadPage, leadHref } from './leads.js';
 import { Coverage, LEAD_STORY, isLead } from './coverage.js';
@@ -1210,12 +1210,14 @@ function ReplayCard({ run, artifacts, copilot }) {
     return () => { live = false; };
   }, [run.id, kept]);
   const inputs = Object.entries((res && res.inputs) || {});
+  const fx = fixCheckOf(run);
   return html`
     <div class="card replaycard">
       <h2>Replay</h2>
       <dl class="facts">
         <dt>Journey</dt><dd>${run.journeyId ? html`<a href=${journeyHref(run.journeyId)}>${run.persona}, ${run.story}, revision ${run.revision}</a>` : `Revision ${run.revision}`}</dd>
         <dt>Seed</dt><dd><code>${run.seed}</code></dd>
+        ${fx ? html`<dt>Fix check</dt><dd><a href=${issueHref(fx.issueId)}>${fx.repeat ? 'Runs a failure at' : 'Checks the fix at'} step ${fx.journeyStep}${fx.repeat ? ' again with the same inputs' : ''}</a></dd>` : null}
         ${copilot ? html`<dt>Copilot</dt><dd><a href=${runHref(copilot.runId)}>${COPILOT_STATE[copilot.state] || copilot.state}</a>${copilot.decision
           ? html`<span class="copilotsays">Decided <b>${copilot.decision.kind}</b>${copilot.decision.reason ? `: ${copilot.decision.reason}` : ''}</span>` : null}</dd>` : null}
         ${res && res.durationMs ? html`<dt>Took</dt><dd>${fmtDuration(res.durationMs)}</dd>` : null}

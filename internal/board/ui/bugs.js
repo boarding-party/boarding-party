@@ -4,14 +4,12 @@
 // Issue and report text is agent-written and untrusted: render it only as
 // text through htm/Preact.
 import { useState } from './vendor/hooks.module.js';
-import { html, api, fmtWhen, parseTime, artifactURL, runHref, usePoll, useParams, setParams, SEVERITY_TAG, SHOT_TOKEN } from './lib.js';
+import { html, api, fmtWhen, parseTime, artifactURL, runHref, issueHref, usePoll, useParams, setParams, SEVERITY_TAG, SHOT_TOKEN } from './lib.js';
 import { Shot } from './shot.js';
 import { journeyHref } from './journeys.js';
 
 const POLL_MS = 15000;
 const CHECK_POLL_MS = 5000; // while a fix check is under way
-
-export const issueHref = (id) => `#/bugs/${encodeURIComponent(id)}`;
 
 const STATUS = new Map([
   ['open', { label: 'Open', tag: 'bad' }],
@@ -223,7 +221,7 @@ export function IssuePage({ id }) {
       ${err ? html`<div class="note bad">Could not load the bug: ${err}</div>` : html`<p class="muted">Loading…</p>`}</section>`;
   }
 
-  const { issue, reports = [] } = data;
+  const { issue, reports = [], checkBy } = data;
   const st = issue.status;
   const couldNot = (issue.checkNote || '').startsWith('Could not check');
   const verifying = st === 'verifying';
@@ -262,7 +260,8 @@ export function IssuePage({ id }) {
             </form>` : null}
           ${actErr ? html`<div class="note bad" role="alert">${actErr}</div>` : null}
           <p class="small muted" style="margin:10px 0 0">${verifying ? 'Changing the status now ignores the check under way.'
-            : reports.some((r) => r.journeyId) ? 'Mark fixed replays the journey step that shows it. No model runs unless the replay cannot tell.'
+            : checkBy === 'replay' ? 'Mark fixed replays the journey step that shows it. No model runs unless the replay cannot tell.'
+            : checkBy === 'none' ? 'Nobody can check this fix: the persona or story that found it is gone. Mark fixed marks it fixed without a check.'
             : 'Mark fixed queues the story that found it, so a persona can look for it again.'}</p>
         </div>
       </div>
