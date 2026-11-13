@@ -2,6 +2,7 @@ package store
 
 import (
 	"errors"
+	"path/filepath"
 	"slices"
 	"testing"
 	"time"
@@ -258,5 +259,82 @@ func TestSetJourneyStateRecords(t *testing.T) {
 	}
 	if err := s.SetJourneyState("nope", JourneyLive, Decision{Kind: "resumed", Actor: "kate", Created: t0}); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("missing journey: %v", err)
+	}
+}
+
+func TestFollowReplayIsOneStep(t *testing.T) {
+	s := open(t)
+	j, _ := addRev(t, s, RevisionFull, "a", t0)
+	for _, r := range []Run{
+		{ID: "rp", Token: "t-rp", Persona: "megan", Story: "invoice", State: RunRunning, Started: t0, Chain: "rp", Kind: RunReplay, JourneyID: j.ID, Revision: 1, Seed: 5},
+		{ID: "ai", Token: "t-ai", Persona: "megan", Story: "invoice", State: RunRunning, Started: t0, Chain: "ai"},
+	} {
+		if err := s.CreateRun(r); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.SetReplayResult("rp", []byte(`{"status":"failed","step":2}`)); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"rp", "ai"} {
+		if _, err := s.FinishRun(id, RunFailed, "Failed at step 2: Pay", t0.Add(time.Minute)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	un, err := s.UnfollowedReplays()
+	if err != nil || len(un) != 1 || un[0].ID != "rp" || string(un[0].ReplayResult) != `{"status":"failed","step":2}` {
+		t.Fatalf("unfollowed %+v %v", un, err)
+	}
+	streak := 2
+	at := t0.Add(time.Hour)
+	err = s.FollowReplay("rp", ReplayFollow{
+		Next:     []Queued{{ID: "q", Persona: "megan", Story: "invoice", Kind: RunReplay, JourneyID: j.ID, Seed: 5, Created: at}},
+		Decisions: []Decision{{JourneyID: j.ID, Kind: "copilot called", Reason: "r", Actor: ActorDirector, Created: at}},
+		State:    JourneyRepairing, FlakyStreak: &streak, CopilotAt: at,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if un, _ := s.UnfollowedReplays(); len(un) != 0 {
+		t.Fatalf("still unfollowed %+v", un)
+	}
+	got, _ := s.Journey(j.ID)
+	if got.State != JourneyRepairing || got.FlakyStreak != 2 || !got.CopilotAt.Equal(at) {
+		t.Fatalf("journey %+v", got)
+	}
+	if q, _ := s.Queue(); len(q) != 1 || q[0].ID != "q" {
+		t.Fatalf("queue %+v", q)
+	}
+	if ds, _ := s.Decisions(j.ID); ds[0].Kind != "copilot called" || ds[0].RevBefore != 1 || ds[0].RevAfter != 1 {
+		t.Fatalf("decision %+v", ds[0])
+	}
+	if err := s.SetBlocked(j.ID, 3, "bug-1"); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.Journey(j.ID); got.BlockedStep != 3 || got.BlockedBug != "bug-1" {
+		t.Fatalf("blocked %+v", got)
+	}
+	if err := s.FollowReplay("rp", ReplayFollow{ClearBlocked: true}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("second follow: %v", err)
+	}
+}
+
+// Replays finished before replays were followed must not be acted on.
+func TestOldReplaysCountAsFollowed(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "bp.db")
+	s := reopen(t, path)
+	if err := s.CreateRun(Run{ID: "rp", Token: "t", State: RunRunning, Started: t0, Chain: "rp", Kind: RunReplay, JourneyID: "j", Seed: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.FinishRun("rp", RunFailed, "x", t0); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.Exec(`UPDATE runs SET followed = 0; ALTER TABLE runs DROP COLUMN replay_result`); err != nil {
+		t.Fatal(err)
+	}
+	s.Close()
+	s = reopen(t, path)
+	if un, err := s.UnfollowedReplays(); err != nil || len(un) != 0 {
+		t.Fatalf("old replay unfollowed: %+v %v", un, err)
 	}
 }

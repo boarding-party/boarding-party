@@ -33,7 +33,8 @@ CREATE TABLE IF NOT EXISTS runs (
   kind       TEXT NOT NULL DEFAULT '',
   journey_id TEXT NOT NULL DEFAULT '',
   revision   INTEGER NOT NULL DEFAULT 0,
-  seed       INTEGER NOT NULL DEFAULT 0
+  seed       INTEGER NOT NULL DEFAULT 0,
+  replay_result TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS runs_started ON runs(started);
 CREATE TABLE IF NOT EXISTS bugs (
@@ -201,6 +202,10 @@ CREATE TABLE IF NOT EXISTS journeys (
   failed        INTEGER NOT NULL DEFAULT 0,
   last_replay   INTEGER NOT NULL DEFAULT 0,
   last_explored INTEGER NOT NULL DEFAULT 0,
+  flaky_streak  INTEGER NOT NULL DEFAULT 0,
+  blocked_step  INTEGER NOT NULL DEFAULT 0,
+  blocked_bug   TEXT NOT NULL DEFAULT '',
+  copilot_at    INTEGER NOT NULL DEFAULT 0,
   UNIQUE(persona, story)
 );
 -- Every version of a journey's code. Numbers only grow; a bug revision

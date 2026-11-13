@@ -66,6 +66,8 @@ type Run struct {
 	Follows   string          `json:"follows,omitempty"` // run that caused this one
 	Via       string          `json:"via,omitempty"`     // "" new, "continue", "handoff"
 	Context   json.RawMessage `json:"context,omitempty"`
+	// ReplayResult is a replay run's result as bp-replay reported it.
+	ReplayResult json.RawMessage `json:"replayResult,omitempty"`
 }
 
 // RunContext is what a chained run is told about the run before it.
@@ -82,6 +84,22 @@ type RunContext struct {
 	Verify *ContextVerify `json:"verify,omitempty"`
 	// Reason is why a lead run woke (kind "lead").
 	Reason string `json:"reason,omitempty"`
+	// Replay is the failed replay a copilot run decides about (kind
+	// "replay_failed").
+	Replay *ContextReplay `json:"replay,omitempty"`
+}
+
+// ContextReplay is the replay a copilot run was called for: which revision
+// failed where, with which inputs, and why the copilot was called.
+type ContextReplay struct {
+	JourneyID string         `json:"journeyId"`
+	Revision  int            `json:"revision"`
+	Step      int            `json:"step,omitempty"`
+	StepName  string         `json:"stepName,omitempty"`
+	Error     string         `json:"error,omitempty"`
+	Seed      int64          `json:"seed"`
+	Inputs    map[string]any `json:"inputs,omitempty"`
+	Why       string         `json:"why"`
 }
 
 // ContextVerify is the issue a fix check looks for again.
@@ -224,6 +242,15 @@ var runsAddedColumns = []addedColumn{
 	{"journey_id", "journey_id TEXT NOT NULL DEFAULT ''"},
 	{"revision", "revision INTEGER NOT NULL DEFAULT 0"},
 	{"seed", "seed INTEGER NOT NULL DEFAULT 0"},
+	{"replay_result", "replay_result TEXT NOT NULL DEFAULT ''"},
+}
+
+// journeysAddedColumns are the journeys columns added after the table first shipped.
+var journeysAddedColumns = []addedColumn{
+	{"flaky_streak", "flaky_streak INTEGER NOT NULL DEFAULT 0"},
+	{"blocked_step", "blocked_step INTEGER NOT NULL DEFAULT 0"},
+	{"blocked_bug", "blocked_bug TEXT NOT NULL DEFAULT ''"},
+	{"copilot_at", "copilot_at INTEGER NOT NULL DEFAULT 0"},
 }
 
 // queueAddedColumns are the queue columns added after the table first shipped.
@@ -264,6 +291,12 @@ func addColumns(db *sql.DB) (added bool, err error) {
 			return false, err
 		}
 	}
+	if addedRuns["replay_result"] {
+		// Replays ended before they were followed are history, not failures to act on.
+		if _, err := tx.Exec(`UPDATE runs SET followed = 1 WHERE kind = 'replay'`); err != nil {
+			return false, err
+		}
+	}
 	addedWaits, err := addMissing(tx, "waits", waitsAddedColumns)
 	if err != nil {
 		return false, err
@@ -273,6 +306,10 @@ func addColumns(db *sql.DB) (added bool, err error) {
 		return false, err
 	}
 	addedQueue, err := addMissing(tx, "queue", queueAddedColumns)
+	if err != nil {
+		return false, err
+	}
+	addedJourneys, err := addMissing(tx, "journeys", journeysAddedColumns)
 	if err != nil {
 		return false, err
 	}
@@ -287,7 +324,7 @@ func addColumns(db *sql.DB) (added bool, err error) {
 	if _, err := tx.Exec(`CREATE INDEX IF NOT EXISTS runs_chain ON runs(chain)`); err != nil {
 		return false, err
 	}
-	return len(addedRuns)+len(addedWaits)+len(addedBugs)+len(addedQueue) > 0, tx.Commit()
+	return len(addedRuns)+len(addedWaits)+len(addedBugs)+len(addedQueue)+len(addedJourneys) > 0, tx.Commit()
 }
 
 // addMissing adds the columns table lacks and returns the names it added. A
@@ -373,19 +410,22 @@ func fromTS(n int64) time.Time {
 }
 
 const runCols = `id, token, persona, role, story, state, outcome, session, started, finished, chain, follows, via, context,
-	kind, journey_id, revision, seed`
+	kind, journey_id, revision, seed, replay_result`
 
 func scanRun(sc interface{ Scan(...any) error }) (Run, error) {
 	var r Run
 	var st string
 	var started, finished int64
-	var ctx string
+	var ctx, result string
 	if err := sc.Scan(&r.ID, &r.Token, &r.Persona, &r.Role, &r.Story, &st, &r.Outcome, &r.Session, &started, &finished,
-		&r.Chain, &r.Follows, &r.Via, &ctx, &r.Kind, &r.JourneyID, &r.Revision, &r.Seed); err != nil {
+		&r.Chain, &r.Follows, &r.Via, &ctx, &r.Kind, &r.JourneyID, &r.Revision, &r.Seed, &result); err != nil {
 		return Run{}, err
 	}
 	if ctx != "" {
 		r.Context = json.RawMessage(ctx)
+	}
+	if result != "" {
+		r.ReplayResult = json.RawMessage(result)
 	}
 	r.State = RunState(st)
 	r.Started, r.Finished = fromTS(started), fromTS(finished)
@@ -412,9 +452,9 @@ func (s *Store) CreateRunFrom(r Run, queueID string) error {
 			return ErrNotFound
 		}
 	}
-	if _, err := tx.Exec(`INSERT INTO runs(`+runCols+`) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+	if _, err := tx.Exec(`INSERT INTO runs(`+runCols+`) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		r.ID, r.Token, r.Persona, r.Role, r.Story, string(r.State), r.Outcome, r.Session, ts(r.Started), ts(r.Finished),
-		r.Chain, r.Follows, r.Via, string(r.Context), r.Kind, r.JourneyID, r.Revision, r.Seed); err != nil {
+		r.Chain, r.Follows, r.Via, string(r.Context), r.Kind, r.JourneyID, r.Revision, r.Seed, string(r.ReplayResult)); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -521,6 +561,24 @@ func (s *Store) RunsInChain(chain string) ([]Run, error) {
 
 // Unfollowed returns done or waiting runs the scheduler has not yet acted on,
 // oldest finished first.
+// UnfollowedReplays returns the ended replay runs the scheduler has not
+// acted on yet, oldest first.
+func (s *Store) UnfollowedReplays() ([]Run, error) {
+	return s.queryRuns(`SELECT ` + runCols + ` FROM runs WHERE state IN ('done','failed','stuck') AND followed = 0 AND kind = 'replay' ORDER BY finished, rowid`)
+}
+
+// SetReplayResult keeps a replay run's result on the run.
+func (s *Store) SetReplayResult(runID string, result json.RawMessage) error {
+	res, err := s.db.Exec(`UPDATE runs SET replay_result = ? WHERE id = ?`, string(result), runID)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 func (s *Store) Unfollowed() ([]Run, error) {
 	// Replays are never followed: they spend nothing and must cause no spend.
 	return s.queryRuns(`SELECT ` + runCols + ` FROM runs WHERE state IN ('done','waiting') AND followed = 0 AND kind = '' ORDER BY finished, rowid`)

@@ -159,6 +159,14 @@ func (s *Service) FinishReplay(token string, res ReplayResult, now time.Time) er
 	default:
 		return fmt.Errorf("%w: status must be passed or failed, got %q", ErrBadReplay, res.Status)
 	}
+	b, err := json.Marshal(res)
+	if err != nil {
+		return err
+	}
+	// Kept before the run ends: the scheduler follows an ended replay by its result.
+	if err := s.Store.SetReplayResult(r.ID, b); err != nil {
+		return err
+	}
 	won, err := s.Store.FinishRunChecked(r.ID, state, outcome, now, nil)
 	if err != nil {
 		return err
@@ -169,7 +177,7 @@ func (s *Service) FinishReplay(token string, res ReplayResult, now time.Time) er
 	if err := s.Store.CountReplay(r.JourneyID, state == store.RunDone, now); err != nil && !errors.Is(err, store.ErrNotFound) {
 		return err
 	}
-	if b, err := json.Marshal(res); err == nil && s.Artifacts != nil {
+	if s.Artifacts != nil {
 		if _, err := s.Artifacts.Put(r.ID, ReplayResultName, bytes.NewReader(b)); err != nil {
 			log.Printf("runs: keep replay result of %s: %v", r.ID, err)
 		}

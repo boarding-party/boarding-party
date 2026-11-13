@@ -251,6 +251,11 @@ func TestFinishReplayKeepsTheResult(t *testing.T) {
 	if err := json.NewDecoder(rc).Decode(&got); err != nil || got.Seed != 3 || got.Inputs["int1"] != float64(4) {
 		t.Fatalf("%+v %v", got, err)
 	}
+	run, _ := svc.Store.RunByID(r.ID)
+	var onRun ReplayResult
+	if err := json.Unmarshal(run.ReplayResult, &onRun); err != nil || onRun.Seed != 3 || onRun.Status != "passed" {
+		t.Fatalf("result on the run %s: %v", run.ReplayResult, err)
+	}
 }
 
 // A replay pod idles after bp-replay exits, so a replay that never reports is

@@ -114,7 +114,7 @@ func (s *Scheduler) Tick(ctx context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	now := s.now()
-	return errors.Join(s.followAll(now), s.resolveAll(now), s.fire(ctx, now), s.wakeLeads(now), s.drain(ctx))
+	return errors.Join(s.followAll(now), s.followReplays(now), s.resolveAll(now), s.fire(ctx, now), s.wakeLeads(now), s.drain(ctx))
 }
 
 // followAll acts once on every done or waiting run not yet acted on.

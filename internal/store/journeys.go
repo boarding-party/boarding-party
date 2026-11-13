@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -29,6 +30,14 @@ type Journey struct {
 	Failed       int          `json:"failed"`
 	LastReplay   time.Time    `json:"lastReplay"`
 	LastExplored time.Time    `json:"lastExplored"` // last AI run that decided about it
+	// FlakyStreak counts replays in a row that failed and then passed with
+	// the same inputs.
+	FlakyStreak int `json:"flakyStreak"`
+	// BlockedStep and BlockedBug: replays fail at this step because of this
+	// reported bug; while its issue is open, such a failure calls no copilot.
+	BlockedStep int       `json:"blockedStep,omitempty"`
+	BlockedBug  string    `json:"blockedBug,omitempty"`
+	CopilotAt   time.Time `json:"copilotAt"` // last copilot call
 }
 
 // RevisionKind is full (the whole journey, may go live) or bug (reproduces
@@ -68,19 +77,21 @@ type Decision struct {
 	Created   time.Time `json:"created"`
 }
 
-const journeyCols = `id, persona, story, state, live_rev, created, passed, failed, last_replay, last_explored`
+const journeyCols = `id, persona, story, state, live_rev, created, passed, failed, last_replay, last_explored,
+	flaky_streak, blocked_step, blocked_bug, copilot_at`
 
 func scanJourney(sc interface{ Scan(...any) error }) (Journey, error) {
 	var j Journey
-	var created, replay, explored int64
-	err := sc.Scan(&j.ID, &j.Persona, &j.Story, &j.State, &j.LiveRev, &created, &j.Passed, &j.Failed, &replay, &explored)
+	var created, replay, explored, copilot int64
+	err := sc.Scan(&j.ID, &j.Persona, &j.Story, &j.State, &j.LiveRev, &created, &j.Passed, &j.Failed, &replay, &explored,
+		&j.FlakyStreak, &j.BlockedStep, &j.BlockedBug, &copilot)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Journey{}, ErrNotFound
 	}
 	if err != nil {
 		return Journey{}, err
 	}
-	j.Created, j.LastReplay, j.LastExplored = fromTS(created), fromTS(replay), fromTS(explored)
+	j.Created, j.LastReplay, j.LastExplored, j.CopilotAt = fromTS(created), fromTS(replay), fromTS(explored), fromTS(copilot)
 	return j, nil
 }
 
@@ -350,6 +361,87 @@ func (s *Store) DeleteJourney(id string, d Decision) error {
 
 // ActorModel is the actor of decisions an AI run made.
 const ActorModel = "model"
+
+// ActorDirector is the actor of decisions the scheduler made on its own.
+const ActorDirector = "director"
+
+// ReplayFollow is what the scheduler does after a replay ended, applied in
+// one transaction with marking the replay followed.
+type ReplayFollow struct {
+	Next         []Queued
+	Decisions    []Decision   // each JourneyID is the replay's journey
+	State        JourneyState // "" leaves the state
+	FlakyStreak  *int         // nil leaves it
+	ClearBlocked bool
+	CopilotAt    time.Time // zero leaves it
+}
+
+// FollowReplay marks a replay run followed and applies f to its journey.
+// ErrNotFound if the run is not there or was already followed.
+func (s *Store) FollowReplay(runID string, f ReplayFollow) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var journeyID string
+	err = tx.QueryRow(`SELECT journey_id FROM runs WHERE id = ? AND followed = 0`, runID).Scan(&journeyID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`UPDATE runs SET followed = 1 WHERE id = ?`, runID); err != nil {
+		return err
+	}
+	for _, q := range f.Next {
+		if err := insertQueued(tx, q); err != nil {
+			return err
+		}
+	}
+	sets, args := []string{}, []any{}
+	if f.State != "" {
+		sets, args = append(sets, "state = ?"), append(args, string(f.State))
+	}
+	if f.FlakyStreak != nil {
+		sets, args = append(sets, "flaky_streak = ?"), append(args, *f.FlakyStreak)
+	}
+	if f.ClearBlocked {
+		sets = append(sets, "blocked_step = 0", "blocked_bug = ''")
+	}
+	if !f.CopilotAt.IsZero() {
+		sets, args = append(sets, "copilot_at = ?"), append(args, ts(f.CopilotAt))
+	}
+	if len(sets) > 0 {
+		if _, err := tx.Exec(`UPDATE journeys SET `+strings.Join(sets, ", ")+` WHERE id = ?`, append(args, journeyID)...); err != nil {
+			return err
+		}
+	}
+	for _, d := range f.Decisions {
+		j, err := scanJourney(tx.QueryRow(`SELECT `+journeyCols+` FROM journeys WHERE id = ?`, d.JourneyID))
+		if err != nil {
+			return err
+		}
+		d.RevBefore, d.RevAfter = j.LiveRev, j.LiveRev
+		if err := insertDecision(tx, &d); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// SetBlocked records that the journey's replays fail at step because of bug.
+func (s *Store) SetBlocked(id string, step int, bug string) error {
+	res, err := s.db.Exec(`UPDATE journeys SET blocked_step = ?, blocked_bug = ? WHERE id = ?`, step, bug, id)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
 
 func insertDecision(tx *sql.Tx, d *Decision) error {
 	if d.Evidence == nil {
