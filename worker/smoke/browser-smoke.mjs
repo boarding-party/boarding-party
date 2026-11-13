@@ -2,7 +2,7 @@
 // with the persona's settings, loaded the way Playwright MCP loads them.
 // A keyboard-only persona with reduced motion gets no click tool (nor a
 // javascript: URL), types into the focused field, and the page sees reduced
-// motion, in the project's language and time zone. A zoomed persona with no colour vision gets a 200% layout and grey
+// motion, in the project's language and time zone. A zoomed UK persona with no colour vision gets a 200% layout and grey
 // screenshots.
 import http from 'node:http';
 import { spawn } from 'node:child_process';
@@ -61,7 +61,7 @@ async function session(settings, cwd) {
 }
 
 // Keyboard only, reduced motion.
-const kb = await session(['--bp-assistive=keyboard-only', '--bp-display=reduced-motion', '--bp-locale=en-GB', '--bp-timezone=Asia/Tokyo'], mkdtempSync(join(tmpdir(), 'bp-kb-')));
+const kb = await session(['--bp-assistive=keyboard-only', '--bp-display=reduced-motion', '--bp-locale=en-US', '--bp-timezone=Asia/Tokyo'], mkdtempSync(join(tmpdir(), 'bp-kb-')));
 const names = (await kb.ask('tools/list', {})).result.tools.map((t) => t.name);
 for (const t of ['browser_click', 'browser_type', 'browser_resize', 'browser_evaluate']) if (names.includes(t)) fail(`${t} is listed for a keyboard-only persona`);
 for (const t of ['browser_press_key', 'browser_type_focused', 'browser_snapshot']) if (!names.includes(t)) fail(`${t} is missing`);
@@ -76,21 +76,30 @@ if (typed.error) fail('typing failed: ' + typed.text);
 let snap = await kb.call('browser_snapshot', {});
 if (!snap.text.includes('Zoë £5')) fail('the typed text is not in the field: ' + snap.text.slice(0, 800));
 if (!snap.text.includes('motion reduced')) fail('the page does not see reduced motion: ' + snap.text.slice(0, 800));
-if (!snap.text.includes('speaks en-GB in Asia/Tokyo, dates 03/11/2026')) fail('the page does not see the language and time zone: ' + snap.text.slice(0, 800));
+if (!snap.text.includes('speaks en-US in Asia/Tokyo, dates 11/3/2026')) fail('the page does not see the language and time zone: ' + snap.text.slice(0, 800));
 if (!snap.text.includes('width 1280')) fail('the default desktop is not 1280 wide: ' + snap.text.slice(0, 800));
 const settings = JSON.parse(readFileSync('/tmp/bp-pw/settings.json', 'utf8'));
-if (settings.assistive !== 'keyboard-only' || settings.display !== 'reduced-motion' || settings.locale !== 'en-GB' || settings.timezone !== 'Asia/Tokyo') fail('settings not recorded: ' + JSON.stringify(settings));
+if (settings.assistive !== 'keyboard-only' || settings.display !== 'reduced-motion' || settings.locale !== 'en-US' || settings.timezone !== 'Asia/Tokyo') fail('settings not recorded: ' + JSON.stringify(settings));
 kb.kill();
 
 // Zoom, no colour vision: the eyesight init page and the context options as
 // Playwright MCP loads them from the run's config.
 const dir = mkdtempSync(join(tmpdir(), 'bp-eye-'));
-const eye = await session(['--bp-assistive=zoom', '--bp-vision=achromatopsia'], dir);
+const eye = await session(['--bp-assistive=zoom', '--bp-vision=achromatopsia', '--bp-locale=en-GB'], dir);
 if ((await eye.call('browser_navigate', { url })).error) fail('could not open the page with zoom');
 snap = await eye.call('browser_snapshot', {});
 if (!snap.text.includes('width 640')) fail('zoom did not halve the layout width: ' + snap.text.slice(0, 800));
 const shot = await eye.call('browser_take_screenshot', { filename: 'eye.png' });
 if (shot.error) fail('screenshot failed: ' + shot.text);
+// Chrome draws a date field in its own language, not the page's: a UK
+// persona must see day, month, year.
+const parts = await eye.call('browser_run_code_unsafe', { code: `async (page) => {
+  await page.setContent('<input type="date" value="2026-11-03">');
+  const s = await page.context().newCDPSession(page);
+  const { nodes } = await s.send('Accessibility.getFullAXTree');
+  return 'date parts ' + nodes.filter((n) => n.role && n.role.value === 'spinbutton').map((n) => n.name && n.name.value).join(',');
+}` });
+if (!parts.text.includes('date parts Day,Month,Year')) fail('an en-GB date field is not day, month, year: ' + parts.text.slice(0, 400));
 eye.kill();
 const png = readFileSync(join(dir, 'eye.png'));
 const require = createRequire(process.env.BP_PW_ROOT || '/usr/lib/node_modules/@playwright/mcp/');

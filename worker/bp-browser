@@ -127,5 +127,9 @@ if ! node /opt/bp/bp-pw-setup.mjs --out=/tmp/bp-pw "--device=$device" "--assisti
   exit 1
 fi
 
+# Chrome draws date fields in its own language, which it takes from the
+# environment: the project's (bp-pw-setup checked the value).
+. /tmp/bp-pw/env.sh
+
 # The gate hides and refuses the tools the persona cannot use.
 exec node /opt/bp/bp-gate.mjs "--assistive=$assistive" -- playwright-mcp --config /tmp/bp-pw/pw-config.json "$@"

@@ -33,7 +33,7 @@ import { join } from 'node:path';
 import { randomInt } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { edgeReplay } from './bp-data.mjs';
-import { contextOptions, visionType, readSettings, SETTINGS } from './bp-a11y.mjs';
+import { contextOptions, visionType, readSettings, localeEnv, SETTINGS } from './bp-a11y.mjs';
 
 const log = (...a) => console.error('bp-replay:', ...a);
 const self = fileURLToPath(import.meta.url);
@@ -242,6 +242,12 @@ async function child() {
     // The same flags as AI runs' browser (pw-config.json): CDP on 9222 for
     // the live screen and the console recorder.
     try { launch.args = JSON.parse(readFileSync('/opt/bp/pw-config.json', 'utf8')).browser.launchOptions.args; } catch { /* plain launch */ }
+  }
+  // Chrome draws date fields in its own language: start it in the project's.
+  const env = localeEnv(look.locale);
+  if (env.LANG) {
+    launch.args = [...(launch.args || []), '--lang=' + look.locale];
+    launch.env = { ...process.env, ...env };
   }
   const proxy = process.env.HTTPS_PROXY || process.env.https_proxy;
   if (proxy) launch.proxy = { server: proxy, bypass: process.env.NO_PROXY || process.env.no_proxy || undefined };

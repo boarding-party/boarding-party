@@ -125,6 +125,12 @@ writeFileSync(speaks, `export default async function journey({ page, bp }) {
     await page.setContent('<p>hi</p>');
     const got = await page.evaluate(() => [navigator.language, Intl.DateTimeFormat().resolvedOptions().timeZone, new Date(Date.UTC(2026, 10, 3, 12)).toLocaleDateString()].join(' '));
     if (got !== 'en-GB Asia/Tokyo 03/11/2026') throw new Error('language, zone, date: ' + got);
+    // Chrome draws the date field itself, in its own language.
+    await page.setContent('<input type="date" value="2026-11-03">');
+    const s = await page.context().newCDPSession(page);
+    const { nodes } = await s.send('Accessibility.getFullAXTree');
+    const parts = nodes.filter((n) => n.role?.value === 'spinbutton').map((n) => n.name?.value).join(',');
+    if (parts !== 'Day,Month,Year') throw new Error('date field parts: ' + parts);
   });
 }`);
 r = await run(['--journey', speaks, '--self', '--locale', 'en-GB', '--timezone', 'Asia/Tokyo']);

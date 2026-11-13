@@ -63,6 +63,16 @@ export function contextOptions({ device = '', assistive = '', display = '', loca
   return { ...out, ...(DISPLAY[display] || {}) };
 }
 
+// localeEnv is the environment that starts Chrome in a language: Chrome draws
+// date and time fields in its own language, not the page's, and on Linux
+// takes it from these. {} for no locale, or one that is no plain BCP 47 tag.
+export function localeEnv(locale = '') {
+  if (!/^[A-Za-z]{2,8}(-[A-Za-z0-9]{1,8})*$/.test(locale)) return {};
+  const posix = locale.replace(/-/g, '_');
+  const lang = posix.split('_')[0];
+  return { LANG: posix + '.UTF-8', LANGUAGE: posix === lang ? lang : `${posix}:${lang}`, LC_ALL: posix + '.UTF-8' };
+}
+
 // visionType is the Chrome vision deficiency for an eyesight key, or ''.
 export const visionType = (key) => VISION[key] || '';
 

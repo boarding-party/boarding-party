@@ -8,7 +8,7 @@ import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { contextOptions, toolRules, visionType, readSettings, GLOBAL_BLOCK } from '../bp-a11y.mjs';
+import { contextOptions, toolRules, visionType, readSettings, GLOBAL_BLOCK, localeEnv } from '../bp-a11y.mjs';
 
 const fail = (m) => { console.error('FAIL ' + m); process.exit(1); };
 const eq = (a, b, what) => { if (JSON.stringify(a) !== JSON.stringify(b)) fail(`${what}: got ${JSON.stringify(a)}, want ${JSON.stringify(b)}`); };
@@ -43,6 +43,12 @@ eq(contextOptions({ display: 'nonsense' }, devices), { viewport: { width: 1280, 
 const lz = contextOptions({ locale: 'en-GB', timezone: 'Europe/London' }, devices);
 eq([lz.locale, lz.timezoneId], ['en-GB', 'Europe/London'], 'language and time zone');
 if ('locale' in contextOptions({}, devices) || 'timezoneId' in contextOptions({}, devices)) fail('an unset language or time zone was set');
+
+// Chrome draws date fields in its own language, which on Linux comes from the
+// environment.
+eq(localeEnv('en-GB'), { LANG: 'en_GB.UTF-8', LANGUAGE: 'en_GB:en', LC_ALL: 'en_GB.UTF-8' }, 'locale environment');
+eq(localeEnv('cy'), { LANG: 'cy.UTF-8', LANGUAGE: 'cy', LC_ALL: 'cy.UTF-8' }, 'language-only environment');
+eq([localeEnv(''), localeEnv("en'; rm -rf /")], [{}, {}], 'no or unsafe locale');
 
 // Eyesight.
 eq(['blurred', 'low-contrast', 'deuteranopia', 'protanopia', 'tritanopia', 'achromatopsia', 'none', 'x'].map(visionType),
@@ -132,6 +138,9 @@ if (await new Promise((r) => setup.on('exit', r)) !== 0) fail('bp-pw-setup faile
 const cfg = JSON.parse(readFileSync(join(out, 'pw-config.json'), 'utf8'));
 eq(cfg.browser.contextOptions, { viewport: { width: 640, height: 400 }, deviceScaleFactor: 2, locale: 'en-GB', timezoneId: 'Europe/London', reducedMotion: 'reduce' }, 'config context');
 if (!cfg.browser.launchOptions.args.includes('--remote-debugging-port=9222')) fail('the base launch options were lost');
+if (!cfg.browser.launchOptions.args.includes('--lang=en-GB')) fail('Chrome is not started in the project language: ' + cfg.browser.launchOptions.args);
+const envFile = readFileSync(join(out, 'env.sh'), 'utf8');
+eq(envFile, "export LANG='en_GB.UTF-8' LANGUAGE='en_GB:en' LC_ALL='en_GB.UTF-8'\n", 'env file');
 eq(readSettings(join(out, 'settings.json')), { device: 'desktop', assistive: 'zoom', vision: 'achromatopsia', display: 'reduced-motion', locale: 'en-GB', timezone: 'Europe/London' }, 'settings file');
 eq(readSettings(join(out, 'missing.json')), {}, 'no settings file');
 

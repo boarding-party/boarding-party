@@ -110,7 +110,7 @@ runs and replays alike:
 | | `screen-reader` | `--image-responses=omit`: the agent works from the accessibility snapshot. Screenshots are still saved |
 | `--bp-vision` | `blurred`, `low-contrast`, `deuteranopia`, `protanopia`, `tritanopia`, `achromatopsia` | Chrome's vision deficiency emulation on every tab (an init page) |
 | `--bp-display` | `reduced-motion`, `high-contrast`, `dark` | `reducedMotion`, `forcedColors` with `contrast: more`, `colorScheme: dark` |
-| `--bp-locale` | a BCP 47 tag, such as `en-GB` (the project's `locale`, default `en-GB`) | `locale`: `navigator.language`, `Accept-Language`, date and number formats |
+| `--bp-locale` | a BCP 47 tag, such as `en-GB` (the project's `locale`, default `en-GB`) | `locale`: `navigator.language`, `Accept-Language`, date and number formats; Chrome itself starts in it too (`--lang`, and `LANG`/`LANGUAGE`/`LC_ALL` from `/tmp/bp-pw/env.sh`), because it draws date fields in its own language |
 | `--bp-timezone` | an IANA zone, such as `Europe/London` (the project's `timezone`) | `timezoneId` |
 
 `bp-gate` refuses `browser_resize` and `browser_emulate_media` to every persona: the browser is set to the

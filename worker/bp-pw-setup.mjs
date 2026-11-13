@@ -8,12 +8,13 @@
 //   bp-pw-setup --out=DIR [--base=FILE] [--device=KEY] [--assistive=KEY] [--vision=KEY] [--display=KEY]
 //               [--locale=TAG] [--timezone=ZONE]
 //
-// Writes DIR/pw-config.json, DIR/settings.json and, for an eyesight setting,
-// DIR/bp-vision.cjs. Prints nothing on stdout.
+// Writes DIR/pw-config.json, DIR/settings.json, DIR/env.sh (the language
+// environment bp-browser starts Playwright MCP in) and, for an eyesight
+// setting, DIR/bp-vision.cjs. Prints nothing on stdout.
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
-import { contextOptions, visionType, SETTINGS } from './bp-a11y.mjs';
+import { contextOptions, visionType, localeEnv, SETTINGS } from './bp-a11y.mjs';
 
 const opt = {};
 for (const a of process.argv.slice(2)) {
@@ -30,7 +31,16 @@ try { cfg = JSON.parse(readFileSync(opt.base || '/opt/bp/pw-config.json', 'utf8'
 const settings = Object.fromEntries(SETTINGS.map((k) => [k, opt[k] || '']));
 cfg.browser = { ...(cfg.browser || {}), contextOptions: { ...(cfg.browser?.contextOptions || {}), ...contextOptions(settings, devices) } };
 
+// Chrome draws date fields in its own language: start it in the project's.
+const env = localeEnv(settings.locale);
+if (env.LANG) {
+  const lo = cfg.browser.launchOptions || {};
+  cfg.browser.launchOptions = { ...lo, args: [...(lo.args || []), '--lang=' + settings.locale] };
+}
+
 mkdirSync(opt.out, { recursive: true });
+writeFileSync(join(opt.out, 'env.sh'), Object.keys(env).length
+  ? 'export ' + Object.entries(env).map(([k, v]) => `${k}='${v}'`).join(' ') + '\n' : '');
 const type = visionType(settings.vision);
 if (type) {
   // Playwright MCP requires each init page and calls its default export
