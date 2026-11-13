@@ -584,8 +584,17 @@ func insertDecision(tx *sql.Tx, d *Decision) error {
 
 // Decisions returns a journey's decisions, newest first.
 func (s *Store) Decisions(journeyID string) ([]Decision, error) {
+	return s.decisions(`journey_id = ?`, journeyID)
+}
+
+// DecisionsByRun returns the decisions a run made, newest first.
+func (s *Store) DecisionsByRun(runID string) ([]Decision, error) {
+	return s.decisions(`run_id = ?`, runID)
+}
+
+func (s *Store) decisions(where string, arg any) ([]Decision, error) {
 	rows, err := s.db.Query(`SELECT id, journey_id, run_id, kind, reason, actor, evidence, rev_before, rev_after, created
-		FROM journey_decisions WHERE journey_id = ? ORDER BY created DESC, id DESC`, journeyID)
+		FROM journey_decisions WHERE `+where+` ORDER BY created DESC, id DESC`, arg)
 	if err != nil {
 		return nil, err
 	}

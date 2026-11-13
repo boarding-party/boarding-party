@@ -5,7 +5,9 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/boarding-party/boardingparty/internal/runs"
 	"github.com/boarding-party/boardingparty/internal/store"
 )
 
@@ -96,5 +98,98 @@ func TestJourneyRouteDelete(t *testing.T) {
 	ds, _ := svc.Store.Decisions(j.ID)
 	if ds[0].Kind != "deleted" || ds[0].Actor != "kate" {
 		t.Fatalf("decision %+v", ds[0])
+	}
+}
+
+// replayRun stores an ended replay run of journey j.
+func replayRun(t *testing.T, svc *runs.Service, id, journeyID, via, follows string, state store.RunState, at time.Time) {
+	t.Helper()
+	if err := svc.Store.CreateRun(store.Run{ID: id, Token: "tok-" + id, Persona: "ann", Role: "buyer", Story: "checkout", State: state,
+		Started: at, Chain: "c", Kind: store.RunReplay, JourneyID: journeyID, Revision: 1, Seed: 7, Via: via, Follows: follows}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRunsFilteredByJourney(t *testing.T) {
+	srv, svc := setup(t, 1<<20)
+	j := withJourney(t, svc)
+	now := time.Now().UTC()
+	replayRun(t, svc, "mine1", j.ID, "", "", store.RunDone, now)
+	replayRun(t, svc, "other", "j-other", "", "", store.RunDone, now.Add(time.Second))
+	replayRun(t, svc, "mine2", j.ID, "", "", store.RunFailed, now.Add(2*time.Second))
+	var got []struct {
+		ID   string   `json:"id"`
+		Cost *float64 `json:"cost"`
+	}
+	resp := act(t, "GET", srv.URL+"/api/runs?journey="+j.ID, "", "")
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got[0].ID != "mine2" || got[1].ID != "mine1" {
+		t.Fatalf("runs %+v", got)
+	}
+}
+
+func TestReplayCostIsZero(t *testing.T) {
+	srv, svc := setup(t, 1<<20)
+	j := withJourney(t, svc)
+	replayRun(t, svc, "rp", j.ID, "", "", store.RunDone, time.Now())
+	var list []struct {
+		ID   string   `json:"id"`
+		Cost *float64 `json:"cost"`
+	}
+	if err := json.NewDecoder(act(t, "GET", srv.URL+"/api/runs", "", "").Body).Decode(&list); err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 1 || list[0].Cost == nil || *list[0].Cost != 0 {
+		t.Fatalf("list %+v", list)
+	}
+	var one map[string]any
+	if err := json.NewDecoder(act(t, "GET", srv.URL+"/api/runs/rp", "", "").Body).Decode(&one); err != nil {
+		t.Fatal(err)
+	}
+	if c, ok := one["cost"].(float64); !ok || c != 0 {
+		t.Fatalf("run cost %v", one["cost"])
+	}
+}
+
+func TestFailedReplayShowsItsCopilot(t *testing.T) {
+	srv, svc := setup(t, 1<<20)
+	j := withJourney(t, svc)
+	now := time.Now().UTC()
+	replayRun(t, svc, "rp", j.ID, "", "", store.RunFailed, now)
+	replayRun(t, svc, "fc", j.ID, "flake check", "rp", store.RunFailed, now.Add(time.Second))
+	if err := svc.Store.CreateRun(store.Run{ID: "cop", Token: "tok-cop", Persona: "ann", Role: "buyer", Story: "checkout", State: store.RunDone,
+		Started: now.Add(2 * time.Second), Chain: "c", Via: "copilot", Follows: "fc"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Store.AddDecision(store.Decision{JourneyID: j.ID, RunID: "cop", Kind: "site changed", Reason: "button renamed",
+		Actor: store.ActorModel, RevBefore: 1, RevAfter: 2, Created: now}); err != nil {
+		t.Fatal(err)
+	}
+	var got struct {
+		Copilot *struct {
+			RunID    string `json:"runId"`
+			State    string `json:"state"`
+			Decision *struct {
+				Kind     string `json:"kind"`
+				Reason   string `json:"reason"`
+				RevAfter int    `json:"revAfter"`
+			} `json:"decision"`
+		} `json:"copilot"`
+	}
+	if err := json.NewDecoder(act(t, "GET", srv.URL+"/api/runs/rp", "", "").Body).Decode(&got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Copilot == nil || got.Copilot.RunID != "cop" || got.Copilot.State != "done" || got.Copilot.Decision == nil ||
+		got.Copilot.Decision.Kind != "site changed" || got.Copilot.Decision.Reason != "button renamed" || got.Copilot.Decision.RevAfter != 2 {
+		t.Fatalf("copilot %+v", got.Copilot)
+	}
+	var none map[string]any
+	if err := json.NewDecoder(act(t, "GET", srv.URL+"/api/runs/cop", "", "").Body).Decode(&none); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := none["copilot"]; ok {
+		t.Fatal("an AI run got a copilot")
 	}
 }

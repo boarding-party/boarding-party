@@ -604,6 +604,16 @@ func (s *Store) Runs(limit int) ([]Run, error) {
 	return s.queryRuns(`SELECT `+runCols+` FROM runs ORDER BY started DESC, rowid DESC LIMIT ?`, limit)
 }
 
+// JourneyRuns returns a journey's replay runs, newest first.
+func (s *Store) JourneyRuns(journeyID string, limit int) ([]Run, error) {
+	return s.queryRuns(`SELECT `+runCols+` FROM runs WHERE journey_id = ? ORDER BY started DESC, rowid DESC LIMIT ?`, journeyID, limit)
+}
+
+// FollowUps returns the runs that follow runID, oldest first.
+func (s *Store) FollowUps(runID string) ([]Run, error) {
+	return s.queryRuns(`SELECT `+runCols+` FROM runs WHERE follows = ? ORDER BY started, rowid`, runID)
+}
+
 // ActiveRuns returns runs that are pending or running.
 func (s *Store) ActiveRuns() ([]Run, error) {
 	return s.queryRuns(`SELECT ` + runCols + ` FROM runs WHERE state IN ('pending','running') ORDER BY started`)

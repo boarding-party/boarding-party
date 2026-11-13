@@ -279,11 +279,66 @@ func (s *server) startRun(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, redact(run))
 }
 
+// copilotView is the copilot run a failed replay called, and its decision.
+type copilotView struct {
+	RunID    string         `json:"runId"`
+	State    store.RunState `json:"state"`
+	Decision *copilotChoice `json:"decision"`
+}
+
+type copilotChoice struct {
+	Kind     string `json:"kind"`
+	Reason   string `json:"reason"`
+	RevAfter int    `json:"revAfter"`
+}
+
+// copilotOf finds the copilot a replay called, following it at most two
+// hops: the replay, its flake check, then the copilot.
+func (s *server) copilotOf(run store.Run) (*copilotView, error) {
+	at := []string{run.ID}
+	for hop := 0; hop < 2 && len(at) > 0; hop++ {
+		var next []string
+		for _, id := range at {
+			fs, err := s.svc.Store.FollowUps(id)
+			if err != nil {
+				return nil, err
+			}
+			for _, f := range fs {
+				switch f.Via {
+				case "copilot":
+					v := &copilotView{RunID: f.ID, State: f.State}
+					ds, err := s.svc.Store.DecisionsByRun(f.ID)
+					if err != nil {
+						return nil, err
+					}
+					if len(ds) > 0 {
+						v.Decision = &copilotChoice{Kind: ds[0].Kind, Reason: ds[0].Reason, RevAfter: ds[0].RevAfter}
+					}
+					return v, nil
+				case "flake check":
+					next = append(next, f.ID)
+				}
+			}
+		}
+		at = next
+	}
+	return nil, nil
+}
+
 // redact hides the worker token from read endpoints.
 func redact(r store.Run) store.Run { r.Token = ""; return r }
 
+// maxJourneyRuns caps a journey's runs on its page.
+const maxJourneyRuns = 20
+
 func (s *server) listRuns(w http.ResponseWriter, r *http.Request) {
-	rs, err := s.svc.Store.Runs(100)
+	var rs []store.Run
+	var err error
+	if j := r.URL.Query().Get("journey"); j != "" {
+		rs, err = s.svc.Store.JourneyRuns(j, maxJourneyRuns)
+	} else {
+		rs, err = s.svc.Store.Runs(100)
+	}
 	if err != nil {
 		fail(w, err)
 		return
@@ -319,7 +374,10 @@ func (s *server) listRuns(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	for i, x := range rs {
 		out[i] = item{Run: redact(x), Bugs: bugs[x.ID]}
-		if u, err := s.svc.Usage(x.ID); err == nil && u != nil {
+		if x.Kind == store.RunReplay {
+			free := 0.0 // a replay runs no model
+			out[i].Cost = &free
+		} else if u, err := s.svc.Usage(x.ID); err == nil && u != nil {
 			c := runs.Cost(*u)
 			out[i].Cost = &c
 		}
@@ -370,7 +428,17 @@ func (s *server) getRun(w http.ResponseWriter, r *http.Request) {
 	} else if len(con) > 0 {
 		out["console"] = con
 	}
-	if u, err := s.svc.Usage(run.ID); err != nil {
+	if run.Kind == store.RunReplay {
+		out["cost"] = 0.0 // a replay runs no model
+		cop, err := s.copilotOf(run)
+		if err != nil {
+			fail(w, err)
+			return
+		}
+		if cop != nil {
+			out["copilot"] = cop
+		}
+	} else if u, err := s.svc.Usage(run.ID); err != nil {
 		log.Printf("api: run %s usage: %v", run.ID, err)
 	} else if u != nil {
 		out["usage"] = u
