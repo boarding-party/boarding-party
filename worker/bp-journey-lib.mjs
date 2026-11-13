@@ -2,6 +2,8 @@
 // bp (named steps and helpers) and expect. Kept free of Playwright so the
 // pieces that decide a replay's inputs can be checked on their own.
 
+import { generators, edgeStream } from './bp-data.mjs';
+
 // rng is mulberry32: small, fast and the same on every machine for a seed.
 export function rng(seed) {
   let a = Number(BigInt.asUintN(32, BigInt(seed))) || 1;
@@ -16,7 +18,8 @@ export function rng(seed) {
 
 // makeData returns the journey's data helpers. Every value drawn lands in
 // inputs under its helper's name and draw number (int1, pick2, …), so a
-// replay can be read back and repeated from its seed.
+// replay can be read back and repeated from its seed. The edge cases a
+// replay carries are listed in inputs.edges as "<name><n>:<id>".
 export function makeData(seed, inputs) {
   const next = rng(seed);
   const counts = {};
@@ -25,8 +28,12 @@ export function makeData(seed, inputs) {
     inputs[name + counts[name]] = v;
     return v;
   };
+  const edgeKeep = (name, id) => {
+    (inputs.edges ||= []).push(`${name}${counts[name]}:${id}`);
+  };
   return {
     seed,
+    ...generators(next, edgeStream(seed), keep, edgeKeep),
     int(min, max) {
       if (!Number.isInteger(min) || !Number.isInteger(max) || max < min) throw new Error('data.int(min, max) needs whole numbers with min <= max');
       return keep('int', min + Math.floor(next() * (max - min + 1)));
@@ -133,6 +140,18 @@ export function makeBp({ onFail, resume } = {}) {
       }
     },
     money,
+    // totalWithVat is the sum of quantity × price over lines, plus VAT at
+    // rate, to the penny.
+    totalWithVat(lines, rate = 0.2) {
+      const net = (lines || []).reduce((s, l) => s + Number(l.quantity) * Number(l.price), 0);
+      return Math.round(net * (1 + rate) * 100) / 100;
+    },
+    // ukDate turns 2026-02-09 into 09/02/2026.
+    ukDate(iso) {
+      const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso || ''));
+      if (!m) throw new Error('bp.ukDate needs a YYYY-MM-DD date');
+      return `${m[3]}/${m[2]}/${m[1]}`;
+    },
     async waitFor(spec) {
       const until = waitUntil(spec);
       const i = ++waits;

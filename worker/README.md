@@ -122,8 +122,16 @@ stay in bp-replay's memory and reach `bp-screen` and `bp-console` on stdin (`--u
 child process given only paths.
 Playwright comes from the Playwright MCP install, so `locator.fill` types at the same human pace as `browser_type`.
 `expect` is Playwright Test's. Helpers: `bp.step(name, fn)` (numbered from 1; a failure records the step, its name
-and a screenshot), `bp.money(n)` (`£1,234.56`), `data.int(min, max)`, `data.pick(list)`, `data.plusEmail(address)`
-(`info+megan@x` becomes `info+megan-<seed>@x`). Every drawn value is recorded in `inputs`; the same seed draws the
-same values. A journey has 10 minutes (`BP_REPLAY_TIMEOUT_MS`), each action 15 s.
+and a screenshot), `bp.money(n)` (`£1,234.56`), `bp.totalWithVat(lines, rate = 0.2)`, `bp.ukDate(iso)`
+(`09/02/2026`), `data.int(min, max)`, `data.pick(list)`, `data.plusEmail(address)` (`info+megan@x` becomes
+`info+megan-<seed>@x`). UK test data comes from `bp-data.mjs`: `data.personName()`, `data.businessName({ size })`
+(`sole`, `small` or `firm`), `data.address()`, `data.postcode()`, `data.phone()` (Ofcom's drama range only),
+`data.vatNumber()`, `data.companyNumber()`, `data.price()`, `data.quantity()`, `data.date()`, `data.dateRange()` and
+`data.lineItems()`. Every drawn value is recorded in `inputs`; the same seed draws the same values.
+
+About 30% of seeds carry one or two edge cases: awkward but valid input such as a zero quantity, a leading space or
+a 120-character business name. They are listed in `inputs.edges` as `quantity2:zero`. A call takes `exclude: [ids]`
+or `edges: false`. Edge decisions come from their own stream, so excluding one never moves any other value. Self
+mode with no `--seed` picks a seed without edge cases. A journey has 10 minutes (`BP_REPLAY_TIMEOUT_MS`), each action 15 s.
 
 Smoke tests: `node /opt/bp/smoke/journey-lib-smoke.mjs` and `node /opt/bp/smoke/replay-smoke.mjs` (expect `ok …`).

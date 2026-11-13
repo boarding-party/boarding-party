@@ -25,6 +25,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomInt } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
+import { edgeReplay } from './bp-data.mjs';
 
 const log = (...a) => console.error('bp-replay:', ...a);
 const self = fileURLToPath(import.meta.url);
@@ -89,7 +90,10 @@ function runChild({ file, seed, device, outDir, profile, saveProfile, cdp, resum
 
 async function selfMode() {
   if (!opts.journey) { log('--journey FILE is required'); process.exit(2); }
-  const seed = seedOf(opts.seed);
+  // The AI proves the happy path: with no --seed, pick one that carries no
+  // edge cases. Scheduled replays and --seed N keep what their seed decides.
+  let seed = seedOf(opts.seed);
+  for (let i = 0; opts.seed === undefined && i < 100 && edgeReplay(seed); i++) seed = seedOf(undefined);
   const outDir = mkdtempSync(join(tmpdir(), 'bp-self-'));
   const res = await runChild({ file: opts.journey, seed, device: opts.device, outDir });
   process.stdout.write(JSON.stringify(res) + '\n');
