@@ -139,7 +139,7 @@ func (t *Tiny) Start(ctx context.Context, r store.Run, p project.Project) (strin
 		if err := t.Stop(ctx, name); err != nil {
 			return "", fmt.Errorf("stop session %s: %w", name, err)
 		}
-		return "", fmt.Errorf("tiny on this cluster is older than v0.12 and ignores nodePool; update it with tiny init, then start the run again")
+		return "", fmt.Errorf("tiny on this cluster is older than v0.12 and ignores nodePool; update it with boardingparty up (or tiny init), then start the run again")
 	}
 	// Same for the sandbox before tiny v0.13: a dropped runtimeClassName
 	// would run the agent on the node's kernel, the one thing it was set to
@@ -148,7 +148,7 @@ func (t *Tiny) Start(ctx context.Context, r store.Run, p project.Project) (strin
 		if err := t.Stop(ctx, name); err != nil {
 			return "", fmt.Errorf("stop session %s: %w", name, err)
 		}
-		return "", fmt.Errorf("tiny on this cluster is older than v0.13 and ignores runtimeClass; update it with tiny init, then start the run again")
+		return "", fmt.Errorf("tiny on this cluster is older than v0.13 and ignores runtimeClass; update it with boardingparty up (or tiny init), then start the run again")
 	}
 	return name, nil
 }
@@ -316,7 +316,7 @@ func (t *Tiny) browserArgs(r store.Run, p project.Project) []string {
 	return append(append(args, settingArgs("--bp-", r, p)...), "--caps=devtools,storage")
 }
 
-var errOldTinyReplay = errors.New("tiny on this cluster is older than v0.15 and cannot run replays; update it with tiny init, then start the replay again")
+var errOldTinyReplay = errors.New("tiny on this cluster is older than v0.15 and cannot run replays; update it with boardingparty up (or tiny init), then start the replay again")
 
 // replayCommand is the bp-replay invocation of a replay run. Everything in
 // the pod, the journey too, can read the command, so it carries the run's

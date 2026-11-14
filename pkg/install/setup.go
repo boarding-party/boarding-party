@@ -87,7 +87,7 @@ func denied(verb, resource string) string {
 
 func preflightCheck(ctx context.Context, kube kubernetes.Interface, ext apiextclient.Interface, ns string, out io.Writer) *checker {
 	c := &checker{out: out}
-	tinyInit := fmt.Sprintf("run `tiny init -n %s`", ns)
+	tinyInit := fmt.Sprintf("run `boardingparty up -n %s`", ns)
 
 	crd, err := ext.ApiextensionsV1().CustomResourceDefinitions().Get(ctx, sessionCRD, metav1.GetOptions{})
 	switch {

@@ -95,3 +95,50 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha,scope=${{ matrix.image }}
           cache-to: type=gha,mode=max,scope=${{ matrix.image }}
+
+  # boardingparty up on a fresh Ubuntu machine with no cluster: installs k3s,
+  # tiny and this commit's director, then serves the board. Proves the board
+  # reaches the director and that k3s enforces tiny's egress fence.
+  up-k3s:
+    needs: images
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: go build -o bp ./cmd/boardingparty
+      - name: up
+        run: |
+          ./bp up --yes --no-open --port 8790 > up.log 2>&1 &
+          for i in $(seq 1 120); do grep -q '^→ http' up.log && break; sleep 5; done
+          cat up.log
+          grep -q '^→ http' up.log
+      - name: board reaches the director
+        run: |
+          link=$(grep -m1 '^→ http' up.log | cut -d' ' -f2)
+          curl -fsSL -c jar -b jar -o /dev/null "$link"
+          curl -fsS -b jar http://127.0.0.1:8790/api/runs
+      - name: k3s enforces the egress fence
+        run: |
+          k="kubectl --context k3s -n boardingparty"
+          probe() { # name, extra args; prints curl's exit code
+            $k run "$1" --image=curlimages/curl:8.10.1 --restart=Never $2 --command -- \
+              curl -sk -m 5 -o /dev/null https://1.1.1.1:853/ >/dev/null
+            $k wait --for=jsonpath='{.status.phase}'=Succeeded pod/"$1" --timeout=120s >/dev/null 2>&1 || \
+              $k wait --for=jsonpath='{.status.phase}'=Failed pod/"$1" --timeout=5s >/dev/null 2>&1
+            $k get pod "$1" -o jsonpath='{.status.containerStatuses[0].state.terminated.exitCode}'
+          }
+          open=$(probe fence-open "")
+          fenced=$(probe fence-session "--labels=app=tiny-session")
+          echo "plain pod: curl exit $open; session pod: curl exit $fenced"
+          kubectl --context k3s -n boardingparty get networkpolicy tiny-session-egress
+          case "$open" in 7|28|"") echo "plain pod could not reach 1.1.1.1:853, the probe proves nothing"; exit 1;; esac
+          case "$fenced" in 7|28) ;; *) echo "session pod reached 1.1.1.1:853: the fence is not enforced"; exit 1;; esac
+      - if: failure()
+        run: |
+          cat up.log || true
+          kubectl --context k3s get pods -A -o wide || true
+          kubectl --context k3s -n boardingparty describe pods || true

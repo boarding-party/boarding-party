@@ -164,6 +164,22 @@ func runBoard(ctx context.Context, fw board.Forwarder, o boardOpts, out io.Write
 	return nil
 }
 
+// serveBoard installs or upgrades the director if needed, then serves the
+// board until ctx is done.
+func (g *globals) serveBoard(ctx context.Context, cfg *rest.Config, ns string, o boardOpts, out io.Writer) error {
+	if err := g.ensure(ctx, cfg, ns); err != nil {
+		return err
+	}
+	var err error
+	if o.adminToken, err = g.token(ctx, cfg, ns); err != nil {
+		return err
+	}
+	if isTerminal() {
+		o.in = os.Stdin
+	}
+	return runBoard(ctx, &kubeForwarder{cfg: cfg, ns: ns}, o, out)
+}
+
 func newBoard(g *globals) *cobra.Command {
 	var o boardOpts
 	var dev bool
@@ -189,16 +205,7 @@ func newBoard(g *globals) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if err := g.ensure(ctx, cfg, ns); err != nil {
-				return err
-			}
-			if o.adminToken, err = g.token(ctx, cfg, ns); err != nil {
-				return err
-			}
-			if isTerminal() {
-				o.in = os.Stdin
-			}
-			return runBoard(ctx, &kubeForwarder{cfg: cfg, ns: ns}, o, cmd.OutOrStdout())
+			return g.serveBoard(ctx, cfg, ns, o, cmd.OutOrStdout())
 		},
 	}
 	cmd.Flags().IntVar(&o.port, "port", 0, "local port (0 = any free port)")

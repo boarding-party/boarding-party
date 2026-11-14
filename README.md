@@ -211,14 +211,15 @@ room for a pool to scale up from zero.
   then taints it and installs a `gvisor` RuntimeClass that sends runs to
   it on its own, so leave `nodePool` empty.
 - tiny's egress add-on (`egressProxy: "true"` in the `tiny-settings`
-  ConfigMap). The director refuses to start runs without it.
+  ConfigMap). The director refuses to start runs without it; `boardingparty
+  up` turns it on.
 - Kubernetes with a CNI that enforces NetworkPolicy. Without that, the
   allow-list is only advisory.
 - tiny v0.12.1 or later, and v0.13.0 for `runtimeClass`. Earlier versions
   lack `spec.mcpServers`, placement (`nodeSelector`, `tolerations`) and the
   `pkg/session` package the director uses. A run with `nodePool` or
   `runtimeClass` set fails with a hint if the cluster's Session CRD is too
-  old to keep it; `tiny init` updates it.
+  old to keep it; `boardingparty up` updates it.
 - A metered Anthropic API key. Runs are automated, so a Claude Pro or Max
   subscription isn't the right fit under the provider's terms.
 - Images: `ghcr.io/boarding-party/director` and `ghcr.io/boarding-party/worker`,
@@ -226,25 +227,31 @@ room for a pool to scale up from zero.
 
 ## Trying it
 
-Before you start:
-
-1. Run `tiny init -n bp-todomvc` to set up tiny in the namespace.
-2. Put your metered Anthropic key in tiny's agent secret (`tiny-agent-env`).
-
-That's all you install by hand. The CLI installs the director on first use,
-waits for it, and upgrades it in place when you get a newer CLI. If tiny isn't
-set up, it stops and tells you to run `tiny init`; it never changes anything
-tiny owns.
-
-Then open the board:
+On a Linux server with no Kubernetes (4 GB of memory or more):
 
 ```
-boardingparty board
+boardingparty up
 ```
 
-In a terminal it asks which kubeconfig context and namespace to use (see
-below), installs the director if needed, and prints a link to a local page on
-127.0.0.1. The link works once and expires after 10 minutes; press Enter for a
+It finds no cluster and offers to install k3s, a one-machine Kubernetes.
+Say yes and it runs k3s's official installer, which asks for sudo. It then
+adds a `k3s` context to `~/.kube/config`, installs tiny (with its egress
+proxy on) and the director in the `boardingparty` namespace, and prints a
+link to the board. If you are logged in over SSH, it also prints the
+`ssh -L` command to run on your laptop so the link opens there.
+
+With a cluster already in your kubeconfig, `up` asks which context and
+namespace to use and leaves k3s out. Running it again is safe: each step
+keeps what is already there.
+
+Last, set your metered Anthropic key in the board (Project → Agent key).
+
+Later, `boardingparty board` opens the board again. It installs or upgrades
+the director when needed but never touches tiny; if tiny isn't set up, it
+stops and tells you to run `boardingparty up`.
+
+Both print a link to a local page on 127.0.0.1; in a terminal, `board` first
+asks which kubeconfig context and namespace to use (see below). The link works once and expires after 10 minutes; press Enter for a
 new one. From the page you edit the project, start a run, and watch it finish.
 A finished run shows its recording with the bugs listed beside it, and a bug
 with a time in its step jumps the video to that moment. Ctrl-C stops the board.

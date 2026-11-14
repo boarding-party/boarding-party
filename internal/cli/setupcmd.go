@@ -21,7 +21,8 @@ func newSetup(g *globals) *cobra.Command {
 		Short: "Check the cluster and install the director",
 		Long: "Checks that tiny is ready in the namespace, then installs (or upgrades in place)\n" +
 			"the boardingparty director with server-side apply and waits until it answers.\n" +
-			"Prerequisite: `tiny init -n <namespace>` and tiny's agent secret.",
+			"Prerequisite: tiny in the namespace; `boardingparty up` installs it, as does\n" +
+			"`tiny init -n <namespace>`.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if err := g.chooseTarget(cmd.Context()); err != nil {

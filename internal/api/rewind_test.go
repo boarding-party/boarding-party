@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"io"
 	"testing"
+	"time"
 
 	"github.com/boarding-party/boardingparty/internal/rewind"
 	"github.com/boarding-party/boardingparty/internal/store"
@@ -52,8 +53,9 @@ func TestRewindDroppedWhenTheRunHasARecording(t *testing.T) {
 	}
 	// The recording starts with the browser's first screen: the run keeps
 	// when that was, so the board can put the video on the run's clock.
+	// Frames are timed in milliseconds, so compare with a truncated start.
 	got, err := svc.Store.RunByID(run.ID)
-	if err != nil || got.FirstFrame.IsZero() || got.FirstFrame.Before(run.Started) || got.FirstFrame.After(got.Finished) {
+	if err != nil || got.FirstFrame.IsZero() || got.FirstFrame.Before(run.Started.Truncate(time.Millisecond)) || got.FirstFrame.After(got.Finished) {
 		t.Fatalf("first frame %v (run %v to %v) %v", got.FirstFrame, run.Started, got.Finished, err)
 	}
 	resp := do(t, "GET", srv.URL+"/api/runs/"+run.ID, "")

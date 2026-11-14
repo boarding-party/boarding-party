@@ -69,7 +69,7 @@ func TestPreflight(t *testing.T) {
 		want   []string
 	}{
 		{"missing CRD", nil, []runtime.Object{nsObj, saObj, secret(map[string]string{"ANTHROPIC_API_KEY": apiKey})}, true,
-			[]string{"✗ CRD", "tiny init -n " + testNS}},
+			[]string{"✗ CRD", "boardingparty up -n " + testNS}},
 		{"no mcpServers", crdWith(false), []runtime.Object{nsObj, saObj, secret(map[string]string{"ANTHROPIC_API_KEY": apiKey})}, true,
 			[]string{"✗", "older than v0.11.0"}},
 		{"missing SA", crdWith(true), []runtime.Object{nsObj, secret(map[string]string{"ANTHROPIC_API_KEY": apiKey})}, true,
@@ -302,7 +302,7 @@ func TestEnsureDirectorMissingInstalls(t *testing.T) {
 func TestEnsureDirectorTinyMissing(t *testing.T) {
 	var applied []string
 	_, err := EnsureDirector(context.Background(), ensureDeps(&applied, false), Options{Ns: testNS, Tag: "main", Timeout: time.Second}, &strings.Builder{})
-	if err == nil || !strings.Contains(err.Error(), "run `tiny init -n "+testNS+"`") || !strings.Contains(err.Error(), "✗ CRD") {
+	if err == nil || !strings.Contains(err.Error(), "run `boardingparty up -n "+testNS+"`") || !strings.Contains(err.Error(), "✗ CRD") {
 		t.Errorf("err = %v", err)
 	}
 	if len(applied) != 0 {
