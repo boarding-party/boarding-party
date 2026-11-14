@@ -23,14 +23,14 @@ code { font-family: var(--mono); font-size: 12.5px; background: var(--idle-soft)
 /* shell */
 .app { display: grid; grid-template-columns: 232px 1fr; min-height: 100vh; }
 aside { background: var(--side); color: var(--side-ink); padding: 16px 12px; display: flex; flex-direction: column; gap: 4px; position: sticky; top: 0; height: 100vh; }
-.brand { color: #fff; font-weight: 700; font-size: 17px; padding: 4px 8px 14px; letter-spacing: -.01em; }
-.proj { background: var(--side-raise); border-radius: 8px; padding: 8px 10px; margin-bottom: 12px; color: #fff; font-weight: 600; overflow-wrap: anywhere; }
-.proj small { display: block; font-weight: 400; color: var(--side-muted); font-size: 12px; }
+.brand { color: #fff; font-weight: 700; font-size: 15px; padding: 4px 10px 12px; letter-spacing: -.01em; }
+.proj { background: var(--side-raise); border-radius: 8px; padding: 8px 10px; margin-bottom: 12px; color: #fff; font-weight: 600; font-size: 13.5px; line-height: 1.35; overflow-wrap: anywhere; }
+.proj small { display: block; font-weight: 400; color: var(--side-muted); font-size: 11.5px; }
 aside nav { display: flex; flex-direction: column; gap: 2px; }
-aside nav a { color: var(--side-ink); padding: 7px 10px; border-radius: 6px; display: flex; justify-content: space-between; gap: 8px; }
+aside nav a { color: var(--side-ink); font-size: 13.5px; line-height: 1.4; padding: 5px 10px; border-radius: 6px; display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
 aside nav a:hover { background: var(--side-raise); text-decoration: none; }
 aside nav a.on { background: var(--side-on); color: #fff; }
-aside .count { font-size: 12px; color: var(--side-muted); }
+aside .count { font-size: 11.5px; color: var(--side-muted); }
 aside .foot { margin-top: auto; font-size: 12px; color: var(--side-muted); padding: 0 8px; }
 main { min-width: 0; }
 
@@ -344,7 +344,7 @@ fieldset.handoffs p { margin: 0; }
 .decisions .why { grid-column: 3; color: var(--muted); overflow-wrap: anywhere; }
 .adopt { display: flex; flex-direction: column; gap: 8px; }
 aside nav.leads { margin-top: 14px; }
-aside nav.leads .sublabel { color: var(--side-ink); opacity: .7; padding: 0 10px 4px; }
+aside nav.leads .sublabel { color: var(--side-ink); opacity: .7; font-size: 12px; padding: 0 10px 4px; }
 /* Console: what the run's browser logged. */
 .console { list-style: none; margin: 0; padding: 0; font-size: 13px; }
 .console li + li { border-top: 1px solid var(--line-soft); }
@@ -366,7 +366,18 @@ aside nav.leads .sublabel { color: var(--side-ink); opacity: .7; padding: 0 10px
 .runhead h1 .muted { font-weight: 400; }
 .runhead h1 .tag { align-self: center; }
 .runverdict { font-size: 15px; line-height: 1.55; max-width: 74ch; margin: 6px 0 10px; overflow-wrap: anywhere; white-space: pre-line; }
-.page.runpage { max-width: 1440px; }
+/* The run page uses the whole window: the recording takes what the side
+   column leaves, capped so it never runs past the window's height. */
+.page.runpage { max-width: none; }
+.runpage .g-side { grid-template-columns: minmax(0, 1fr) minmax(320px, 400px); }
+.runpage .player { max-height: calc(100vh - 140px); }
+@media (max-width: 860px) { .runpage .g-side { grid-template-columns: minmax(0, 1fr); } }
+details.card > summary { cursor: pointer; list-style: none; display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+details.card > summary::-webkit-details-marker { display: none; }
+details.card > summary h2 { margin: 0; }
+details.card > summary::after { content: "Show"; font-size: 13px; color: var(--accent, inherit); }
+details.card[open] > summary { margin-bottom: 10px; }
+details.card[open] > summary::after { content: "Hide"; }
 .readout { list-style: none; display: flex; flex-wrap: wrap; gap: 4px 0; margin: 0; padding: 0; font-size: 13px; color: var(--muted); }
 .readout li { padding: 0 12px; border-left: 1px solid var(--line); }
 .readout li:first-child { padding-left: 0; border-left: 0; }

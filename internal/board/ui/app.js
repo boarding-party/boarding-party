@@ -1115,7 +1115,7 @@ function RunPage({ id, onChange }) {
           ${usage ? html`<li><b>${usage.turns || 0}</b> ${usage.turns === 1 ? 'turn' : 'turns'}</li>` : null}
           <li><a href="#bugs" onClick=${(e) => { e.preventDefault(); document.getElementById('bugs').scrollIntoView({ block: 'start' }); }}><b>${bugs.length}</b> ${bugs.length === 1 ? 'bug' : 'bugs'}</a></li>
           ${run.story !== LEAD_STORY ? html`<li><a href="#console" class=${conErrors ? 'bad-text' : ''} onClick=${(e) => { e.preventDefault(); document.getElementById('console').scrollIntoView({ block: 'start' }); }}><b>${conErrors}</b> console ${conErrors === 1 ? 'error' : 'errors'}</a></li>` : null}
-          ${blocked.length ? html`<li><a href="#blocked" onClick=${(e) => { e.preventDefault(); document.getElementById('blocked').scrollIntoView({ block: 'start' }); }}>${plural(blocked.length, 'blocked host', 'blocked hosts')}</a></li>` : null}
+          ${blocked.length ? html`<li><a href="#blocked" onClick=${(e) => { e.preventDefault(); const d = document.getElementById('blocked'); d.open = true; d.scrollIntoView({ block: 'start' }); }}>${plural(blocked.length, 'blocked host', 'blocked hosts')}</a></li>` : null}
         </ul>
       </header>
       ${err ? html`<div class="note bad banner">Lost contact with the director: ${err}. ${gaveUp ? 'Reload the page to try again.' : 'Retrying.'}</div>` : null}
@@ -1147,7 +1147,6 @@ function RunPage({ id, onChange }) {
         <div class="stack">
           ${replay ? html`<${ReplayCard} run=${run} artifacts=${artifacts} copilot=${data.copilot} />` : null}
           ${chain || queued ? html`<${Chain} links=${links} current=${run.id} queued=${queued || []} />` : null}
-          ${blocked.length ? html`<${BlockedHosts} hosts=${blocked} />` : null}
           ${data.settings && data.settings.length ? html`<${PersonaCard} run=${run} settings=${data.settings} />` : null}
           <div class="card">
             <h2>Details</h2>
@@ -1176,6 +1175,7 @@ function RunPage({ id, onChange }) {
                 ${n === 'trace.zip' ? html`<span class="hint">Open it with <code>npx playwright show-trace trace.zip</code></span>` : null}</li>`)}</ul>`
               : html`<p class="muted small" style="margin:0">No files yet.</p>`}
           </div>
+          ${blocked.length ? html`<${BlockedHosts} hosts=${blocked} />` : null}
         </div>
       </div>
     </section>`;
@@ -1300,10 +1300,6 @@ function fmtCount(n) {
 const BLOCKED_NAME = 'blocked-hosts.json';
 const MAX_BLOCKED = 50;
 
-// BlockedHosts lists the hosts the network fence refused during the run. A
-// page that loads fonts, scripts or payments from such a host looks broken
-// to the persona. Allow adds the host to the project's extra hosts, which
-// the director copies to the fence's allow-list.
 // PersonaCard is the profile the persona had when the run started: what the
 // browser itself was set to, then how the agent was asked to act.
 function PersonaCard({ run, settings }) {
@@ -1320,6 +1316,11 @@ function PersonaCard({ run, settings }) {
     </div>`;
 }
 
+// BlockedHosts lists the hosts the network fence refused during the run. A
+// page that loads fonts, scripts or payments from such a host looks broken
+// to the persona. Allow adds the host to the project's extra hosts, which
+// the director copies to the fence's allow-list. The card starts folded: most
+// blocked hosts are trackers and other noise the site works without.
 function BlockedHosts({ hosts }) {
   const [allowed, setAllowed] = useState(() => new Set());
   const [busy, setBusy] = useState('');
@@ -1351,8 +1352,8 @@ function BlockedHosts({ hosts }) {
 
   const shown = hosts.slice(0, MAX_BLOCKED);
   return html`
-    <div class="card" id="blocked">
-      <h2>Blocked hosts</h2>
+    <details class="card" id="blocked">
+      <summary><h2>Blocked hosts <span class="muted">${hosts.length}</span></h2></summary>
       <p class="small muted" style="margin-top:0">The network fence stopped the browser reaching these hosts, so parts of the site may not have loaded. Allow the ones the site needs, such as fonts, scripts or payments. The next run can reach them.</p>
       <ul class="files blocked">${shown.map((h) => html`
         <li key=${h}><code>${h}</code>
@@ -1361,7 +1362,7 @@ function BlockedHosts({ hosts }) {
             : html`<button class="btn" type="button" disabled=${busy !== ''} onClick=${() => allow(h)}>${busy === h ? 'Allowing…' : 'Allow'}</button>`}</li>`)}</ul>
       ${hosts.length > shown.length ? html`<p class="small muted">${hosts.length - shown.length} more not shown.</p>` : null}
       ${err ? html`<div class="note bad">Could not allow the host: ${err}</div>` : null}
-    </div>`;
+    </details>`;
 }
 
 // allowable mirrors the director's check (project.publicHostProblem) so the
