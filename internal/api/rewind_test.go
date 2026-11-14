@@ -50,6 +50,21 @@ func TestRewindDroppedWhenTheRunHasARecording(t *testing.T) {
 	if at, _ := svc.Rewind.Index(run.ID); len(at) != 0 {
 		t.Fatalf("frames kept beside a recording: %v", at)
 	}
+	// The recording starts with the browser's first screen: the run keeps
+	// when that was, so the board can put the video on the run's clock.
+	got, err := svc.Store.RunByID(run.ID)
+	if err != nil || got.FirstFrame.IsZero() || got.FirstFrame.Before(run.Started) || got.FirstFrame.After(got.Finished) {
+		t.Fatalf("first frame %v (run %v to %v) %v", got.FirstFrame, run.Started, got.Finished, err)
+	}
+	resp := do(t, "GET", srv.URL+"/api/runs/"+run.ID, "")
+	var view struct {
+		Run struct {
+			FirstFrame string `json:"firstFrame"`
+		} `json:"run"`
+	}
+	if json.NewDecoder(resp.Body).Decode(&view) != nil || view.Run.FirstFrame == "" {
+		t.Fatalf("firstFrame not in the run view: %+v", view)
+	}
 }
 
 func TestRewindKeptWithoutARecording(t *testing.T) {

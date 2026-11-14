@@ -58,6 +58,13 @@ func (s *Service) trimRewind(runID string) {
 	}
 	for _, n := range names {
 		if strings.HasSuffix(n, ".webm") || strings.HasSuffix(n, ".mp4") {
+			// The frames go, but the recording is placed on the run's clock
+			// by when the first of them arrived.
+			if at, err := s.Rewind.Index(runID); err == nil && len(at) > 0 {
+				if err := s.Store.SetFirstFrame(runID, time.UnixMilli(at[0]).UTC()); err != nil {
+					log.Printf("runs: keep first frame of %s: %v", runID, err)
+				}
+			}
 			if err := s.Rewind.Remove(runID); err != nil {
 				log.Printf("runs: drop frames of %s: %v", runID, err)
 			}

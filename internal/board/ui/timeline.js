@@ -24,10 +24,10 @@ function ticks(span) {
   return out;
 }
 
-// frames (Unix ms) are the screen frames the director kept; with them the
-// track scrubs: click or drag to see the screen at that moment (onScrub gets
-// Unix ms), and scrub (Unix ms, or null for live) draws the playhead.
-export function Timeline({ run, bugs, events, blocked, active, onBug, onEvent, frames, scrub, onScrub }) {
+// With scrubs the track scrubs: click or drag to see the screen or the video
+// at that moment (onScrub gets Unix ms), and scrub (Unix ms, or null for live)
+// draws the playhead.
+export function Timeline({ run, bugs, events, blocked, active, onBug, onEvent, scrubs, scrub, onScrub }) {
   const [now, setNow] = useState(Date.now());
   const [tip, setTip] = useState(null); // {x, text}
   useEffect(() => {
@@ -79,7 +79,7 @@ export function Timeline({ run, bugs, events, blocked, active, onBug, onEvent, f
     setTip({ x: Math.min(Math.max(r.left + r.width / 2 - box.left, 80), box.width - 80), text: `${clock(s)}  ${text}` });
   };
   const hide = () => setTip(null);
-  const canScrub = !!(frames && frames.length && onScrub);
+  const canScrub = !!(scrubs && onScrub);
   // Clicking or dragging on the lanes (not on a mark) scrubs to that time.
   const drag = (e) => {
     if (!canScrub || e.button !== 0 || e.target.closest('button')) return;

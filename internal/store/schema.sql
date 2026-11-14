@@ -36,7 +36,8 @@ CREATE TABLE IF NOT EXISTS runs (
   seed       INTEGER NOT NULL DEFAULT 0,
   replay_result TEXT NOT NULL DEFAULT '',
   claim TEXT NOT NULL DEFAULT '',
-  profile TEXT NOT NULL DEFAULT ''
+  profile TEXT NOT NULL DEFAULT '',
+  first_frame INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS runs_started ON runs(started);
 CREATE TABLE IF NOT EXISTS bugs (

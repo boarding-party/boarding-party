@@ -963,6 +963,7 @@ function RunPage({ id, onChange }) {
   const [err, setErr] = useState('');
   const [missing, setMissing] = useState(false);
   const [duration, setDuration] = useState(0); // seconds, once the video's metadata is in
+  const [vt, setVt] = useState(0); // the video's current time, seconds
   const video = useRef(null);
   const lastState = useRef('');
   const failures = useRef(0);
@@ -1083,6 +1084,16 @@ function RunPage({ id, onChange }) {
   const conErrors = events.filter((e) => e.level === 'error' && !fenced(e, blocked)).length;
   // Kept frames replace the video while live, or when there is no video.
   const framesMode = frames.length > 0 && (active || !webm);
+  // The recording starts with the browser, which is when the first screen
+  // frame arrived: that puts the video on the run's clock, so the timeline
+  // shows where the video is and scrubs it.
+  const firstFrame = parseTime(run.firstFrame);
+  const videoStart = firstFrame ? firstFrame.getTime() : frames.length ? frames[0] : 0;
+  const videoSync = !!(webm && !framesMode && videoStart && duration);
+  const toVideo = (ms) => {
+    const v = video.current;
+    if (v) v.currentTime = Math.min(duration, Math.max(0, (ms - videoStart) / 1000));
+  };
   const toTime = (iso) => { const t = parseTime(iso); if (t) { setPlaying(false); setScrub(frames[frameAt(frames, t.getTime())]); } };
   const toBug = (i) => {
     const b = bugs[i];
@@ -1127,13 +1138,14 @@ function RunPage({ id, onChange }) {
                   active=${active} playing=${playing} onPlay=${setPlaying} onLive=${() => { setPlaying(false); setScrub(null); }} />`
               : active ? html`<${LiveView} key=${run.id} id=${run.id} stage=${data.stage} reason=${data.stageReason} started=${run.started} />` : webm ? html`<video ref=${video} key=${webm} src=${artifactURL(run.id, webm)} controls preload="metadata" playsinline
                   onLoadedMetadata=${(e) => { const d = e.currentTarget.duration; setDuration(d > 0 ? d : 0); }}
+                  onTimeUpdate=${(e) => setVt(e.currentTarget.currentTime)} onSeeking=${(e) => setVt(e.currentTarget.currentTime)}
                   onPause=${(e) => { if (wantT.current == null) setParams({ t: Math.round(e.currentTarget.currentTime) }); }}></video>`
                 : html`<p>This run has no recording.</p>`}
             </div>
             <${Timeline} run=${run} bugs=${bugs} events=${run.story !== LEAD_STORY ? events : null} blocked=${blocked}
               active=${active} onBug=${toBug} onEvent=${toEvent}
-              frames=${framesMode ? frames : null} scrub=${framesMode ? (scrub ?? (active ? null : frames[frames.length - 1])) : null}
-              onScrub=${(ms) => { setPlaying(false); setScrub(frames[frameAt(frames, ms)]); }} />
+              scrubs=${framesMode || videoSync} scrub=${framesMode ? (scrub ?? (active ? null : frames[frames.length - 1])) : videoSync ? videoStart + vt * 1000 : null}
+              onScrub=${framesMode ? (ms) => { setPlaying(false); setScrub(frames[frameAt(frames, ms)]); } : toVideo} />
           </div>
           <div class="card" id="bugs">
             <div class="row between"><h2>Bugs</h2><span class="small muted">${bugs.length && webm ? 'A bug with a time jumps the video there.' : ''}</span></div>

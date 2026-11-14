@@ -70,6 +70,9 @@ type Run struct {
 	ReplayResult json.RawMessage `json:"replayResult,omitempty"`
 	// Profile is the persona's profile when the run started.
 	Profile project.Profile `json:"profile,omitzero"`
+	// FirstFrame is when the browser's first screen arrived. The recording
+	// starts with the browser, so it puts the video on the run's clock.
+	FirstFrame time.Time `json:"firstFrame,omitzero"`
 	// Claim is a replay run's one-time code: its pod's command carries it
 	// in place of the token, and redeeming it once gives the pod its URLs.
 	// Only CreateRun writes it; it is never read back into a Run or shown.
@@ -283,6 +286,7 @@ var runsAddedColumns = []addedColumn{
 	{"replay_result", "replay_result TEXT NOT NULL DEFAULT ''"},
 	{"claim", "claim TEXT NOT NULL DEFAULT ''"},
 	{"profile", "profile TEXT NOT NULL DEFAULT ''"},
+	{"first_frame", "first_frame INTEGER NOT NULL DEFAULT 0"},
 }
 
 // journeysAddedColumns are the journeys columns added after the table first shipped.
@@ -453,15 +457,15 @@ func fromTS(n int64) time.Time {
 }
 
 const runCols = `id, token, persona, role, story, state, outcome, session, started, finished, chain, follows, via, context,
-	kind, journey_id, revision, seed, replay_result, profile`
+	kind, journey_id, revision, seed, replay_result, profile, first_frame`
 
 func scanRun(sc interface{ Scan(...any) error }) (Run, error) {
 	var r Run
 	var st string
-	var started, finished int64
+	var started, finished, firstFrame int64
 	var ctx, result, profile string
 	if err := sc.Scan(&r.ID, &r.Token, &r.Persona, &r.Role, &r.Story, &st, &r.Outcome, &r.Session, &started, &finished,
-		&r.Chain, &r.Follows, &r.Via, &ctx, &r.Kind, &r.JourneyID, &r.Revision, &r.Seed, &result, &profile); err != nil {
+		&r.Chain, &r.Follows, &r.Via, &ctx, &r.Kind, &r.JourneyID, &r.Revision, &r.Seed, &result, &profile, &firstFrame); err != nil {
 		return Run{}, err
 	}
 	if profile != "" {
@@ -474,7 +478,7 @@ func scanRun(sc interface{ Scan(...any) error }) (Run, error) {
 		r.ReplayResult = json.RawMessage(result)
 	}
 	r.State = RunState(st)
-	r.Started, r.Finished = fromTS(started), fromTS(finished)
+	r.Started, r.Finished, r.FirstFrame = fromTS(started), fromTS(finished), fromTS(firstFrame)
 	return r, nil
 }
 
@@ -506,9 +510,9 @@ func (s *Store) CreateRunFrom(r Run, queueID string) error {
 		}
 		profile = string(b)
 	}
-	if _, err := tx.Exec(`INSERT INTO runs(`+runCols+`, claim) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+	if _, err := tx.Exec(`INSERT INTO runs(`+runCols+`, claim) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		r.ID, r.Token, r.Persona, r.Role, r.Story, string(r.State), r.Outcome, r.Session, ts(r.Started), ts(r.Finished),
-		r.Chain, r.Follows, r.Via, string(r.Context), r.Kind, r.JourneyID, r.Revision, r.Seed, string(r.ReplayResult), profile, r.Claim); err != nil {
+		r.Chain, r.Follows, r.Via, string(r.Context), r.Kind, r.JourneyID, r.Revision, r.Seed, string(r.ReplayResult), profile, ts(r.FirstFrame), r.Claim); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -658,6 +662,18 @@ func (s *Store) LastRunVia(persona, story, via string) (Run, error) {
 // acted on yet, oldest first.
 func (s *Store) UnfollowedReplays() ([]Run, error) {
 	return s.queryRuns(`SELECT ` + runCols + ` FROM runs WHERE state IN ('done','failed','stuck') AND followed = 0 AND kind = 'replay' ORDER BY finished, rowid`)
+}
+
+// SetFirstFrame keeps when the run's first screen frame arrived.
+func (s *Store) SetFirstFrame(runID string, at time.Time) error {
+	res, err := s.db.Exec(`UPDATE runs SET first_frame = ? WHERE id = ?`, ts(at), runID)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 // SetReplayResult keeps a replay run's result on the run.
