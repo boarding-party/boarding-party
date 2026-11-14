@@ -153,8 +153,11 @@ jobs:
         # The same wait tiny puts before a fenced session's agent
         # (internal/workload/fence.go in tiny): once it passes, the very
         # first connection to another namespace must already be blocked.
+        # Same image too: the agent image's timeout (coreutils) stops only the
+        # probe, where busybox's takes the whole script down.
         run: |
           ip=$(kubectl --context k3s -n fence-target get pod web -o jsonpath='{.status.podIP}')
+          agent=ghcr.io/tiny-systems/agent:$(go list -m -f '{{.Version}}' github.com/tiny-systems/tiny | sed 's/^v//')
           cat <<YAML | kubectl --context k3s apply -f -
           apiVersion: v1
           kind: Pod
@@ -163,16 +166,16 @@ jobs:
             restartPolicy: Never
             initContainers:
             - name: egress-fence
-              image: bash:5.2
+              image: $agent
               env: [{name: HOST_IP, valueFrom: {fieldRef: {fieldPath: status.hostIP}}}]
               command: [bash, -c, 'for i in \$(seq 1 20); do timeout 1 bash -c "exec 3<>/dev/tcp/\$HOST_IP/10250" 2>/dev/null || { echo "fence after \$i tries"; exit 0; }; sleep 1; done; echo "fence wait gave up"']
             containers:
             - name: agent
-              image: bash:5.2
+              image: $agent
               command: [bash, -c, 'timeout 3 bash -c "exec 3<>/dev/tcp/$ip/80" 2>/dev/null && echo REACHED || echo BLOCKED']
           YAML
           k="kubectl --context k3s -n boardingparty"
-          for i in $(seq 1 60); do
+          for i in $(seq 1 120); do
             case $($k get pod fence-wait -o jsonpath='{.status.phase}') in Succeeded|Failed) break;; esac
             sleep 2
           done
