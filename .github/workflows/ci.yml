@@ -122,21 +122,30 @@ jobs:
           curl -fsSL -c jar -b jar -o /dev/null "$link"
           curl -fsS -b jar http://127.0.0.1:8790/api/runs
       - name: k3s enforces the egress fence
+        # The target is a web server in another namespace: a plain pod reaches
+        # it, a session pod (app=tiny-session) must not.
         run: |
-          k="kubectl --context k3s -n boardingparty"
+          kc="kubectl --context k3s"
+          $kc create namespace fence-target
+          $kc -n fence-target run web --image=nginx:1.27-alpine --port=80
+          $kc -n fence-target wait --for=condition=Ready pod/web --timeout=120s
+          ip=$($kc -n fence-target get pod web -o jsonpath='{.status.podIP}')
+          k="$kc -n boardingparty"
           probe() { # name, extra args; prints curl's exit code
             $k run "$1" --image=curlimages/curl:8.10.1 --restart=Never $2 --command -- \
-              curl -sk -m 5 -o /dev/null https://1.1.1.1:853/ >/dev/null
-            $k wait --for=jsonpath='{.status.phase}'=Succeeded pod/"$1" --timeout=120s >/dev/null 2>&1 || \
-              $k wait --for=jsonpath='{.status.phase}'=Failed pod/"$1" --timeout=5s >/dev/null 2>&1
+              curl -s -m 5 -o /dev/null "http://$ip/" >/dev/null
+            for i in $(seq 1 60); do
+              case $($k get pod "$1" -o jsonpath='{.status.phase}') in Succeeded|Failed) break;; esac
+              sleep 2
+            done
             $k get pod "$1" -o jsonpath='{.status.containerStatuses[0].state.terminated.exitCode}'
           }
           open=$(probe fence-open "")
           fenced=$(probe fence-session "--labels=app=tiny-session")
           echo "plain pod: curl exit $open; session pod: curl exit $fenced"
-          kubectl --context k3s -n boardingparty get networkpolicy tiny-session-egress
-          case "$open" in 7|28|"") echo "plain pod could not reach 1.1.1.1:853, the probe proves nothing"; exit 1;; esac
-          case "$fenced" in 7|28) ;; *) echo "session pod reached 1.1.1.1:853: the fence is not enforced"; exit 1;; esac
+          $k get networkpolicy tiny-session-egress
+          [ "$open" = 0 ] || { echo "plain pod could not reach $ip, the probe proves nothing"; exit 1; }
+          case "$fenced" in 7|28) ;; *) echo "session pod reached $ip: the fence is not enforced"; exit 1;; esac
       - if: failure()
         run: |
           cat up.log || true
