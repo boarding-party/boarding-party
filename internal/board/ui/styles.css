@@ -365,7 +365,7 @@ aside nav.leads .sublabel { color: var(--side-ink); opacity: .7; font-size: 12px
 .runhead h1 { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; }
 .runhead h1 .muted { font-weight: 400; }
 .runhead h1 .tag { align-self: center; }
-.runverdict { font-size: 15px; line-height: 1.55; max-width: 74ch; margin: 6px 0 10px; overflow-wrap: anywhere; white-space: pre-line; }
+.runverdict { font-size: 14px; line-height: 1.55; margin: 0; overflow-wrap: anywhere; white-space: pre-line; }
 /* The run page uses the whole window: the recording takes what the side
    column leaves, capped so it never runs past the window's height. */
 .page.runpage { max-width: none; }

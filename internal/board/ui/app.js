@@ -1116,7 +1116,6 @@ function RunPage({ id, onChange }) {
       <p class="crumb"><a href="#/runs">Runs</a> / ${run.id}</p>
       <header class="runhead">
         <h1>${run.persona} <span class="muted">on</span> ${run.story} <${StateTag} state=${run.state} wait=${wait} /></h1>
-        <p class="runverdict">${run.outcome || (active ? (replay ? 'Replaying. The outcome appears when the journey ends.' : 'Running. The outcome appears when the persona finishes.') : 'No outcome recorded.')}</p>
         <ul class="readout">
           ${replay ? html`<li><b>${replayLabel(run)}</b></li>` : null}
           <li>${run.role || 'Persona'}</li>
@@ -1157,6 +1156,10 @@ function RunPage({ id, onChange }) {
           ${run.story !== LEAD_STORY ? html`<${ConsoleCard} events=${events} blocked=${blocked} started=${run.started} active=${active} focus=${conFocus} />` : null}
         </div>
         <div class="stack">
+          <div class="card">
+            <h2>Outcome</h2>
+            <p class="runverdict">${run.outcome || (active ? (replay ? 'Replaying. The outcome appears when the journey ends.' : 'Running. The outcome appears when the persona finishes.') : 'No outcome recorded.')}</p>
+          </div>
           ${replay ? html`<${ReplayCard} run=${run} artifacts=${artifacts} copilot=${data.copilot} />` : null}
           ${chain || queued ? html`<${Chain} links=${links} current=${run.id} queued=${queued || []} />` : null}
           ${data.settings && data.settings.length ? html`<${PersonaCard} run=${run} settings=${data.settings} />` : null}
