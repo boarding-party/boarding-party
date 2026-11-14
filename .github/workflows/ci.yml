@@ -132,8 +132,10 @@ jobs:
           ip=$($kc -n fence-target get pod web -o jsonpath='{.status.podIP}')
           k="$kc -n boardingparty"
           probe() { # name, extra args; prints curl's exit code
-            $k run "$1" --image=curlimages/curl:8.10.1 --restart=Never $2 --command -- \
-              curl -s -m 5 -o /dev/null "http://$ip/" >/dev/null
+            # The first try is only logged: k3s's policy controller programs a
+            # new pod's rules a moment after it starts. The second decides.
+            $k run "$1" --image=curlimages/curl:8.10.1 --restart=Never $2 --command -- sh -c \
+              "curl -s -m 5 -o /dev/null http://$ip/; echo first try: \$?; sleep 15; curl -s -m 5 -o /dev/null http://$ip/" >/dev/null
             for i in $(seq 1 60); do
               case $($k get pod "$1" -o jsonpath='{.status.phase}') in Succeeded|Failed) break;; esac
               sleep 2
@@ -143,6 +145,7 @@ jobs:
           open=$(probe fence-open "")
           fenced=$(probe fence-session "--labels=app=tiny-session")
           echo "plain pod: curl exit $open; session pod: curl exit $fenced"
+          $k logs fence-session
           $k get networkpolicy tiny-session-egress
           [ "$open" = 0 ] || { echo "plain pod could not reach $ip, the probe proves nothing"; exit 1; }
           case "$fenced" in 7|28) ;; *) echo "session pod reached $ip: the fence is not enforced"; exit 1;; esac
@@ -151,3 +154,5 @@ jobs:
           cat up.log || true
           kubectl --context k3s get pods -A -o wide || true
           kubectl --context k3s -n boardingparty describe pods || true
+          echo "kube-router policy chains: $(sudo iptables-save | grep -c KUBE-NWPLCY || true)"
+          sudo iptables-save | grep -E 'KUBE-NWPLCY|KUBE-POD-FW' | head -40 || true
