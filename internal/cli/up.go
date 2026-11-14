@@ -170,6 +170,9 @@ func waitNodeReady(ctx context.Context, kubeContext string) error {
 	}
 }
 
+// isK3s reports whether a server version is k3s's (v1.33.5+k3s1).
+func isK3s(gitVersion string) bool { return strings.Contains(gitVersion, "+k3s") }
+
 // sshHint tells someone logged in over SSH how to reach the board, which
 // listens on the server's 127.0.0.1, from their laptop. "" outside SSH.
 func sshHint(getenv func(string) string, port int) string {
@@ -222,8 +225,16 @@ func newUp(g *globals) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			// The director starts runs only behind tiny's egress proxy.
-			if err := tinyruntime.Init(ctx, cfg, ns, tinyruntime.Options{EgressProxy: true}); err != nil {
+			// The director starts runs only behind tiny's egress proxy. On
+			// k3s a pod's policy lands a moment after it starts, so sessions
+			// there wait for the fence before the agent runs.
+			topts := tinyruntime.Options{EgressProxy: true}
+			if kc, err := kubernetes.NewForConfig(cfg); err == nil {
+				if v, err := kc.Discovery().ServerVersion(); err == nil {
+					topts.FenceWait = isK3s(v.GitVersion)
+				}
+			}
+			if err := tinyruntime.Init(ctx, cfg, ns, topts); err != nil {
 				return fmt.Errorf("install tiny: %w", err)
 			}
 			fmt.Fprintln(out, "✓ tiny runtime, egress through its proxy")

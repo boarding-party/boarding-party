@@ -147,6 +147,7 @@ jobs:
           echo "plain pod: curl exit $open; session pod: curl exit $fenced"
           $k logs fence-session
           $k get networkpolicy tiny-session-egress
+          [ "$($k get cm tiny-settings -o jsonpath='{.data.fenceWait}')" = true ] || { echo "up did not turn tiny's fence wait on for k3s"; exit 1; }
           [ "$open" = 0 ] || { echo "plain pod could not reach $ip, the probe proves nothing"; exit 1; }
           case "$fenced" in 7|28) ;; *) echo "session pod reached $ip: the fence is not enforced"; exit 1;; esac
       - name: tiny's fence wait closes the start-up gap

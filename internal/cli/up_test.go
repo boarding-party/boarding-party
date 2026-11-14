@@ -166,3 +166,15 @@ func TestSSHHintNamesTheTunnel(t *testing.T) {
 		t.Fatal("a hint outside SSH")
 	}
 }
+
+func TestK3sIsToldFromItsServerVersion(t *testing.T) {
+	for v, want := range map[string]bool{
+		"v1.33.5+k3s1":        true,
+		"v1.34.1-gke.1829001": false,
+		"v1.35.0":             false,
+	} {
+		if got := isK3s(v); got != want {
+			t.Errorf("isK3s(%q) = %v, want %v", v, got, want)
+		}
+	}
+}
