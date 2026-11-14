@@ -149,6 +149,37 @@ jobs:
           $k get networkpolicy tiny-session-egress
           [ "$open" = 0 ] || { echo "plain pod could not reach $ip, the probe proves nothing"; exit 1; }
           case "$fenced" in 7|28) ;; *) echo "session pod reached $ip: the fence is not enforced"; exit 1;; esac
+      - name: tiny's fence wait closes the start-up gap
+        # The same wait tiny puts before a fenced session's agent
+        # (internal/workload/fence.go in tiny): once it passes, the very
+        # first connection to another namespace must already be blocked.
+        run: |
+          ip=$(kubectl --context k3s -n fence-target get pod web -o jsonpath='{.status.podIP}')
+          cat <<YAML | kubectl --context k3s apply -f -
+          apiVersion: v1
+          kind: Pod
+          metadata: {name: fence-wait, namespace: boardingparty, labels: {app: tiny-session}}
+          spec:
+            restartPolicy: Never
+            initContainers:
+            - name: egress-fence
+              image: bash:5.2
+              env: [{name: HOST_IP, valueFrom: {fieldRef: {fieldPath: status.hostIP}}}]
+              command: [bash, -c, 'for i in \$(seq 1 20); do timeout 1 bash -c "exec 3<>/dev/tcp/\$HOST_IP/10250" 2>/dev/null || { echo "fence after \$i tries"; exit 0; }; sleep 1; done; echo "fence wait gave up"']
+            containers:
+            - name: agent
+              image: bash:5.2
+              command: [bash, -c, 'timeout 3 bash -c "exec 3<>/dev/tcp/$ip/80" 2>/dev/null && echo REACHED || echo BLOCKED']
+          YAML
+          k="kubectl --context k3s -n boardingparty"
+          for i in $(seq 1 60); do
+            case $($k get pod fence-wait -o jsonpath='{.status.phase}') in Succeeded|Failed) break;; esac
+            sleep 2
+          done
+          wait=$($k logs fence-wait -c egress-fence); first=$($k logs fence-wait -c agent)
+          echo "wait: $wait; first connection: $first"
+          case "$wait" in "fence after"*) ;; *) echo "the wait never saw the fence"; exit 1;; esac
+          [ "$first" = BLOCKED ] || { echo "the first connection after the wait got through"; exit 1; }
       - if: failure()
         run: |
           cat up.log || true
