@@ -47,7 +47,7 @@ export function JourneysPage() {
     return POLL_MS;
   }, []);
   return html`
-    <section class="page">
+    <section class="page wide">
       <h1>Journeys</h1>
       <p class="lede">The steps an AI run recorded for a persona's story. A replay plays them back in a browser with fresh test data and no model, so it costs nothing.</p>
       ${err ? html`<div class="note bad" role="alert">Could not load the journeys: ${err}</div>` : null}

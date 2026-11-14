@@ -802,7 +802,7 @@ function InboxPage({ project }) {
   const pick = (patch) => { loaded.current = false; setMsgs(null); setParams({ ...patch, m: '' }); };
 
   return html`
-    <section class="page">
+    <section class="page wide">
       <h1>Inbox</h1>
       <p class="lede">Mail sent to the personas' addresses. The mailbox is set up on the <a href="#/project/inbox">Project</a> page.</p>
       <div class="stack">

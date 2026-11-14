@@ -58,7 +58,7 @@ export function BugsPage() {
 
   const done = (issues || []).filter(DONE);
   return html`
-    <section class="page">
+    <section class="page wide">
       <h1>Bugs</h1>
       <p class="lede">Problems your personas found, across all runs. A report of the same problem joins its issue. Mark an issue fixed and a persona checks it again.</p>
       <${Value} days=${params.days === '30' ? 30 : 7} by=${params.by === 'story' ? 'story' : 'persona'} open=${params.spend === '1'} />

@@ -56,7 +56,7 @@ export function LeadPage({ name }) {
   const budget = l.dailyBudget != null ? l.dailyBudget : 5;
   const runs = l.dailyRuns || 10;
   return html`
-    <section class="page">
+    <section class="page wide">
       <div class="row between">
         <h1>${lead.name}</h1>
         <button type="button" class="btn primary" disabled=${busy} onClick=${runNow}>Run now</button>
