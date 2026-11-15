@@ -42,9 +42,9 @@ func (s *Service) Digest(since, now time.Time) (digest.Digest, error) {
 	d.Runs = digest.Runs{Finished: len(finished), Stuck: digest.Cap(stuck)}
 
 	p, err := s.Store.Project()
-	if err != nil {
+	if err != nil && !errors.Is(err, store.ErrNotFound) {
 		return d, fmt.Errorf("load project: %w", err)
-	}
+	} // no project yet: the default timezone and budget
 	loc := p.Location()
 	today := DayStart(now, loc)
 	if d.Spent, err = s.SpentBetween(DayStart(today.Add(-time.Hour), loc), today); err != nil {

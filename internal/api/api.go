@@ -87,6 +87,7 @@ func admin(svc *runs.Service, maxBytes int64, token string, hub *live.Hub, mail 
 	mux.HandleFunc("POST /api/runs/{id}/stop", s.stopRun)
 	mux.HandleFunc("GET /api/status", s.getStatus)
 	mux.HandleFunc("GET /api/value", s.getValue)
+	mux.HandleFunc("GET /api/digest", s.getDigest)
 	mux.HandleFunc("PUT /api/pause", s.putPause)
 	mux.HandleFunc("GET /api/runs/{id}/artifacts/{name}", s.getArtifact)
 	mux.HandleFunc("GET /api/runs/{id}/live", s.streamLive)
@@ -859,6 +860,33 @@ func (s *server) getValue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, v)
+}
+
+// maxDigestWindow is how far back a digest reaches.
+const maxDigestWindow = 7 * 24 * time.Hour
+
+// getDigest reports the board's news since ?since= (RFC 3339; default a
+// day back, at most 7 days back), for the cloud's morning email.
+func (s *server) getDigest(w http.ResponseWriter, r *http.Request) {
+	now := time.Now().UTC()
+	since := now.Add(-24 * time.Hour)
+	if q := r.URL.Query().Get("since"); q != "" {
+		t, err := time.Parse(time.RFC3339Nano, q)
+		if err != nil || t.After(now) {
+			http.Error(w, "since must be an RFC 3339 time in the past", http.StatusBadRequest)
+			return
+		}
+		since = t.UTC()
+	}
+	if oldest := now.Add(-maxDigestWindow); since.Before(oldest) {
+		since = oldest
+	}
+	d, err := s.svc.Digest(since, now)
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, d)
 }
 
 // putPause flips the pause switch. Pausing stops nothing: it only gates new
