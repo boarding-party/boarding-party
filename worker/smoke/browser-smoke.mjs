@@ -71,14 +71,26 @@ function videoDims(dir) {
   const r = spawnSync(join('/ms-playwright', ff, bin), ['-i', join(dir, String(webm))], { encoding: 'utf8' });
   const m = /Video:.*?, (\d+)x(\d+)/.exec(r.stderr || '');
   if (!m) fail('cannot read the video size: ' + (r.stderr || '').slice(0, 400));
-  // The first frame's bottom-right pixel is the white page, not the grey the
-  // encoder pads a frame smaller than the video with. A live-recorded webm
-  // has no duration to seek from the end.
-  const px = spawnSync(join('/ms-playwright', ff, bin), ['-loglevel', 'error', '-i', join(dir, String(webm)), '-frames:v', '1', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'], { maxBuffer: 64 << 20 });
-  if (!px.stdout || px.stdout.length < 3) fail('cannot read a video frame: ' + String(px.stderr).slice(0, 400));
-  const [r_, g, b] = px.stdout.subarray(px.stdout.length - 3);
-  if (Math.min(r_, g, b) < 200) fail(`the video's corner is rgb(${r_},${g},${b}), not the white page: the frame does not fill the video`);
   return m[1] + 'x' + m[2];
+}
+
+// fillsFrame fails unless the first frame's bottom-right pixel of the one
+// recording under dir is the white page, not the grey the encoder pads a frame
+// smaller than the video with. Chromium decodes it: Playwright's ffmpeg only
+// encodes webm.
+async function fillsFrame(dir) {
+  const webm = readdirSync(dir, { recursive: true }).find((f) => String(f).endsWith('.webm'));
+  const req = createRequire(process.env.BP_PW_ROOT || '/usr/lib/node_modules/@playwright/mcp/');
+  const b = await req('playwright-core').chromium.launch(process.env.BP_CHROMIUM ? { executablePath: process.env.BP_CHROMIUM } : {});
+  const px = await (await b.newPage()).evaluate(async (b64) => {
+    const v = document.createElement('video'); v.muted = true; v.src = 'data:video/webm;base64,' + b64;
+    await new Promise((ok, bad) => { v.onloadeddata = ok; v.onerror = () => bad(new Error('cannot decode the video')); });
+    const c = document.createElement('canvas'); c.width = v.videoWidth; c.height = v.videoHeight;
+    const g = c.getContext('2d'); g.drawImage(v, 0, 0);
+    return [...g.getImageData(c.width - 1, c.height - 1, 1, 1).data].slice(0, 3);
+  }, readFileSync(join(dir, String(webm))).toString('base64'));
+  await b.close();
+  if (Math.min(...px) < 200) fail(`the video's corner is rgb(${px}), not the white page: the frame does not fill the video`);
 }
 
 // Keyboard only, reduced motion.
@@ -107,6 +119,7 @@ if (settings.assistive !== 'keyboard-only' || settings.display !== 'reduced-moti
 if ((await kb.call('browser_stop_video', {})).error) fail('could not stop the video');
 kb.kill();
 if (videoDims(kbDir) !== '1280x800') fail('desktop video is ' + videoDims(kbDir) + ', want 1280x800');
+await fillsFrame(kbDir);
 
 // Zoom, no colour vision: the eyesight init page and the context options as
 // Playwright MCP loads them from the run's config.
@@ -131,6 +144,7 @@ if (!parts.text.includes('date parts Day,Month,Year')) fail('an en-GB date field
 if ((await eye.call('browser_stop_video', {})).error) fail('could not stop the zoomed video');
 eye.kill();
 if (videoDims(dir) !== '640x400') fail('zoomed video is ' + videoDims(dir) + ', want 640x400');
+await fillsFrame(dir);
 const png = readFileSync(join(dir, 'eye.png'));
 const require = createRequire(process.env.BP_PW_ROOT || '/usr/lib/node_modules/@playwright/mcp/');
 const browser = await require('playwright-core').chromium.launch(process.env.BP_CHROMIUM ? { executablePath: process.env.BP_CHROMIUM } : {});
