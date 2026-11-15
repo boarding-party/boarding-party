@@ -74,10 +74,10 @@ function videoDims(dir) {
   return m[1] + 'x' + m[2];
 }
 
-// fillsFrame fails unless the first frame's bottom-right pixel of the one
-// recording under dir is the white page, not the grey the encoder pads a frame
-// smaller than the video with. Chromium decodes it: Playwright's ffmpeg only
-// encodes webm.
+// fillsFrame fails if the bottom-right pixel of the one recording under dir,
+// a second in, is the grey (128) the encoder pads a frame smaller than the
+// video with. The first frame can be black, before the page paints. Chromium
+// decodes it: Playwright's ffmpeg only encodes webm.
 async function fillsFrame(dir) {
   const webm = readdirSync(dir, { recursive: true }).find((f) => String(f).endsWith('.webm'));
   const req = createRequire(process.env.BP_PW_ROOT || '/usr/lib/node_modules/@playwright/mcp/');
@@ -85,12 +85,14 @@ async function fillsFrame(dir) {
   const px = await (await b.newPage()).evaluate(async (b64) => {
     const v = document.createElement('video'); v.muted = true; v.src = 'data:video/webm;base64,' + b64;
     await new Promise((ok, bad) => { v.onloadeddata = ok; v.onerror = () => bad(new Error('cannot decode the video')); });
+    v.currentTime = 1; await new Promise((ok) => { v.onseeked = ok; });
     const c = document.createElement('canvas'); c.width = v.videoWidth; c.height = v.videoHeight;
     const g = c.getContext('2d'); g.drawImage(v, 0, 0);
     return [...g.getImageData(c.width - 1, c.height - 1, 1, 1).data].slice(0, 3);
   }, readFileSync(join(dir, String(webm))).toString('base64'));
   await b.close();
-  if (Math.min(...px) < 200) fail(`the video's corner is rgb(${px}), not the white page: the frame does not fill the video`);
+  if (px.every((c) => Math.abs(c - 128) < 8)) fail(`the video's corner is padding grey rgb(${px}): the frame does not fill the video`);
+  console.log(`video corner rgb(${px})`);
 }
 
 // Keyboard only, reduced motion.
