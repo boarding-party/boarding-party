@@ -104,6 +104,12 @@ jobs:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        # docker: k3s in a container, the path on a Mac (Docker there is a
+        # Linux VM). k3s: the installer, the path on a bare Linux server.
+        local: [docker, k3s]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -112,7 +118,7 @@ jobs:
       - run: go build -o bp ./cmd/boardingparty
       - name: up
         run: |
-          ./bp up --yes --no-open --port 8790 > up.log 2>&1 &
+          ./bp up --yes --local ${{ matrix.local }} --no-open --port 8790 > up.log 2>&1 &
           for i in $(seq 1 120); do grep -q '^→ http' up.log && break; sleep 5; done
           cat up.log
           grep -q '^→ http' up.log
@@ -189,5 +195,11 @@ jobs:
           cat up.log || true
           kubectl --context k3s get pods -A -o wide || true
           kubectl --context k3s -n boardingparty describe pods || true
-          echo "kube-router policy chains: $(sudo iptables-save | grep -c KUBE-NWPLCY || true)"
-          sudo iptables-save | grep -E 'KUBE-NWPLCY|KUBE-POD-FW' | head -40 || true
+          if [ "${{ matrix.local }}" = docker ]; then
+            docker logs --tail 80 boardingparty-k3s || true
+            ipt() { docker exec boardingparty-k3s iptables-save; }
+          else
+            ipt() { sudo iptables-save; }
+          fi
+          echo "kube-router policy chains: $(ipt | grep -c KUBE-NWPLCY || true)"
+          ipt | grep -E 'KUBE-NWPLCY|KUBE-POD-FW' | head -40 || true

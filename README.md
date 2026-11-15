@@ -227,18 +227,22 @@ room for a pool to scale up from zero.
 
 ## Trying it
 
-On a Linux server with no Kubernetes (4 GB of memory or more):
+You need a Kubernetes cluster or Docker. On a laptop with Docker Desktop or
+OrbStack (give Docker 6 GB of memory or more), or on a Linux server:
 
 ```
 boardingparty up
 ```
 
-It finds no cluster and offers to install k3s, a one-machine Kubernetes.
-Say yes and it runs k3s's official installer, which asks for sudo. It then
-adds a `k3s` context to `~/.kube/config`, installs tiny (with its egress
-proxy on) and the director in the `boardingparty` namespace, and prints a
-link to the board. If you are logged in over SSH, it also prints the
-`ssh -L` command to run on your laptop so the link opens there.
+With no cluster, it offers to start k3s, a one-machine Kubernetes. When
+Docker is running, k3s runs in a container called `boardingparty-k3s`, with
+its API on 127.0.0.1 only. On a Linux server without Docker it runs k3s's
+official installer instead, which asks for sudo. `--local docker` or
+`--local k3s` picks one. It then adds a `k3s` context to `~/.kube/config`,
+installs tiny (with its egress proxy on) and the director in the
+`boardingparty` namespace, and prints a link to the board. If you are logged
+in over SSH, it also prints the `ssh -L` command to run on your laptop so the
+link opens there. It also prints how to remove k3s again.
 
 With a cluster already in your kubeconfig, `up` asks which context and
 namespace to use and leaves k3s out. Running it again is safe: each step
