@@ -627,6 +627,13 @@ func (s *Store) queryRuns(q string, args ...any) ([]Run, error) {
 	return out, rows.Err()
 }
 
+// RunsFinishedSince returns the runs that ended done, failed or stuck at
+// or after since, oldest first.
+func (s *Store) RunsFinishedSince(since time.Time) ([]Run, error) {
+	return s.queryRuns(`SELECT `+runCols+` FROM runs WHERE finished >= ? AND state IN ('done', 'failed', 'stuck')
+		ORDER BY finished, rowid`, ts(since))
+}
+
 // Runs returns the newest runs first.
 func (s *Store) Runs(limit int) ([]Run, error) {
 	return s.queryRuns(`SELECT `+runCols+` FROM runs ORDER BY started DESC, rowid DESC LIMIT ?`, limit)

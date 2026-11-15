@@ -587,17 +587,31 @@ func insertDecision(tx *sql.Tx, d *Decision) error {
 
 // Decisions returns a journey's decisions, newest first.
 func (s *Store) Decisions(journeyID string) ([]Decision, error) {
-	return s.decisions(`journey_id = ?`, journeyID)
+	return s.decisions(`journey_id = ? ORDER BY created DESC, id DESC`, journeyID)
 }
 
 // DecisionsByRun returns the decisions a run made, newest first.
 func (s *Store) DecisionsByRun(runID string) ([]Decision, error) {
-	return s.decisions(`run_id = ?`, runID)
+	return s.decisions(`run_id = ? ORDER BY created DESC, id DESC`, runID)
 }
 
-func (s *Store) decisions(where string, arg any) ([]Decision, error) {
+// DecisionsSince returns the decisions of the given kinds made at or after
+// since, oldest first.
+func (s *Store) DecisionsSince(since time.Time, kinds ...string) ([]Decision, error) {
+	if len(kinds) == 0 {
+		return []Decision{}, nil
+	}
+	args := []any{ts(since)}
+	for _, k := range kinds {
+		args = append(args, k)
+	}
+	return s.decisions(`created >= ? AND kind IN (?`+strings.Repeat(`, ?`, len(kinds)-1)+`) ORDER BY created, id`, args...)
+}
+
+// decisions returns the decisions matching where, which also orders them.
+func (s *Store) decisions(where string, args ...any) ([]Decision, error) {
 	rows, err := s.db.Query(`SELECT id, journey_id, run_id, kind, reason, actor, evidence, rev_before, rev_after, created
-		FROM journey_decisions WHERE `+where+` ORDER BY created DESC, id DESC`, arg)
+		FROM journey_decisions WHERE `+where, args...)
 	if err != nil {
 		return nil, err
 	}
