@@ -71,11 +71,12 @@ function videoDims(dir) {
   const r = spawnSync(join('/ms-playwright', ff, bin), ['-i', join(dir, String(webm))], { encoding: 'utf8' });
   const m = /Video:.*?, (\d+)x(\d+)/.exec(r.stderr || '');
   if (!m) fail('cannot read the video size: ' + (r.stderr || '').slice(0, 400));
-  // The last frame's bottom-right pixel is the white page, not the grey the
-  // encoder pads a frame smaller than the video with.
-  const px = spawnSync(join('/ms-playwright', ff, bin), ['-sseof', '-0.3', '-i', join(dir, String(webm)), '-frames:v', '1', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'], { maxBuffer: 64 << 20 }).stdout;
-  if (!px || px.length < 3) fail('cannot read a video frame');
-  const [r_, g, b] = px.subarray(px.length - 3);
+  // The first frame's bottom-right pixel is the white page, not the grey the
+  // encoder pads a frame smaller than the video with. A live-recorded webm
+  // has no duration to seek from the end.
+  const px = spawnSync(join('/ms-playwright', ff, bin), ['-loglevel', 'error', '-i', join(dir, String(webm)), '-frames:v', '1', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'], { maxBuffer: 64 << 20 });
+  if (!px.stdout || px.stdout.length < 3) fail('cannot read a video frame: ' + String(px.stderr).slice(0, 400));
+  const [r_, g, b] = px.stdout.subarray(px.stdout.length - 3);
   if (Math.min(r_, g, b) < 200) fail(`the video's corner is rgb(${r_},${g},${b}), not the white page: the frame does not fill the video`);
   return m[1] + 'x' + m[2];
 }
