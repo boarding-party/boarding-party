@@ -1,6 +1,6 @@
 # Daily digest email
 
-Status: proposed, waiting for approval.
+Status: approved 2026-11-15.
 
 ## Why
 
