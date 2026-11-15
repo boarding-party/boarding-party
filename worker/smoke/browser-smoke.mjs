@@ -30,7 +30,7 @@ const url = `http://127.0.0.1:${srv.address().port}/`;
 // session starts bp-browser with settings and returns its MCP client.
 async function session(settings, cwd) {
   const p = spawn(process.env.BP_BROWSER || '/opt/bp/bp-browser', [...settings,
-    '--headless', '--isolated', '--no-sandbox', '--browser=chromium', '--output-dir=' + join(cwd, 'out')], { cwd, stdio: ['pipe', 'pipe', 'inherit'] });
+    '--headless', '--isolated', '--no-sandbox', '--browser=chromium', '--caps=devtools,storage', '--output-dir=' + join(cwd, 'out')], { cwd, stdio: ['pipe', 'pipe', 'inherit'] });
   const replies = new Map();
   let buf = '';
   p.stdout.on('data', (d) => {
@@ -80,7 +80,8 @@ const kb = await session(['--bp-assistive=keyboard-only', '--bp-display=reduced-
 const names = (await kb.ask('tools/list', {})).result.tools.map((t) => t.name);
 for (const t of ['browser_click', 'browser_type', 'browser_resize', 'browser_evaluate']) if (names.includes(t)) fail(`${t} is listed for a keyboard-only persona`);
 for (const t of ['browser_press_key', 'browser_type_focused', 'browser_snapshot']) if (!names.includes(t)) fail(`${t} is missing`);
-if ((await kb.call('browser_start_video', {})).error) fail('could not start the video');
+const rec = await kb.call('browser_start_video', {});
+if (rec.error) fail('could not start the video: ' + rec.text);
 if ((await kb.call('browser_navigate', { url })).error) fail('could not open the page');
 const click = await kb.call('browser_click', { element: 'Name', target: 'e1' });
 if (!click.error || !/keyboard/.test(click.text)) fail('a click was not refused: ' + click.text);
@@ -104,7 +105,8 @@ if (videoDims(kbDir) !== '1280x800') fail('desktop video is ' + videoDims(kbDir)
 // Playwright MCP loads them from the run's config.
 const dir = mkdtempSync(join(tmpdir(), 'bp-eye-'));
 const eye = await session(['--bp-assistive=zoom', '--bp-vision=achromatopsia', '--bp-locale=en-GB'], dir);
-if ((await eye.call('browser_start_video', {})).error) fail('could not start the zoomed video');
+const erec = await eye.call('browser_start_video', {});
+if (erec.error) fail('could not start the zoomed video: ' + erec.text);
 if ((await eye.call('browser_navigate', { url })).error) fail('could not open the page with zoom');
 snap = await eye.call('browser_snapshot', {});
 if (!snap.text.includes('width 640')) fail('zoom did not halve the layout width: ' + snap.text.slice(0, 800));
