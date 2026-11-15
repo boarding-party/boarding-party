@@ -3,8 +3,8 @@
 // A keyboard-only persona with reduced motion gets no click tool (nor a
 // javascript: URL), types into the focused field, and the page sees reduced
 // motion, in the project's language and time zone. A zoomed UK persona with no colour vision gets a 200% layout and grey
-// screenshots. Both record video at the size the screen draws, not
-// Playwright MCP's 800 px default.
+// screenshots. Both record video at the CSS viewport, not Playwright MCP's
+// 800 px default, with the page filling the frame.
 import http from 'node:http';
 import { spawn, spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, readdirSync } from 'node:fs';
@@ -71,6 +71,12 @@ function videoDims(dir) {
   const r = spawnSync(join('/ms-playwright', ff, bin), ['-i', join(dir, String(webm))], { encoding: 'utf8' });
   const m = /Video:.*?, (\d+)x(\d+)/.exec(r.stderr || '');
   if (!m) fail('cannot read the video size: ' + (r.stderr || '').slice(0, 400));
+  // The last frame's bottom-right pixel is the white page, not the grey the
+  // encoder pads a frame smaller than the video with.
+  const px = spawnSync(join('/ms-playwright', ff, bin), ['-sseof', '-0.3', '-i', join(dir, String(webm)), '-frames:v', '1', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'], { maxBuffer: 64 << 20 }).stdout;
+  if (!px || px.length < 3) fail('cannot read a video frame');
+  const [r_, g, b] = px.subarray(px.length - 3);
+  if (Math.min(r_, g, b) < 200) fail(`the video's corner is rgb(${r_},${g},${b}), not the white page: the frame does not fill the video`);
   return m[1] + 'x' + m[2];
 }
 
@@ -123,7 +129,7 @@ const parts = await eye.call('browser_run_code_unsafe', { code: `async (page) =>
 if (!parts.text.includes('date parts Day,Month,Year')) fail('an en-GB date field is not day, month, year: ' + parts.text.slice(0, 400));
 if ((await eye.call('browser_stop_video', {})).error) fail('could not stop the zoomed video');
 eye.kill();
-if (videoDims(dir) !== '1280x800') fail('zoomed video is ' + videoDims(dir) + ', want 1280x800 (640x400 at twice the density)');
+if (videoDims(dir) !== '640x400') fail('zoomed video is ' + videoDims(dir) + ', want 640x400');
 const png = readFileSync(join(dir, 'eye.png'));
 const require = createRequire(process.env.BP_PW_ROOT || '/usr/lib/node_modules/@playwright/mcp/');
 const browser = await require('playwright-core').chromium.launch(process.env.BP_CHROMIUM ? { executablePath: process.env.BP_CHROMIUM } : {});

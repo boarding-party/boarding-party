@@ -32,12 +32,13 @@ eq([zp.viewport, zp.screen, zp.deviceScaleFactor, zp.isMobile, zp.hasTouch, zp.u
 if ('defaultBrowserType' in zp) fail('a device descriptor key that is no context option leaked');
 eq(contextOptions({ device: 'iphone-15' }, devices).viewport, phone.viewport, 'phone');
 
-// Video: the page as the screen draws it, longer side at most 1440 px.
+// Video: the CSS viewport, which is what Chrome's screencast frames are,
+// longer side at most 1440 px. Pixel density is ignored: a bigger video only
+// pads the frames with grey.
 eq(videoSize(contextOptions({}, devices)), { width: 1280, height: 800 }, 'desktop video');
 eq(videoSize(contextOptions({ device: 'desktop-large' }, devices)), { width: 1440, height: 810 }, 'large desktop video');
-eq(videoSize(contextOptions({ assistive: 'zoom' }, devices)), { width: 1280, height: 800 }, 'zoomed desktop video');
-const pv = videoSize(contextOptions({ device: 'iphone-15' }, devices));
-if (Math.max(pv.width, pv.height) > 1440 || pv.height < 1400 || pv.width % 2 || pv.height % 2) fail('phone video ' + JSON.stringify(pv));
+eq(videoSize(contextOptions({ assistive: 'zoom' }, devices)), { width: 640, height: 400 }, 'zoomed desktop video');
+eq(videoSize(contextOptions({ device: 'iphone-15' }, devices)), { width: phone.viewport.width & ~1, height: phone.viewport.height & ~1 }, 'phone video');
 
 // Display settings.
 eq(contextOptions({ display: 'reduced-motion' }, devices).reducedMotion, 'reduce', 'reduced motion');
