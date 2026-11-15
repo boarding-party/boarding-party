@@ -74,12 +74,21 @@ func DayStart(now time.Time, loc *time.Location) time.Time {
 // SpentSince sums the cost of every run started at or after t, counting a
 // running run's latest reported usage.
 func (s *Service) SpentSince(t time.Time) (float64, error) {
-	rs, err := s.Store.RunsSince(t)
+	return s.SpentBetween(t, time.Time{})
+}
+
+// SpentBetween is SpentSince for runs started before to as well; a zero to
+// means no end.
+func (s *Service) SpentBetween(from, to time.Time) (float64, error) {
+	rs, err := s.Store.RunsSince(from)
 	if err != nil {
 		return 0, err
 	}
 	var total float64
 	for _, r := range rs {
+		if !to.IsZero() && !r.Started.Before(to) {
+			continue
+		}
 		u, err := s.Usage(r.ID)
 		if err != nil {
 			return 0, err
