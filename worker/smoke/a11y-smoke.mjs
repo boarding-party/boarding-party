@@ -8,7 +8,7 @@ import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { contextOptions, toolRules, visionType, readSettings, GLOBAL_BLOCK, localeEnv } from '../bp-a11y.mjs';
+import { contextOptions, toolRules, visionType, readSettings, GLOBAL_BLOCK, localeEnv, videoSize } from '../bp-a11y.mjs';
 
 const fail = (m) => { console.error('FAIL ' + m); process.exit(1); };
 const eq = (a, b, what) => { if (JSON.stringify(a) !== JSON.stringify(b)) fail(`${what}: got ${JSON.stringify(a)}, want ${JSON.stringify(b)}`); };
@@ -31,6 +31,13 @@ eq([zp.viewport, zp.screen, zp.deviceScaleFactor, zp.isMobile, zp.hasTouch, zp.u
     phone.deviceScaleFactor * 2, true, true, phone.userAgent], 'zoomed phone');
 if ('defaultBrowserType' in zp) fail('a device descriptor key that is no context option leaked');
 eq(contextOptions({ device: 'iphone-15' }, devices).viewport, phone.viewport, 'phone');
+
+// Video: the page as the screen draws it, longer side at most 1440 px.
+eq(videoSize(contextOptions({}, devices)), { width: 1280, height: 800 }, 'desktop video');
+eq(videoSize(contextOptions({ device: 'desktop-large' }, devices)), { width: 1440, height: 810 }, 'large desktop video');
+eq(videoSize(contextOptions({ assistive: 'zoom' }, devices)), { width: 1280, height: 800 }, 'zoomed desktop video');
+const pv = videoSize(contextOptions({ device: 'iphone-15' }, devices));
+if (Math.max(pv.width, pv.height) > 1440 || pv.height < 1400 || pv.width % 2 || pv.height % 2) fail('phone video ' + JSON.stringify(pv));
 
 // Display settings.
 eq(contextOptions({ display: 'reduced-motion' }, devices).reducedMotion, 'reduce', 'reduced motion');

@@ -33,7 +33,7 @@ import { join } from 'node:path';
 import { randomInt } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { edgeReplay } from './bp-data.mjs';
-import { contextOptions, visionType, readSettings, localeEnv, SETTINGS } from './bp-a11y.mjs';
+import { contextOptions, videoSize, visionType, readSettings, localeEnv, SETTINGS } from './bp-a11y.mjs';
 
 const log = (...a) => console.error('bp-replay:', ...a);
 const self = fileURLToPath(import.meta.url);
@@ -257,10 +257,11 @@ async function child() {
     const mod = await import(opts.file);
     if (typeof mod.default !== 'function') throw new lib.StepFailed(0, '', new Error('the journey must export a default async function'));
     browser = await chromium.launch(launch);
+    const view = contextOptions(look, devices);
     ctx = await browser.newContext({
-      ...contextOptions(look, devices),
+      ...view,
       ...(opts.profile ? { storageState: opts.profile } : {}),
-      recordVideo: { dir: join(opts.out, 'video') },
+      recordVideo: { dir: join(opts.out, 'video'), size: videoSize(view) },
     });
     // Every tab, popups too, as the persona sees it.
     const vision = visionType(look.vision);

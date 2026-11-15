@@ -63,6 +63,21 @@ export function contextOptions({ device = '', assistive = '', display = '', loca
   return { ...out, ...(DISPLAY[display] || {}) };
 }
 
+// videoScale is how much a recording scales a CSS viewport: up to the pixel
+// density, so it shows the page as the screen draws it, but never past 1440 px
+// on the longer side. It must stay self-contained: video-size.mjs copies its
+// source into Playwright MCP, whose own default fits 800 px and blurs.
+export function videoScale(viewport, deviceScaleFactor) {
+  return Math.min(deviceScaleFactor || 1, 1440 / Math.max(viewport.width, viewport.height));
+}
+
+// videoSize is the recording size for context options, in even pixels as the
+// encoder needs.
+export function videoSize({ viewport = { width: 1280, height: 800 }, deviceScaleFactor } = {}) {
+  const s = videoScale(viewport, deviceScaleFactor);
+  return { width: Math.floor(viewport.width * s) & ~1, height: Math.floor(viewport.height * s) & ~1 };
+}
+
 // localeEnv is the environment that starts Chrome in a language: Chrome draws
 // date and time fields in its own language, not the page's, and on Linux
 // takes it from these. {} for no locale, or one that is no plain BCP 47 tag.

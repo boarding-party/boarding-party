@@ -3,10 +3,11 @@
 // A keyboard-only persona with reduced motion gets no click tool (nor a
 // javascript: URL), types into the focused field, and the page sees reduced
 // motion, in the project's language and time zone. A zoomed UK persona with no colour vision gets a 200% layout and grey
-// screenshots.
+// screenshots. Both record video at the size the screen draws, not
+// Playwright MCP's 800 px default.
 import http from 'node:http';
-import { spawn } from 'node:child_process';
-import { mkdtempSync, readFileSync } from 'node:fs';
+import { spawn, spawnSync } from 'node:child_process';
+import { mkdtempSync, readFileSync, readdirSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -60,11 +61,26 @@ async function session(settings, cwd) {
   return { ask, call, kill: () => p.kill() };
 }
 
+// videoDims reads the size of the one recording under dir with Playwright's ffmpeg.
+function videoDims(dir) {
+  const webm = readdirSync(dir, { recursive: true }).find((f) => String(f).endsWith('.webm'));
+  if (!webm) fail('no video under ' + dir);
+  const ff = readdirSync('/ms-playwright').find((d) => d.startsWith('ffmpeg-'));
+  if (!ff) fail('no ffmpeg in /ms-playwright');
+  const bin = readdirSync(join('/ms-playwright', ff)).find((f) => f.startsWith('ffmpeg'));
+  const r = spawnSync(join('/ms-playwright', ff, bin), ['-i', join(dir, String(webm))], { encoding: 'utf8' });
+  const m = /Video:.*?, (\d+)x(\d+)/.exec(r.stderr || '');
+  if (!m) fail('cannot read the video size: ' + (r.stderr || '').slice(0, 400));
+  return m[1] + 'x' + m[2];
+}
+
 // Keyboard only, reduced motion.
-const kb = await session(['--bp-assistive=keyboard-only', '--bp-display=reduced-motion', '--bp-locale=en-US', '--bp-timezone=Asia/Tokyo'], mkdtempSync(join(tmpdir(), 'bp-kb-')));
+const kbDir = mkdtempSync(join(tmpdir(), 'bp-kb-'));
+const kb = await session(['--bp-assistive=keyboard-only', '--bp-display=reduced-motion', '--bp-locale=en-US', '--bp-timezone=Asia/Tokyo'], kbDir);
 const names = (await kb.ask('tools/list', {})).result.tools.map((t) => t.name);
 for (const t of ['browser_click', 'browser_type', 'browser_resize', 'browser_evaluate']) if (names.includes(t)) fail(`${t} is listed for a keyboard-only persona`);
 for (const t of ['browser_press_key', 'browser_type_focused', 'browser_snapshot']) if (!names.includes(t)) fail(`${t} is missing`);
+if ((await kb.call('browser_start_video', {})).error) fail('could not start the video');
 if ((await kb.call('browser_navigate', { url })).error) fail('could not open the page');
 const click = await kb.call('browser_click', { element: 'Name', target: 'e1' });
 if (!click.error || !/keyboard/.test(click.text)) fail('a click was not refused: ' + click.text);
@@ -80,12 +96,15 @@ if (!snap.text.includes('speaks en-US in Asia/Tokyo, dates 11/3/2026')) fail('th
 if (!snap.text.includes('width 1280')) fail('the default desktop is not 1280 wide: ' + snap.text.slice(0, 800));
 const settings = JSON.parse(readFileSync('/tmp/bp-pw/settings.json', 'utf8'));
 if (settings.assistive !== 'keyboard-only' || settings.display !== 'reduced-motion' || settings.locale !== 'en-US' || settings.timezone !== 'Asia/Tokyo') fail('settings not recorded: ' + JSON.stringify(settings));
+if ((await kb.call('browser_stop_video', {})).error) fail('could not stop the video');
 kb.kill();
+if (videoDims(kbDir) !== '1280x800') fail('desktop video is ' + videoDims(kbDir) + ', want 1280x800');
 
 // Zoom, no colour vision: the eyesight init page and the context options as
 // Playwright MCP loads them from the run's config.
 const dir = mkdtempSync(join(tmpdir(), 'bp-eye-'));
 const eye = await session(['--bp-assistive=zoom', '--bp-vision=achromatopsia', '--bp-locale=en-GB'], dir);
+if ((await eye.call('browser_start_video', {})).error) fail('could not start the zoomed video');
 if ((await eye.call('browser_navigate', { url })).error) fail('could not open the page with zoom');
 snap = await eye.call('browser_snapshot', {});
 if (!snap.text.includes('width 640')) fail('zoom did not halve the layout width: ' + snap.text.slice(0, 800));
@@ -100,7 +119,9 @@ const parts = await eye.call('browser_run_code_unsafe', { code: `async (page) =>
   return 'date parts ' + nodes.filter((n) => n.role && n.role.value === 'spinbutton').map((n) => n.name && n.name.value).join(',');
 }` });
 if (!parts.text.includes('date parts Day,Month,Year')) fail('an en-GB date field is not day, month, year: ' + parts.text.slice(0, 400));
+if ((await eye.call('browser_stop_video', {})).error) fail('could not stop the zoomed video');
 eye.kill();
+if (videoDims(dir) !== '1280x800') fail('zoomed video is ' + videoDims(dir) + ', want 1280x800 (640x400 at twice the density)');
 const png = readFileSync(join(dir, 'eye.png'));
 const require = createRequire(process.env.BP_PW_ROOT || '/usr/lib/node_modules/@playwright/mcp/');
 const browser = await require('playwright-core').chromium.launch(process.env.BP_CHROMIUM ? { executablePath: process.env.BP_CHROMIUM } : {});

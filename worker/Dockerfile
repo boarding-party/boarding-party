@@ -25,6 +25,11 @@ RUN npm i -g @playwright/mcp@${PLAYWRIGHT_MCP_VERSION} && npm cache clean --forc
 COPY humanise.mjs /tmp/humanise.mjs
 RUN node /tmp/humanise.mjs "$(find "$(npm root -g)/@playwright/mcp" -path '*/playwright-core/lib/coreBundle.js' | head -1)" \
     && rm /tmp/humanise.mjs
+# Videos at the size the screen draws, not Playwright MCP's 800 px (see
+# video-size.mjs). Fails the build if the patch misses.
+COPY video-size.mjs bp-a11y.mjs /tmp/bpvideo/
+RUN node /tmp/bpvideo/video-size.mjs "$(find "$(npm root -g)/@playwright/mcp" -path '*/playwright-core/lib/coreBundle.js' | head -1)" \
+    && rm -r /tmp/bpvideo
 
 # Claude Code's telemetry, error reports and update checks are not part of the
 # test: without this they show up as blocked hosts on every run.
