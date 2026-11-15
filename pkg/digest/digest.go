@@ -84,9 +84,10 @@ type Digest struct {
 	Paused     bool           `json:"paused"`
 }
 
-// News reports whether the digest has anything to tell. A board that is
-// only paused has none: it would say the same thing every morning.
+// News reports whether the digest has anything to tell. Runs that went
+// fine and a board that is only paused are not news: a board on a schedule
+// would otherwise say the same thing every morning.
 func (d Digest) News() bool {
 	return !d.NewBugs.empty() || !d.FixChecks.empty() || !d.Journeys.Broke.empty() ||
-		!d.Journeys.Repaired.empty() || d.Runs.Finished > 0 || !d.Runs.Stuck.empty() || d.OverBudget
+		!d.Journeys.Repaired.empty() || !d.Runs.Stuck.empty() || d.OverBudget
 }

@@ -15,15 +15,14 @@ func TestCapCountsTheRest(t *testing.T) {
 }
 
 func TestNews(t *testing.T) {
-	if (Digest{}).News() || (Digest{Paused: true}).News() {
-		t.Fatal("an empty or only paused digest has news")
+	if (Digest{}).News() || (Digest{Paused: true}).News() || (Digest{Runs: Runs{Finished: 6}}).News() {
+		t.Fatal("an empty, only paused or only healthy digest has news")
 	}
 	for name, d := range map[string]Digest{
-		"bug":      {NewBugs: List[Bug]{Items: []Bug{{ID: "i1"}}}},
-		"more":     {FixChecks: List[FixCheck]{More: 1}},
-		"finished": {Runs: Runs{Finished: 1}},
-		"over":     {OverBudget: true},
-		"broke":    {Journeys: Journeys{Broke: List[Journey]{Items: []Journey{{ID: "j"}}}}},
+		"bug":   {NewBugs: List[Bug]{Items: []Bug{{ID: "i1"}}}},
+		"more":  {FixChecks: List[FixCheck]{More: 1}},
+		"over":  {OverBudget: true},
+		"broke": {Journeys: Journeys{Broke: List[Journey]{Items: []Journey{{ID: "j"}}}}},
 	} {
 		if !d.News() {
 			t.Errorf("%s: no news", name)

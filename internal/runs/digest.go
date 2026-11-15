@@ -1,9 +1,9 @@
 package runs
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
-	"sort"
 	"strings"
 	"time"
 
@@ -20,9 +20,7 @@ func (s *Service) Digest(since, now time.Time) (digest.Digest, error) {
 	if d.NewBugs, err = s.newBugs(since); err != nil {
 		return d, fmt.Errorf("new bugs: %w", err)
 	}
-	if d.FixChecks, err = s.fixChecks(since); err != nil {
-		return d, fmt.Errorf("fix checks: %w", err)
-	}
+
 	if d.Journeys.Broke, err = s.journeysDecided(since, "copilot called"); err != nil {
 		return d, fmt.Errorf("journeys: %w", err)
 	}
@@ -40,6 +38,9 @@ func (s *Service) Digest(since, now time.Time) (digest.Digest, error) {
 		}
 	}
 	d.Runs = digest.Runs{Finished: len(finished), Stuck: digest.Cap(stuck)}
+	if d.FixChecks, err = s.fixChecks(finished); err != nil {
+		return d, fmt.Errorf("fix checks: %w", err)
+	}
 
 	p, err := s.Store.Project()
 	if err != nil && !errors.Is(err, store.ErrNotFound) {
@@ -85,31 +86,41 @@ func (s *Service) newBugs(since time.Time) (digest.List[digest.Bug], error) {
 	return digest.Cap(out), nil
 }
 
-// fixChecks are the checks that settled since: passed when the check
-// closed the issue ("Gone: …"), failed when it reopened it ("Still there:
-// …"). The store keeps no status history, so these are read off the issue.
-func (s *Service) fixChecks(since time.Time) (digest.List[digest.FixCheck], error) {
-	is, err := s.Store.Issues()
-	if err != nil {
-		return digest.List[digest.FixCheck]{}, err
-	}
-	type at struct {
-		digest.FixCheck
-		when time.Time
-	}
-	var all []at
-	for _, i := range is {
-		switch {
-		case i.Status == store.IssueClosed && strings.HasPrefix(i.CheckNote, "Gone:") && !i.Updated.Before(since):
-			all = append(all, at{digest.FixCheck{IssueID: i.ID, Title: i.Summary, Passed: true}, i.Updated})
-		case !i.Reopened.Before(since) && strings.HasPrefix(i.CheckNote, "Still there:"):
-			all = append(all, at{digest.FixCheck{IssueID: i.ID, Title: i.Summary}, i.Reopened})
+// fixChecks are the fix checks among finished runs whose verdict settled
+// the issue: passed when it closed it ("Gone: …"), failed when it reopened
+// it ("Still there: …"). The verdict is read off the issue, which the check
+// updated when it finished; a later check of the same issue wins.
+func (s *Service) fixChecks(finished []store.Run) (digest.List[digest.FixCheck], error) {
+	last := map[string]store.Run{}
+	var order []string
+	for _, r := range finished { // oldest first
+		var c store.RunContext
+		if json.Unmarshal(r.Context, &c) != nil || c.Verify == nil || c.Verify.IssueID == "" {
+			continue
 		}
+		if _, ok := last[c.Verify.IssueID]; !ok {
+			order = append(order, c.Verify.IssueID)
+		}
+		last[c.Verify.IssueID] = r
 	}
-	sort.SliceStable(all, func(i, j int) bool { return all[i].when.Before(all[j].when) })
-	out := make([]digest.FixCheck, len(all))
-	for i, a := range all {
-		out[i] = a.FixCheck
+	var out []digest.FixCheck
+	for _, id := range order {
+		i, err := s.Store.Issue(id)
+		if errors.Is(err, store.ErrNotFound) {
+			continue
+		}
+		if err != nil {
+			return digest.List[digest.FixCheck]{}, err
+		}
+		if i.Updated.Before(last[id].Finished) {
+			continue // the check settled nothing: the issue had moved on
+		}
+		switch {
+		case strings.HasPrefix(i.CheckNote, "Gone:"):
+			out = append(out, digest.FixCheck{IssueID: i.ID, Title: i.Summary, Passed: true})
+		case strings.HasPrefix(i.CheckNote, "Still there:"):
+			out = append(out, digest.FixCheck{IssueID: i.ID, Title: i.Summary})
+		}
 	}
 	return digest.Cap(out), nil
 }

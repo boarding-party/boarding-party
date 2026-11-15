@@ -193,3 +193,28 @@ func TestDigestCarriesNoBodies(t *testing.T) {
 		t.Fatalf("digest %s", raw)
 	}
 }
+
+func TestDigestFixChecksIgnoreLaterEdits(t *testing.T) {
+	svc, _ := newSvc(t)
+	now := time.Now().UTC()
+	// A check passed long ago; a person touched the issue today.
+	old := checked(t, svc, "old", &store.Verdict{Reached: true, Note: "fine"}, now.Add(-72*time.Hour))
+	if err := svc.Store.SetIssueStatus(old, store.IssueClosed, "", now.Add(-time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	// A check failed long ago; a person closed it; a new report reopened it today.
+	again := checked(t, svc, "again", &store.Verdict{Reached: true, StillThere: true, Note: "same"}, now.Add(-72*time.Hour))
+	if err := svc.Store.SetIssueStatus(again, store.IssueClosed, "", now.Add(-48*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Store.AddBug(store.Bug{ID: "again-2", RunID: "r-again", IssueID: again, Summary: "x", Created: now.Add(-time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	d, err := svc.Digest(now.Add(-24*time.Hour), now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(d.FixChecks.Items) != 0 {
+		t.Fatalf("fix checks %+v, want none: no check ran in the window", d.FixChecks.Items)
+	}
+}
