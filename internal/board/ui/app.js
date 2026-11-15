@@ -1129,6 +1129,9 @@ function RunPage({ id, onChange }) {
         </ul>
       </header>
       ${err ? html`<div class="note bad banner">Lost contact with the director: ${err}. ${gaveUp ? 'Reload the page to try again.' : 'Retrying.'}</div>` : null}
+      ${run.restarts?.length ? html`<div class="note banner">Restarted ${run.restarts.length === 1 ? 'once' : `${run.restarts.length} times`}, last at ${fmtFull(run.restarts[run.restarts.length - 1])}:
+        the run's pod was replaced (a Spot node taken back, or an evicted pod) and the agent started again from the beginning.
+        The video covers the last attempt only.</div>` : null}
       <div class="grid g-side">
         <div class="stack">
           <div class="recorder">

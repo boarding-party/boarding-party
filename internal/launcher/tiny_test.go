@@ -723,3 +723,41 @@ func TestLeadRunHasNoBrowser(t *testing.T) {
 		t.Errorf("usage server = %v", u)
 	}
 }
+
+// Pod names the pod the agent runs in now; a new name after a Spot node is
+// taken back is how the watchdog sees the restart.
+func TestPodNamesTheCurrentPod(t *testing.T) {
+	at := func(name string, min int, f func(p *corev1.Pod)) *corev1.Pod {
+		p := pod("bp", name, "tiny-session", "bp-run-1")
+		p.CreationTimestamp = metav1.NewTime(time.Date(2026, 11, 15, 13, min, 0, 0, time.UTC))
+		if f != nil {
+			f(p)
+		}
+		return p
+	}
+	failed := func(p *corev1.Pod) { p.Status.Phase = corev1.PodFailed }
+	for _, c := range []struct {
+		name string
+		pods []*corev1.Pod
+		want string
+	}{
+		{"no pod", nil, ""},
+		{"one pod", []*corev1.Pod{at("a", 27, nil)}, "a"},
+		{"replacement beats the failed pod", []*corev1.Pod{at("a", 27, failed), at("b", 31, nil)}, "b"},
+		{"only the failed pod is left", []*corev1.Pod{at("a", 27, failed)}, ""},
+		{"newest of two live pods", []*corev1.Pod{at("b", 31, nil), at("a", 27, nil)}, "b"},
+		{"another session's pod", []*corev1.Pod{at("x", 27, func(p *corev1.Pod) { p.Labels["tinysystems.io/session"] = "bp-run-2" })}, ""},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			tn := newTiny()
+			for _, p := range c.pods {
+				if err := tn.Client.Create(context.Background(), p); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if got, err := tn.Pod(context.Background(), "bp-run-1"); err != nil || got != c.want {
+				t.Errorf("Pod = %q %v, want %q", got, err, c.want)
+			}
+		})
+	}
+}

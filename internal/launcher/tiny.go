@@ -271,6 +271,32 @@ func (t *Tiny) Stage(ctx context.Context, name string) (stage, reason string, er
 	return best, bestReason, nil
 }
 
+// Pod names the pod the session's agent runs in now: the newest one not
+// being deleted and not finished. "" while there is none, for example when a
+// taken-back node's pod has failed and its replacement is not yet created.
+func (t *Tiny) Pod(ctx context.Context, name string) (string, error) {
+	l := &corev1.PodList{}
+	if err := t.Client.List(ctx, l, client.InNamespace(t.Namespace),
+		client.MatchingLabels{podAppLabel: podAppValue, session.SessionLabel: name}); err != nil {
+		return "", fmt.Errorf("list pods: %w", err)
+	}
+	var best *corev1.Pod
+	for i := range l.Items {
+		p := &l.Items[i]
+		if p.DeletionTimestamp != nil || p.Status.Phase == corev1.PodSucceeded || p.Status.Phase == corev1.PodFailed {
+			continue
+		}
+		if best == nil || p.CreationTimestamp.After(best.CreationTimestamp.Time) ||
+			(p.CreationTimestamp.Equal(&best.CreationTimestamp) && p.Name > best.Name) {
+			best = p
+		}
+	}
+	if best == nil {
+		return "", nil
+	}
+	return best.Name, nil
+}
+
 var failingReasons = map[string]bool{
 	"CrashLoopBackOff": true, "ImagePullBackOff": true, "ErrImagePull": true, "CreateContainerConfigError": true,
 }

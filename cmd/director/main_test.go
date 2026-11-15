@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/boarding-party/boardingparty/internal/artifacts"
+	"github.com/boarding-party/boardingparty/internal/launcher"
 	"github.com/boarding-party/boardingparty/internal/live"
 	"github.com/boarding-party/boardingparty/internal/project"
 	"github.com/boarding-party/boardingparty/internal/runs"
@@ -204,3 +205,6 @@ func TestAdminServesBoard(t *testing.T) {
 		t.Fatalf("GET /api/runs = %d %s", rec.Code, rec.Header().Get("Content-Type"))
 	}
 }
+
+// The director's launcher names pods, so the watchdog sees a replaced pod.
+var _ runs.PodNamer = (*launcher.Tiny)(nil)

@@ -110,6 +110,17 @@ type Launcher interface {
 	Stage(ctx context.Context, session string) (stage, reason string, err error)
 }
 
+// PodNamer is a Launcher that can name the pod a session runs in now. The
+// watchdog uses it to notice a replaced pod; launchers without it never
+// report restarts.
+type PodNamer interface {
+	Pod(ctx context.Context, session string) (string, error)
+}
+
+// MaxRestarts is how many times a run's pod may be replaced before the
+// run fails: each replacement starts the agent again and spends again.
+const MaxRestarts = 2
+
 // Egress is the fence's allow-list and refusal log (see package egress).
 type Egress interface {
 	Sync(ctx context.Context, hosts []string) error

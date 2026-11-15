@@ -146,3 +146,29 @@ func TestBugCounts(t *testing.T) {
 		t.Fatalf("empty: %v %v", got, err)
 	}
 }
+
+func TestSeePodRecordsReplacementsOnly(t *testing.T) {
+	s := open(t)
+	if err := s.CreateRun(Run{ID: "r1", Token: "tok", State: RunRunning, Started: time.Unix(100, 0).UTC()}); err != nil {
+		t.Fatal(err)
+	}
+	at := time.Unix(200, 0).UTC()
+	for i, c := range []struct {
+		pod  string
+		want int
+	}{{"p1", 0}, {"p1", 0}, {"p2", 1}, {"p2", 1}, {"p3", 2}} {
+		if _, err := s.SeePod("r1", c.pod, at.Add(time.Duration(i)*time.Second)); err != nil {
+			t.Fatal(err)
+		}
+		r, err := s.RunByID("r1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(r.Restarts) != c.want {
+			t.Fatalf("after %s: restarts %v, want %d", c.pod, r.Restarts, c.want)
+		}
+	}
+	if _, err := s.SeePod("nope", "p1", at); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("unknown run: %v", err)
+	}
+}

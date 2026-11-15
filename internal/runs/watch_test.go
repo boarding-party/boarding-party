@@ -204,3 +204,68 @@ func TestReapStopsWaitingSession(t *testing.T) {
 		t.Fatalf("stopped: %v", fl.stopped)
 	}
 }
+
+// A Spot node taken back (or an evicted pod) replaces a run's pod: the
+// Deployment starts the agent again. The run carries on, with the restart
+// on record and the timeout counted from it.
+func reconcileAt(t *testing.T, svc *Service, at time.Time) {
+	t.Helper()
+	if err := svc.Reconcile(context.Background(), at, 20*time.Minute); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestReconcileRecordsAReplacedPod(t *testing.T) {
+	svc, fl := newSvc(t)
+	fl.phases = map[string]phaseInfo{"s1": {"Running", ""}}
+	fl.podNames = map[string]string{"s1": "p1"}
+	seed(t, svc, "r1", store.RunRunning, "s1", time.Minute)
+	reconcileAt(t, svc, t0)
+	if r := get(t, svc, "r1"); len(r.Restarts) != 0 {
+		t.Fatalf("first pod counted as a restart: %v", r.Restarts)
+	}
+	fl.podNames["s1"] = "p2"
+	reconcileAt(t, svc, t0.Add(time.Minute))
+	r := get(t, svc, "r1")
+	if r.State != store.RunRunning || len(r.Restarts) != 1 || !r.Restarts[0].Equal(t0.Add(time.Minute)) {
+		t.Fatalf("state %s restarts %v, want running with one restart at t0+1m", r.State, r.Restarts)
+	}
+	reconcileAt(t, svc, t0.Add(2*time.Minute))
+	if r := get(t, svc, "r1"); len(r.Restarts) != 1 {
+		t.Fatalf("the same pod counted again: %v", r.Restarts)
+	}
+}
+
+func TestReconcileTimesOutFromTheLastRestart(t *testing.T) {
+	svc, fl := newSvc(t)
+	fl.phases = map[string]phaseInfo{"s1": {"Running", ""}}
+	fl.podNames = map[string]string{"s1": "p1"}
+	seed(t, svc, "r1", store.RunRunning, "s1", 19*time.Minute)
+	reconcileAt(t, svc, t0)
+	fl.podNames["s1"] = "p2"
+	reconcileAt(t, svc, t0)
+	reconcileAt(t, svc, t0.Add(5*time.Minute)) // 24 minutes since start
+	if r := get(t, svc, "r1"); r.State != store.RunRunning {
+		t.Fatalf("state %s %q: the agent started again 5 minutes ago", r.State, r.Outcome)
+	}
+	reconcileAt(t, svc, t0.Add(21*time.Minute))
+	if r := get(t, svc, "r1"); r.State != store.RunFailed || r.Outcome != "no finish within 20m0s" {
+		t.Fatalf("got %s %q", r.State, r.Outcome)
+	}
+}
+
+func TestReconcileFailsAPodReplacedTooOften(t *testing.T) {
+	svc, fl := newSvc(t)
+	fl.phases = map[string]phaseInfo{"s1": {"Running", ""}}
+	fl.podNames = map[string]string{"s1": "p0"}
+	seed(t, svc, "r1", store.RunRunning, "s1", time.Minute)
+	reconcileAt(t, svc, t0)
+	for i, pod := range []string{"p1", "p2", "p3"} {
+		fl.podNames["s1"] = pod
+		reconcileAt(t, svc, t0.Add(time.Duration(i+1)*time.Minute))
+	}
+	r := get(t, svc, "r1")
+	if r.State != store.RunFailed || !strings.Contains(r.Outcome, "replaced 3 times") {
+		t.Fatalf("got %s %q, want failed after the third replacement", r.State, r.Outcome)
+	}
+}

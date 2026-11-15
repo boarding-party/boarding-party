@@ -33,6 +33,13 @@ type fakeLauncher struct {
 	sessions         map[string]string    // session -> run ID, as listed by Sessions
 	pods             int                  // run pods LivePods reports
 	podsErr          error
+	podNames         map[string]string // session -> its current pod, as Pod reports
+}
+
+func (f *fakeLauncher) Pod(_ context.Context, session string) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.podNames[session], nil
 }
 
 func (f *fakeLauncher) LivePods(context.Context) (int, error) {

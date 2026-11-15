@@ -127,10 +127,32 @@ func (s *Service) verdict(ctx context.Context, r store.Run, now time.Time, timeo
 			return "session ended without finish_run", nil
 		}
 	}
+	if pn, ok := s.Launcher.(PodNamer); ok && r.Session != "" {
+		pod, err := pn.Pod(ctx, r.Session)
+		if err != nil {
+			return "", err
+		}
+		replaced, err := s.Store.SeePod(r.ID, pod, now)
+		if err != nil {
+			return "", err
+		}
+		if replaced {
+			r.Restarts = append(r.Restarts, now)
+			log.Printf("run %s: pod replaced (%s), the agent starts again", r.ID, pod)
+		}
+		if len(r.Restarts) > MaxRestarts {
+			return fmt.Sprintf("its pod was replaced %d times (node taken back or pod evicted)", len(r.Restarts)), nil
+		}
+	}
 	if r.Kind == store.RunReplay && timeout > ReplayTimeout {
 		timeout = ReplayTimeout
 	}
-	if now.Sub(r.Started) > timeout {
+	// The agent starts over in a replaced pod, so its time starts over too.
+	since := r.Started
+	if n := len(r.Restarts); n > 0 && r.Restarts[n-1].After(since) {
+		since = r.Restarts[n-1]
+	}
+	if now.Sub(since) > timeout {
 		return "no finish within " + timeout.String(), nil
 	}
 	return "", nil

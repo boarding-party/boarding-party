@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -73,6 +74,9 @@ type Run struct {
 	// FirstFrame is when the browser's first screen arrived. The recording
 	// starts with the browser, so it puts the video on the run's clock.
 	FirstFrame time.Time `json:"firstFrame,omitzero"`
+	// Restarts are when the run's pod was replaced and its agent started
+	// again (a Spot node taken back, an evicted pod).
+	Restarts []time.Time `json:"restarts,omitempty"`
 	// Claim is a replay run's one-time code: its pod's command carries it
 	// in place of the token, and redeeming it once gives the pod its URLs.
 	// Only CreateRun writes it; it is never read back into a Run or shown.
@@ -287,6 +291,8 @@ var runsAddedColumns = []addedColumn{
 	{"claim", "claim TEXT NOT NULL DEFAULT ''"},
 	{"profile", "profile TEXT NOT NULL DEFAULT ''"},
 	{"first_frame", "first_frame INTEGER NOT NULL DEFAULT 0"},
+	{"pod", "pod TEXT NOT NULL DEFAULT ''"},
+	{"restarts", "restarts TEXT NOT NULL DEFAULT ''"},
 }
 
 // journeysAddedColumns are the journeys columns added after the table first shipped.
@@ -457,17 +463,18 @@ func fromTS(n int64) time.Time {
 }
 
 const runCols = `id, token, persona, role, story, state, outcome, session, started, finished, chain, follows, via, context,
-	kind, journey_id, revision, seed, replay_result, profile, first_frame`
+	kind, journey_id, revision, seed, replay_result, profile, first_frame, restarts`
 
 func scanRun(sc interface{ Scan(...any) error }) (Run, error) {
 	var r Run
 	var st string
 	var started, finished, firstFrame int64
-	var ctx, result, profile string
+	var ctx, result, profile, restarts string
 	if err := sc.Scan(&r.ID, &r.Token, &r.Persona, &r.Role, &r.Story, &st, &r.Outcome, &r.Session, &started, &finished,
-		&r.Chain, &r.Follows, &r.Via, &ctx, &r.Kind, &r.JourneyID, &r.Revision, &r.Seed, &result, &profile, &firstFrame); err != nil {
+		&r.Chain, &r.Follows, &r.Via, &ctx, &r.Kind, &r.JourneyID, &r.Revision, &r.Seed, &result, &profile, &firstFrame, &restarts); err != nil {
 		return Run{}, err
 	}
+	r.Restarts = parseRestarts(restarts)
 	if profile != "" {
 		_ = json.Unmarshal([]byte(profile), &r.Profile) // a profile that no longer parses is shown as none
 	}
@@ -510,9 +517,9 @@ func (s *Store) CreateRunFrom(r Run, queueID string) error {
 		}
 		profile = string(b)
 	}
-	if _, err := tx.Exec(`INSERT INTO runs(`+runCols+`, claim) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+	if _, err := tx.Exec(`INSERT INTO runs(`+runCols+`, claim) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		r.ID, r.Token, r.Persona, r.Role, r.Story, string(r.State), r.Outcome, r.Session, ts(r.Started), ts(r.Finished),
-		r.Chain, r.Follows, r.Via, string(r.Context), r.Kind, r.JourneyID, r.Revision, r.Seed, string(r.ReplayResult), profile, ts(r.FirstFrame), r.Claim); err != nil {
+		r.Chain, r.Follows, r.Via, string(r.Context), r.Kind, r.JourneyID, r.Revision, r.Seed, string(r.ReplayResult), profile, ts(r.FirstFrame), formatRestarts(r.Restarts), r.Claim); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -674,6 +681,55 @@ func (s *Store) SetFirstFrame(runID string, at time.Time) error {
 		return ErrNotFound
 	}
 	return nil
+}
+
+// SeePod notes the pod a run's session runs in. A pod other than the one
+// seen before means the pod was replaced and the agent started again: the
+// time goes on the run's restarts and SeePod reports true.
+func (s *Store) SeePod(runID, pod string, at time.Time) (bool, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback()
+	var seen, restarts string
+	err = tx.QueryRow(`SELECT pod, restarts FROM runs WHERE id = ?`, runID).Scan(&seen, &restarts)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, ErrNotFound
+	}
+	if err != nil {
+		return false, err
+	}
+	if pod == "" || pod == seen {
+		return false, nil
+	}
+	replaced := seen != ""
+	if replaced {
+		restarts = formatRestarts(append(parseRestarts(restarts), at))
+	}
+	if _, err := tx.Exec(`UPDATE runs SET pod = ?, restarts = ? WHERE id = ?`, pod, restarts, runID); err != nil {
+		return false, err
+	}
+	return replaced, tx.Commit()
+}
+
+// Restarts are kept as space-separated timestamps.
+func formatRestarts(at []time.Time) string {
+	parts := make([]string, len(at))
+	for i, t := range at {
+		parts[i] = strconv.FormatInt(ts(t), 10)
+	}
+	return strings.Join(parts, " ")
+}
+
+func parseRestarts(s string) []time.Time {
+	var out []time.Time
+	for _, f := range strings.Fields(s) {
+		if n, err := strconv.ParseInt(f, 10, 64); err == nil {
+			out = append(out, fromTS(n))
+		}
+	}
+	return out
 }
 
 // SetReplayResult keeps a replay run's result on the run.
