@@ -49,7 +49,8 @@ func do(t *testing.T, d *Director, method, path, ctype, token, body string) (*ht
 func TestRunLifecycle(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	d, err := Start(ctx, sample(t), 300*time.Millisecond)
+	// Long enough that the run is still active at the second start under -race.
+	d, err := Start(ctx, sample(t), 2*time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
