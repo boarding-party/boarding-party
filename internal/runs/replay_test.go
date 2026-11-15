@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"testing"
 	"time"
 
+	"github.com/boarding-party/boardingparty/internal/artifacts"
 	"github.com/boarding-party/boardingparty/internal/project"
 	"github.com/boarding-party/boardingparty/internal/store"
 )
@@ -255,6 +257,37 @@ func TestFinishReplayKeepsTheResult(t *testing.T) {
 	var onRun ReplayResult
 	if err := json.Unmarshal(run.ReplayResult, &onRun); err != nil || onRun.Seed != 3 || onRun.Status != "passed" {
 		t.Fatalf("result on the run %s: %v", run.ReplayResult, err)
+	}
+}
+
+// stateAtPut records the run's state when its replay result is kept.
+type stateAtPut struct {
+	artifacts.Store
+	store *store.Store
+	seen  store.RunState
+}
+
+func (a *stateAtPut) Put(runID, name string, r io.Reader) (int64, error) {
+	if name == ReplayResultName {
+		run, _ := a.store.RunByID(runID)
+		a.seen = run.State
+	}
+	return a.Store.Put(runID, name, r)
+}
+
+// The result is on the board before the run shows as ended, so nobody sees a
+// finished replay without its result.
+func TestFinishReplayKeepsTheResultBeforeTheEnd(t *testing.T) {
+	svc, _ := newSvc(t)
+	spy := &stateAtPut{Store: svc.Artifacts, store: svc.Store}
+	svc.Artifacts = spy
+	j := recorded(t, svc, 1)
+	r := replay(t, svc, j.ID, 0, 3, "owner")
+	if err := svc.FinishReplay(r.Token, ReplayResult{Status: "passed", Seed: 3}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if spy.seen != store.RunRunning {
+		t.Fatalf("the result was kept with the run %q, want it still running", spy.seen)
 	}
 }
 
