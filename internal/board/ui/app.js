@@ -15,6 +15,7 @@ import { Timeline } from './timeline.js';
 import { Studio } from './studio.js';
 import { ThoughtsPanel, Caption } from './thoughts.js';
 import { NetworkPanel } from './network.js';
+import { PageView } from './pageview.js';
 import { captionAt, nearest } from './studio-time.js';
 import { Shot } from './shot.js';
 import { JourneysPage, JourneyPage, journeyHref } from './journeys.js';
@@ -979,6 +980,8 @@ function RunPage({ id, onChange }) {
   const [playing, setPlaying] = useState(false);
   const [tab, setTab] = useState(() => routeParams().tab || 'thoughts');
   const [trace, setTrace] = useState({ state: 'loading' });
+  const [view, setView] = useState('video'); // video | page
+  const [vsize, setVsize] = useState({ w: 1280, h: 800 }); // the recording's size: the persona's viewport, at most 1440 wide
   const runActive = !!(data && data.run && ACTIVE.has(data.run.state));
   const hasTrace = !!(data && (data.artifacts || []).includes('trace.zip'));
   // The trace summary (actions, page URLs, requests) once the run has ended
@@ -1168,6 +1171,8 @@ function RunPage({ id, onChange }) {
   const pageURL = actions.length && playhead != null
     ? actions[nearest(actions, playhead, (a) => Date.parse(a.start))].pageUrl || '' : '';
   const network = trace.state === 'ok' ? trace.summary.network || [] : [];
+  const canPage = !active && trace.state === 'ok' && actions.length > 0;
+  const pageMode = view === 'page' && canPage;
   const netBad = network.filter((r) => r.failed || r.status >= 400).length;
   const toTab = (t, el) => (e) => {
     e.preventDefault();
@@ -1199,15 +1204,23 @@ function RunPage({ id, onChange }) {
     <div class="stage-bar">
       ${pageURL ? html`<span class="urlline" title=${pageURL}>${pageURL}</span>`
         : html`<span class="urlline muted">${active ? 'The page address shows when the run ends.' : trace.state === 'loading' ? 'Reading the trace…' : ''}</span>`}
+      <div class="viewswitch" role="group" aria-label="Show">
+        <button type="button" class=${pageMode ? '' : 'on'} aria-pressed=${!pageMode} onClick=${() => setView('video')}>Video</button>
+        <button type="button" class=${pageMode ? 'on' : ''} aria-pressed=${pageMode} disabled=${!canPage}
+          title=${canPage ? 'The page at the playhead, from the trace' : active ? 'The trace arrives when the run ends.' : 'This run has no readable trace.'}
+          onClick=${() => setView('page')}>Page</button>
+      </div>
     </div>
-    <div class=${'player' + (active || framesMode ? ' live' : '')}>
+    <div class=${'player' + (active || framesMode ? ' live' : '') + (pageMode ? ' pagemode' : '')}>
       ${framesMode && (scrub !== null || !active) ? html`<${FrameView} id=${run.id} frames=${frames} at=${scrub} started=${run.started}
           active=${active} playing=${playing} onPlay=${setPlaying} onLive=${() => { setPlaying(false); setScrub(null); }} />`
       : active ? html`<${LiveView} key=${run.id} id=${run.id} stage=${data.stage} reason=${data.stageReason} started=${run.started} />` : webm ? html`<video ref=${video} key=${webm} src=${artifactURL(run.id, webm)} controls preload="metadata" playsinline
-          onLoadedMetadata=${(e) => { const d = e.currentTarget.duration; setDuration(d > 0 ? d : 0); }}
+          onLoadedMetadata=${(e) => { const v = e.currentTarget, d = v.duration; setDuration(d > 0 ? d : 0); if (v.videoWidth && v.videoHeight) setVsize({ w: v.videoWidth, h: v.videoHeight }); }}
           onTimeUpdate=${(e) => setVt(e.currentTarget.currentTime)} onSeeking=${(e) => setVt(e.currentTarget.currentTime)}
           onPause=${(e) => { if (wantT.current == null) setParams({ t: Math.round(e.currentTarget.currentTime) }); }}></video>`
         : html`<p>This run has no recording.</p>`}
+      ${pageMode ? html`<${PageView} actions=${actions} playhead=${playhead} size=${vsize}
+          traceURL=${new URL(artifactURL(run.id, 'trace.zip'), location.href).href} viewer=${traceViewerURL(run.id)} />` : null}
       <${Caption} entry=${caption} />
     </div>
     <${Timeline} run=${run} bugs=${bugs} events=${events} blocked=${blocked}
