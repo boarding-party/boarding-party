@@ -38,6 +38,8 @@ jobs:
         run: docker run --rm --user 1000 --tmpfs /workspace:rw,mode=1777 bp-worker:smoke node /opt/bp/smoke/screen-smoke.mjs
       - name: Smoke test worker console recording
         run: docker run --rm --user 1000 bp-worker:smoke node /opt/bp/smoke/console-smoke.mjs
+      - name: Smoke test the agent's narration
+        run: docker run --rm --user 1000 bp-worker:smoke node /opt/bp/smoke/narration-smoke.mjs
       - name: Smoke test the no-browser MCP server of lead runs
         run: docker run --rm --user 1000 bp-worker:smoke node /opt/bp/smoke/null-mcp-smoke.mjs
       - name: Smoke test journey replays

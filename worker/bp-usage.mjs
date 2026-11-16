@@ -1,13 +1,18 @@
 // Token usage reporter: sums the model usage Claude Code writes to its
 // transcripts and sends the running total to the director every few seconds
 // while it changes. Started once per pod by bp-browser, like bp-screen.
+// It also sends the run's narration (what the agent says and does) to the
+// director's /narration/ endpoint beside /usage/.
 // The URL carries the run token: it is never logged.
 import { open, readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
+import { capEntries, narrationOf } from "./bp-narration.mjs";
 
 const arg = process.argv.find((a) => a.startsWith("--usage-url="));
 const url = arg && arg.slice("--usage-url=".length);
 if (!url) process.exit(0);
+const narrationUrl = url.replace(/\/usage\/([^/]+)$/, "/narration/$1");
+const token = (url.match(/\/usage\/([^/]+)$/) || [])[1] || "";
 const root = join(process.env.CLAUDE_CONFIG_DIR || join(process.env.HOME || "/workspace", ".claude"), "projects");
 
 const files = new Map(); // path -> { offset, rest }
@@ -15,6 +20,8 @@ const seen = new Set(); // message ids already counted: one message spans severa
 const zero = () => ({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0, turns: 0 });
 const total = { ...zero(), byModel: {} };
 let sent = "";
+let narration = [];
+let sentNarration = "";
 
 async function transcripts(dir) {
   let out = [];
@@ -62,7 +69,11 @@ async function read(path) {
     f.offset = size;
     const lines = (f.rest + buf.toString("utf8")).split("\n");
     f.rest = lines.pop(); // a line still being written
-    lines.forEach(count);
+    for (const l of lines) {
+      count(l);
+      narration.push(...narrationOf(l, [token]));
+    }
+    narration = capEntries(narration);
   } finally {
     await fh.close();
     files.set(path, f);
@@ -71,12 +82,22 @@ async function read(path) {
 
 async function tick() {
   for (const p of await transcripts(root)) await read(p).catch(() => {});
+  await sendNarration();
   const body = JSON.stringify(total);
   if (body === sent || total.turns === 0) return;
   const res = await fetch(url, { method: "PUT", headers: { "Content-Type": "application/json" }, body }).catch(() => null);
   if (res && res.ok) sent = body;
   else if (res && res.status === 404) process.exit(0); // the run is over
   else console.error("bp-usage: report failed" + (res ? " (" + res.status + ")" : ""));
+}
+
+async function sendNarration() {
+  if (narrationUrl === url) return; // not a /usage/ URL: nowhere to send it
+  const body = JSON.stringify(narration);
+  if (body === sentNarration || narration.length === 0) return;
+  const res = await fetch(narrationUrl, { method: "PUT", headers: { "Content-Type": "application/json" }, body }).catch(() => null);
+  if (res && res.ok) sentNarration = body;
+  else if (!res || res.status !== 404) console.error("bp-usage: narration report failed" + (res ? " (" + res.status + ")" : ""));
 }
 
 for (;;) {
