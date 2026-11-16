@@ -3,12 +3,14 @@
 // each snapshot; this frame shows the one for the action nearest the
 // playhead, at the persona's viewport, scaled to fit. When the browser will
 // not start the worker (a cross-origin frame can refuse it), it says so and
-// offers the full viewer in a new tab.
+// offers the full viewer in a new tab. The frame is sandboxed as the viewer's
+// own is: a snapshot's forms, popups and top-level links do nothing.
 import { useState, useEffect, useRef } from './vendor/hooks.module.js';
 import { html } from './lib.js';
 import { nearest } from './studio-time.js';
 
-const START_MS = 10000;
+const START_MS = 10000; // for the worker to start
+const SLOW_MS = 60000; // the first snapshot downloads and reads the whole trace
 
 let worker = null; // one registration per page load
 function startWorker() {
@@ -34,8 +36,9 @@ function startWorker() {
 // traceURL is the run's trace.zip as an absolute URL; viewer opens the full
 // trace viewer; size is the persona's viewport {w, h}.
 export function PageView({ actions, playhead, traceURL, viewer, size }) {
-  const [state, setState] = useState('starting'); // starting | ready | failed
-  const [loaded, setLoaded] = useState(false);
+  const [state, setState] = useState('starting'); // starting | ready | failed (the browser refused the worker)
+  const [load, setLoad] = useState('loading'); // loading | ok | slow | missing | error: the current snapshot
+  const [attempt, setAttempt] = useState(0);
   const box = useRef(null);
   const frame = useRef(null);
   const [fit, setFit] = useState({ s: 1, x: 0, y: 0 });
@@ -59,20 +62,18 @@ export function PageView({ actions, playhead, traceURL, viewer, size }) {
   const shown = actions.filter((a) => a.callId && a.phase);
   const a = shown.length ? shown[nearest(shown, playhead ?? 0, (x) => Date.parse(x.start))] : null;
   const src = a ? `trace/snapshot/${encodeURIComponent(a.callId)}?trace=${encodeURIComponent(traceURL)}&phase=${encodeURIComponent(a.phase)}` : '';
-  // A snapshot that never arrives, or arrives as the worker's JSON error,
-  // counts as a failure too.
+  // A snapshot slow to arrive (a big trace on a slow link) says so and can
+  // be retried; one the worker cannot find, or its error, says that.
   useEffect(() => {
     if (state !== 'ready' || !src) return undefined;
-    setLoaded(false);
-    if (frame.current) delete frame.current.dataset.ok;
-    const t = setTimeout(() => setState((s) => (s === 'ready' && !frame.current?.dataset.ok ? 'failed' : s)), START_MS);
+    setLoad('loading');
+    const t = setTimeout(() => setLoad((l) => (l === 'loading' ? 'slow' : l)), SLOW_MS);
     return () => clearTimeout(t);
-  }, [state, src]);
+  }, [state, src, attempt]);
   const onLoad = () => {
     const doc = frame.current && frame.current.contentDocument;
-    if (doc && doc.contentType === 'application/json') { setState('failed'); return; }
-    frame.current.dataset.ok = '1';
-    setLoaded(true);
+    const type = doc ? doc.contentType : '';
+    setLoad(type === 'application/json' ? 'error' : type !== 'text/html' ? 'missing' : 'ok');
   };
 
   if (state === 'failed') {
@@ -80,12 +81,18 @@ export function PageView({ actions, playhead, traceURL, viewer, size }) {
       <p><a href=${viewer} target="_blank" rel="noopener">Open full trace</a></p></div>`;
   }
   if (!a) return html`<div class="pageview msg"><p>The trace has no page snapshots.</p></div>`;
+  const note = {
+    slow: html`<p>The trace is still loading. Big traces take a while.</p>
+      <p><button type="button" class="btn" onClick=${() => setAttempt((n) => n + 1)}>Retry</button> <a href=${viewer} target="_blank" rel="noopener">Open full trace</a></p>`,
+    missing: html`<p>The trace has no snapshot for this step.</p>`,
+    error: html`<p>The trace could not be read here.</p><p><a href=${viewer} target="_blank" rel="noopener">Open full trace</a></p>`,
+  }[load];
   return html`
     <div class="pageview" ref=${box}>
-      ${state === 'ready' ? html`<iframe ref=${frame} src=${src} title=${'The page at: ' + a.title} referrerpolicy="no-referrer"
-        onLoad=${onLoad} class=${loaded ? '' : 'loading'}
+      ${state === 'ready' ? html`<iframe key=${attempt} ref=${frame} src=${src} title=${'The page at: ' + a.title} referrerpolicy="no-referrer" sandbox="allow-same-origin allow-scripts"
+        onLoad=${onLoad} class=${load === 'ok' ? '' : 'loading'}
         style=${{ width: size.w + 'px', height: size.h + 'px', transform: `translate(${fit.x}px, ${fit.y}px) scale(${fit.s})` }}></iframe>` : null}
-      ${!loaded ? html`<p class="pageview-wait">Opening the page…</p>` : null}
+      ${note ? html`<div class="pageview-wait msg">${note}</div>` : load !== 'ok' ? html`<p class="pageview-wait">Opening the page…</p>` : null}
       <span class="pageview-step">${a.title}</span>
     </div>`;
 }

@@ -91,3 +91,17 @@ func TestTraceViewerMatchesWorker(t *testing.T) {
 		t.Fatalf("vendored trace viewer is for %q, the worker runs @playwright/mcp %s: run scripts/vendor-traceviewer.sh", first, m[1])
 	}
 }
+
+// Trace snapshots are site pages drawn on the board's origin; the vendored
+// viewer's service worker keeps the site's scripts from running in them by
+// giving each snapshot a nonce-only script policy. A viewer update that drops
+// it must not slip in unnoticed.
+func TestTraceSnapshotsKeepNonceCSP(t *testing.T) {
+	b, err := os.ReadFile("ui/trace/sw.bundle.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), "\"Content-Security-Policy\":`script-src 'nonce-${") || !strings.Contains(string(b), "object-src 'none'") {
+		t.Fatal("the trace viewer's snapshots no longer carry a nonce-only script policy: check the vendored version before shipping it")
+	}
+}
