@@ -980,6 +980,7 @@ function RunPage({ id, onChange }) {
   const [frames, setFrames] = useState([]); // kept screen frames, Unix ms
   const [scrub, setScrub] = useState(null); // Unix ms shown instead of live/end; null = live
   const [playing, setPlaying] = useState(false);
+  const [vplay, setVplay] = useState(false); // the video is playing
   const [tab, setTab] = useState(() => routeParams().tab || 'thoughts');
   const [trace, setTrace] = useState({ state: 'loading' });
   const [view, setView] = useState('video'); // video | page
@@ -1175,6 +1176,20 @@ function RunPage({ id, onChange }) {
   const network = trace.state === 'ok' ? trace.summary.network || [] : [];
   const canPage = !active && trace.state === 'ok' && actions.length > 0;
   const pageMode = view === 'page' && canPage;
+  // The page covers the video and its controls, so Page has its own: play
+  // and pause, and a step at a time through the trace's snapshots.
+  const steps = actions.filter((a) => a.callId && a.phase);
+  const si = steps.length && playhead != null ? nearest(steps, playhead, (a) => Date.parse(a.start)) : -1;
+  const togglePlay = () => {
+    if (framesMode) { setPlaying((p) => !p); return; }
+    const v = video.current;
+    if (v) { if (v.paused) v.play().catch(() => {}); else v.pause(); }
+  };
+  const toStep = (i) => {
+    if (!steps[i]) return;
+    if (video.current) video.current.pause();
+    seekMs(Date.parse(steps[i].start));
+  };
   const netBad = network.filter((r) => r.failed || r.status >= 400).length;
   const toTab = (t, el) => (e) => {
     e.preventDefault();
@@ -1219,10 +1234,17 @@ function RunPage({ id, onChange }) {
       : active ? html`<${LiveView} key=${run.id} id=${run.id} stage=${data.stage} reason=${data.stageReason} started=${run.started} />` : webm ? html`<video ref=${video} key=${webm} src=${artifactURL(run.id, webm)} controls preload="metadata" playsinline
           onLoadedMetadata=${(e) => { const v = e.currentTarget, d = v.duration; setDuration(d > 0 ? d : 0); if (v.videoWidth && v.videoHeight) setVsize({ w: v.videoWidth, h: v.videoHeight }); }}
           onTimeUpdate=${(e) => setVt(e.currentTarget.currentTime)} onSeeking=${(e) => setVt(e.currentTarget.currentTime)}
-          onPause=${(e) => { if (wantT.current == null) setParams({ t: Math.round(e.currentTarget.currentTime) }); }}></video>`
+          onPlay=${() => setVplay(true)}
+          onPause=${(e) => { setVplay(false); if (wantT.current == null) setParams({ t: Math.round(e.currentTarget.currentTime) }); }}></video>`
         : html`<p>This run has no recording.</p>`}
       ${pageMode ? html`<${PageView} actions=${actions} playhead=${playhead} size=${vsize}
           traceURL=${new URL(artifactURL(run.id, 'trace.zip'), location.href).href} viewer=${traceViewerURL(run.id)} />` : null}
+      ${pageMode && (framesMode || videoSync) ? html`<div class="framebar pagebar">
+          <button type="button" class="btn small" onClick=${togglePlay}>${(framesMode ? playing : vplay) ? 'Pause' : 'Play'}</button>
+          <button type="button" class="btn small" disabled=${si <= 0} onClick=${() => toStep(si - 1)}>Previous step</button>
+          <button type="button" class="btn small" disabled=${si < 0 || si >= steps.length - 1} onClick=${() => toStep(si + 1)}>Next step</button>
+          <span class="pagebar-at">Step ${si + 1} of ${steps.length}</span>
+        </div>` : null}
       <${Caption} entry=${caption} />
     </div>
     <${Timeline} run=${run} bugs=${bugs} events=${events} blocked=${blocked}

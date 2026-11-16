@@ -746,3 +746,5 @@ pre.diff { padding: 6px 0; margin-top: 8px; }
 .pageview-wait.msg { flex-direction: column; color: #C9D1DC; text-align: center; padding: 16px; }
 .pageview-wait.msg p { margin: 4px 0; }
 .pageview-wait.msg a { color: #9DB8F5; }
+.player.pagemode .caption { bottom: 60px; } /* above Page's controls */
+.pagebar .pagebar-at { text-align: right; color: #A9B4C4; }
