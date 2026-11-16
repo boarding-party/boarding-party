@@ -111,8 +111,13 @@ async function sharp(sock) {
   const m = await call(sock, 'Page.getLayoutMetrics', {});
   const v = m && m.cssVisualViewport;
   if (!v || !(v.clientWidth > 0) || !(v.clientHeight > 0)) { logOnce('sharp: no viewport ' + JSON.stringify(m).slice(0, 200)); return null; }
-  const scale = Math.min(2, SHARP_EDGE / Math.max(v.clientWidth, v.clientHeight));
-  if (scale < 1.25) { logOnce('sharp: not sharper at ' + JSON.stringify(v)); return null; }
+  // The visual viewport is in page CSS pixels; a page with no viewport meta
+  // lays out wider and is zoomed out (v.scale < 1). The screen's own size
+  // is the viewport times that zoom.
+  const zoom = v.scale > 0 ? v.scale : 1;
+  const k = Math.min(2, SHARP_EDGE / (Math.max(v.clientWidth, v.clientHeight) * zoom));
+  if (k < 1.25) return null;
+  const scale = k * zoom;
   const r = await call(sock, 'Page.captureScreenshot', { format: 'jpeg', quality: SHARP_QUALITY,
     clip: { x: v.pageX, y: v.pageY, width: v.clientWidth, height: v.clientHeight, scale } });
   if (!r || !r.data) { logOnce('sharp: capture failed at scale ' + scale); return null; }
