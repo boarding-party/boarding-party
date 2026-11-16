@@ -301,9 +301,9 @@ func cleanURL(s string) string {
 	return cut(u.String(), 2048)
 }
 
-// urlInText matches a URL inside free text, up to a space, quote, angle
-// bracket or comma.
-var urlInText = regexp.MustCompile(`(?i)(?:https?|wss?)://[^\s"'<>,]+`)
+// urlInText matches a URL inside free text, up to a space, quote or angle
+// bracket. A comma may sit inside a path, so it never ends the match.
+var urlInText = regexp.MustCompile(`(?i)(?:https?|wss?)://[^\s"'<>]+`)
 
 // cleanText runs cleanURL over every URL in s: error messages and headers
 // quote page URLs.

@@ -54,10 +54,14 @@ func TestTraceHeaders(t *testing.T) {
 	if strings.Contains(csp, "'none'") || h.Get("X-Frame-Options") != "" || h.Get("X-Content-Type-Options") != "nosniff" {
 		t.Fatalf("trace headers: %v", h)
 	}
+	if h.Get("Cross-Origin-Opener-Policy") != "same-origin" {
+		t.Errorf("no COOP: a cross-origin opener could post a trace into the viewer")
+	}
+	// Only the board frames the viewer, even when the cloud frames the board.
 	h = http.Header{}
 	PageHeaders(h, "/trace/index.html", "https://c.io")
-	if !strings.Contains(h.Get("Content-Security-Policy"), "frame-ancestors 'self' https://c.io") {
-		t.Fatalf("framed trace CSP = %q", h.Get("Content-Security-Policy"))
+	if csp := h.Get("Content-Security-Policy"); !strings.HasSuffix(csp, "frame-ancestors 'self'") || strings.Contains(csp, "c.io") {
+		t.Fatalf("framed trace CSP = %q", csp)
 	}
 	// Everything else keeps the board's own policy.
 	for _, p := range []string{"/", "/app.js", "/tracer", "/x/trace/a"} {

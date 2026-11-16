@@ -54,15 +54,15 @@ const traceCSP = "default-src 'self'; img-src 'self' data: blob:; media-src 'sel
 	"frame-ancestors 'self'"
 
 // TraceHeaders sets the headers of the trace viewer's files: the security
-// headers, the viewer's CSP, which the board itself and the frame-ancestors
-// origins may frame, and no X-Frame-Options.
+// headers, the viewer's CSP, which only the board itself may frame (even
+// when the cloud frames the board: the viewer's snapshots are drawn by its
+// service worker, not served from here), and no X-Frame-Options. COOP cuts
+// a cross-origin opener's handle: the viewer loads any trace posted to it.
+// frameAncestors is unused and kept for symmetry with UIHeaders.
 func TraceHeaders(h http.Header, frameAncestors string) {
 	SecurityHeaders(h)
-	csp := traceCSP
-	if frameAncestors != "'none'" {
-		csp += " " + frameAncestors
-	}
-	h.Set("Content-Security-Policy", csp)
+	h.Set("Content-Security-Policy", traceCSP)
+	h.Set("Cross-Origin-Opener-Policy", "same-origin")
 	h.Del("X-Frame-Options")
 	h.Set("Cache-Control", "no-cache")
 }

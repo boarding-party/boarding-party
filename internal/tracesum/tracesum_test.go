@@ -159,4 +159,7 @@ func TestErrorTextLosesQueries(t *testing.T) {
 	if strings.Contains(got, "code=123") || strings.Contains(got, "t=1") || strings.Contains(got, "bob:pw") || !strings.Contains(got, "https://s.test/reset") {
 		t.Fatalf("cleanText = %q", got)
 	}
+	if got := cleanText(`see https://s.test/a,b?token=1 now`); strings.Contains(got, "token") {
+		t.Fatalf("comma in path kept the query: %q", got)
+	}
 }
