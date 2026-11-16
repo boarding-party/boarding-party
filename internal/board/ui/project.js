@@ -5,7 +5,7 @@
 // Field names must match internal/project/project.go exactly: the director
 // rejects unknown fields.
 import { useState, useEffect, useRef } from './vendor/hooks.module.js';
-import { html, api, confirmDialog, dialogOpen } from './lib.js';
+import { html, api, confirmDialog, dialogOpen, useProfileFields } from './lib.js';
 
 // ---- model --------------------------------------------------------------
 // The draft carries a stable id on every repeatable row so inputs keep focus
@@ -590,16 +590,6 @@ function RoleCard({ role, n, profileFields, roles, onChange, onRemove }) {
     </div>`;
 }
 
-// Profile fields come from the director so the lists stay in one place.
-function useProfileFields() {
-  const [fields, setFields] = useState([]);
-  useEffect(() => {
-    let live = true;
-    api('api/profile-fields').then((f) => { if (live && Array.isArray(f)) setFields(f); }).catch(() => {});
-    return () => { live = false; };
-  }, []);
-  return fields;
-}
 
 function ProfileGrid({ profile, fields, onChange }) {
   if (!fields.length) return null;

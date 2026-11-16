@@ -5,7 +5,7 @@
 // Never use innerHTML or dangerouslySetInnerHTML here.
 import { render } from './vendor/preact.module.js';
 import { useState, useEffect, useRef, useCallback } from './vendor/hooks.module.js';
-import { html, api, directorDown, confirmDialog, DialogHost, parseTime, sameDay, fmtWhen, artifactURL, runHref, issueHref, fixCheckOf, usePoll, useParams, routeParams, setParams, PARAMS_EVENT, SEVERITY_TAG, SHOT_TOKEN } from './lib.js';
+import { html, api, directorDown, confirmDialog, DialogHost, parseTime, sameDay, fmtWhen, artifactURL, runHref, issueHref, fixCheckOf, usePoll, useParams, useProfileFields, routeParams, setParams, PARAMS_EVENT, SEVERITY_TAG, SHOT_TOKEN } from './lib.js';
 import { BugsPage, IssuePage, openCount } from './bugs.js';
 import { ProjectPage } from './project.js';
 import { LeadPage, leadHref } from './leads.js';
@@ -18,6 +18,7 @@ import { NetworkPanel } from './network.js';
 import { PageView } from './pageview.js';
 import { captionAt, nearest } from './studio-time.js';
 import { Shot } from './shot.js';
+import { personaLabel } from './persona-label.js';
 import { JourneysPage, JourneyPage, journeyHref } from './journeys.js';
 
 const ACTIVE = new Set(['pending', 'running']);
@@ -429,6 +430,7 @@ function StartRun({ project, active, status, onStarted, onClose }) {
   const goal = (stories.find((x) => x.name === s) || {}).goal;
 
   const roles = (project.roles || []).filter((r) => (r.personas || []).length);
+  const fields = useProfileFields();
 
   // A persona and story with a recorded journey can be replayed instead:
   // the same steps in a browser, with no model.
@@ -484,7 +486,7 @@ function StartRun({ project, active, status, onStarted, onClose }) {
         <select id="sr-persona" value=${p} disabled=${busy}
             onChange=${(e) => { setPersona(e.currentTarget.value); setStory(''); setErr(''); }}>
           ${roles.map((r) => html`<optgroup label=${r.name}>
-            ${r.personas.map((x) => html`<option value=${x.name}>${x.name}</option>`)}
+            ${r.personas.map((x) => html`<option value=${x.name}>${personaLabel(x, fields)}</option>`)}
           </optgroup>`)}
         </select>
       </div>

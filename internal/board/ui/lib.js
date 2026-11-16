@@ -171,5 +171,16 @@ export function usePoll(fn, deps) {
   }, deps);
 }
 
+// Profile fields come from the director so the lists stay in one place.
+export function useProfileFields() {
+  const [fields, setFields] = useState([]);
+  useEffect(() => {
+    let live = true;
+    api('api/profile-fields').then((f) => { if (live && Array.isArray(f)) setFields(f); }).catch(() => {});
+    return () => { live = false; };
+  }, []);
+  return fields;
+}
+
 export const SEVERITY_TAG = new Map([['high', 'bad'], ['critical', 'bad'], ['medium', 'wait'], ['low', 'idle']]);
 export const SHOT_TOKEN = /\bbug-\d+\.(?:png|jpe?g)\b/i;
