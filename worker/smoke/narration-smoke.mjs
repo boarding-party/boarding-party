@@ -26,7 +26,19 @@ assert.ok(quoted.every((e) => !e.text.includes('TOKEN123')), 'token leaked: ' + 
 
 // Long text is cut to 500 characters, an action summary to 200.
 assert.equal(narrationOf(line([{ type: 'text', text: 'x'.repeat(900) }]), [])[0].text.length, 500);
-assert.equal(narrationOf(line([{ type: 'tool_use', name: 'mcp__pw__browser_type', input: { text: 'y'.repeat(900) } }]), [])[0].text.length, 200);
+assert.equal(narrationOf(line([{ type: 'tool_use', name: 'mcp__pw__browser_click', input: { element: 'y'.repeat(900) } }]), [])[0].text.length, 200);
+
+// A token cut in half by the length limit still drops the entry.
+assert.deepEqual(narrationOf(line([{ type: 'text', text: 'x'.repeat(495) + 'TOKEN123' }]), ['TOKEN123']), []);
+
+// Typed values never appear: the action names its target only.
+assert.deepEqual(narrationOf(line([{ type: 'tool_use', name: 'mcp__pw__browser_type', input: { element: 'Password', ref: 'e3', text: 'hunter2' } }]), []),
+  [{ at, kind: 'action', text: 'browser_type: Password' }]);
+
+// URLs lose their query, fragment and credentials, in thoughts and actions.
+const urls = narrationOf(line([{ type: 'text', text: 'Opening https://bob:pw@site.test/reset?code=123#x now' },
+  { type: 'tool_use', name: 'mcp__pw__browser_navigate', input: { url: 'https://site.test/verify?token=abc' } }]), []);
+assert.deepEqual(urls.map((e) => e.text), ['Opening https://site.test/reset now', 'browser_navigate: https://site.test/verify']);
 
 // Nothing from user lines, tool results, thinking, blank text or broken JSON.
 assert.deepEqual(narrationOf(JSON.stringify({ type: 'user', timestamp: at, message: { content: [{ type: 'text', text: 'hi' }] } }), []), []);

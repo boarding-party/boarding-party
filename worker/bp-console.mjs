@@ -3,6 +3,7 @@
 // batches. Logs go to stderr only; it never exits on its own.
 // The URL carries the run token: --url-stdin takes it from stdin (replay
 // runs), so it is never on a command line anything in the pod can read.
+import { cleanText, cleanUrl } from './bp-clean.mjs';
 const arg = process.argv.find((a) => a.startsWith('--console-url='));
 let consoleUrl = arg ? arg.slice('--console-url='.length) : '';
 if (!consoleUrl && process.argv.includes('--url-stdin')) {
@@ -31,48 +32,6 @@ let lastErr = '';
 
 function logOnce(msg) {
   if (msg !== lastErr) { lastErr = msg; log(msg); }
-}
-
-// cleanUrl drops the query and fragment: they can carry tokens from emails.
-function cleanUrl(u) {
-  if (!u) return '';
-  try {
-    const p = new URL(u);
-    if (p.protocol !== 'http:' && p.protocol !== 'https:') return p.protocol;
-    return p.origin + p.pathname;
-  } catch {
-    return '';
-  }
-}
-
-// cleanText drops the query and fragment of every URL in a message: stack
-// traces and messages quote page URLs, which can carry tokens from emails.
-function cleanText(s) {
-  // Match to the next space, quote or angle bracket (never stop at characters a
-  // URL may hold), then cut at the first ? or #. No URL parsing: what is cut
-  // must not depend on how a parser reads a malformed URL.
-  return String(s || '').replace(/(?:https?|wss?):\/\/[^\s"<>]+/gi, cleanToken);
-}
-
-// cleanToken cuts one URL-like token at its first ? or #, then strips
-// credentials from it and from any URL nested in what is left. When the first
-// ? or # falls in the part between a scheme's :// and the next / and that part
-// also has an @, credentials and query can't be told apart: everything after
-// that :// goes.
-const stripCreds = (s) => s.replace(/((?:https?|wss?):\/\/)[^/]*@/gi, '$1');
-
-function cleanToken(u) {
-  const q = u.search(/[?#]/);
-  if (q >= 0) {
-    for (const m of u.matchAll(/(?:https?|wss?):\/\//gi)) {
-      const start = m.index + m[0].length;
-      if (start > q) break;
-      const slash = u.indexOf('/', start);
-      const end = slash < 0 ? u.length : slash;
-      if (q < end && u.slice(start, end).includes('@')) return stripCreds(u.slice(0, start)) + '[redacted]';
-    }
-  }
-  return stripCreds(q < 0 ? u : u.slice(0, q));
 }
 
 function argText(a) {
