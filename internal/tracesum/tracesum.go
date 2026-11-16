@@ -51,6 +51,10 @@ type Action struct {
 	Error    string    `json:"error,omitempty"`
 	Snapshot string    `json:"snapshot,omitempty"` // the "after" snapshot name, else "before"
 	PageID   string    `json:"pageId,omitempty"`
+	// CallID and Phase address the snapshot in the trace viewer's service
+	// worker: /snapshot/<callId>?phase=<phase>.
+	CallID string `json:"callId,omitempty"`
+	Phase  string `json:"phase,omitempty"`
 }
 
 // Resource is one network request the page made.
@@ -185,7 +189,7 @@ func readActions(sc *bufio.Scanner) ([]Action, error) {
 				snaps[e.CallID] = e.After
 			}
 			if e.Error != nil && e.Error.Error.Message != "" {
-				a.Error = cut(firstLine(e.Error.Error.Message), maxTitle)
+				a.Error = cut(cleanText(firstLine(e.Error.Error.Message)), maxTitle)
 			}
 		case "frame-snapshot":
 			if s := e.Snapshot; s != nil && s.SnapshotName != "" {
@@ -202,6 +206,8 @@ func readActions(sc *bufio.Scanner) ([]Action, error) {
 	for _, id := range order {
 		a := calls[id]
 		a.Snapshot = snaps[id]
+		a.CallID = id
+		a.Phase, _, _ = strings.Cut(a.Snapshot, "@")
 		a.PageURL = pageURL[a.Snapshot]
 		out = append(out, *a)
 	}
@@ -259,8 +265,9 @@ func readNetwork(sc *bufio.Scanner) ([]Resource, error) {
 	return out, nil
 }
 
-// secretHeaders hold credentials: their values never leave the director.
-var secretHeaders = map[string]bool{"cookie": true, "set-cookie": true, "authorization": true, "proxy-authorization": true}
+// secretHeader matches the names of headers that may hold credentials:
+// their values never leave the director.
+var secretHeader = regexp.MustCompile(`(?i)cookie|auth|token|key|secret|session|csrf|xsrf|signature|password`)
 
 func headers(hs []header) map[string]string {
 	if len(hs) == 0 {
@@ -270,10 +277,10 @@ func headers(hs []header) map[string]string {
 	for _, h := range hs {
 		v := h.Value
 		switch {
-		case secretHeaders[strings.ToLower(h.Name)]:
+		case secretHeader.MatchString(h.Name):
 			v = "[redacted]"
-		case strings.HasPrefix(v, "http://") || strings.HasPrefix(v, "https://"):
-			v = cleanURL(v)
+		default:
+			v = cleanText(v)
 		}
 		out[h.Name] = cut(v, maxHeader)
 	}
@@ -294,6 +301,14 @@ func cleanURL(s string) string {
 	return cut(u.String(), 2048)
 }
 
+// urlInText matches a URL inside free text, up to a space, quote, angle
+// bracket or comma.
+var urlInText = regexp.MustCompile(`(?i)(?:https?|wss?)://[^\s"'<>,]+`)
+
+// cleanText runs cleanURL over every URL in s: error messages and headers
+// quote page URLs.
+func cleanText(s string) string { return urlInText.ReplaceAllStringFunc(s, cleanURL) }
+
 var (
 	roleName = regexp.MustCompile(`^internal:role=([a-z]+)\[name="(.*)"[is]?\]$`)
 	quoted   = regexp.MustCompile(`^internal:(?:text|label|testid|attr)=(?:\[[a-z-]+=)?"(.*)"[is]?\]?$`)
@@ -311,6 +326,7 @@ func title(method string, params json.RawMessage) string {
 	case p.URL != "":
 		what = cleanURL(p.URL)
 	case p.Selector != "":
+		p.Selector = cleanText(p.Selector)
 		parts := strings.Split(p.Selector, " >> ")
 		last := parts[len(parts)-1]
 		if m := roleName.FindStringSubmatch(last); m != nil {

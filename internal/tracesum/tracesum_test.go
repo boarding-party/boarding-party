@@ -45,6 +45,9 @@ func TestReadFixture(t *testing.T) {
 		if a.Snapshot == "" || a.PageID == "" {
 			t.Errorf("action %d %q has no snapshot or page", i, a.Title)
 		}
+		if a.Snapshot != a.Phase+"@"+a.CallID || (a.Phase != "after" && a.Phase != "before") {
+			t.Errorf("action %d snapshot %q, call %q, phase %q: the viewer could not find it", i, a.Snapshot, a.CallID, a.Phase)
+		}
 	}
 	titles := map[string]Action{}
 	for _, a := range s.Actions {
@@ -139,8 +142,21 @@ func TestReadBadZips(t *testing.T) {
 }
 
 func TestHeadersRedacted(t *testing.T) {
-	h := headers([]header{{"Cookie", "sid=1"}, {"Authorization", "Bearer x"}, {"Referer", "https://s.test/a?code=9"}, {"Accept", "*/*"}})
-	if h["Cookie"] != "[redacted]" || h["Authorization"] != "[redacted]" || h["Referer"] != "https://s.test/a" || h["Accept"] != "*/*" {
+	h := headers([]header{{"Cookie", "sid=1"}, {"Authorization", "Bearer x"}, {"Referer", "https://s.test/a?code=9"}, {"Accept", "*/*"},
+		{"X-Api-Key", "k"}, {"X-CSRF-Token", "c"}, {"X-Session-Id", "s"}, {"X-Client-Secret", "z"}, {"Link", "<https://s.test/n?page=2>; rel=next"}})
+	for _, n := range []string{"Cookie", "Authorization", "X-Api-Key", "X-CSRF-Token", "X-Session-Id", "X-Client-Secret"} {
+		if h[n] != "[redacted]" {
+			t.Errorf("%s = %q, want redacted", n, h[n])
+		}
+	}
+	if h["Referer"] != "https://s.test/a" || h["Accept"] != "*/*" || strings.Contains(h["Link"], "page=2") {
 		t.Fatalf("headers = %v", h)
+	}
+}
+
+func TestErrorTextLosesQueries(t *testing.T) {
+	got := cleanText(`page.goto: net::ERR_ABORTED at https://bob:pw@s.test/reset?code=123#x, then "http://s.test/b?t=1"`)
+	if strings.Contains(got, "code=123") || strings.Contains(got, "t=1") || strings.Contains(got, "bob:pw") || !strings.Contains(got, "https://s.test/reset") {
+		t.Fatalf("cleanText = %q", got)
 	}
 }
