@@ -202,3 +202,27 @@ func TestReadSkipsHugeLines(t *testing.T) {
 		}
 	}
 }
+
+// A zip of many trace entries cannot multiply the per-entry read limit.
+func TestReadCapsWholeTrace(t *testing.T) {
+	b := fixture(t)
+	z, _ := zip.NewReader(bytes.NewReader(b), int64(len(b)))
+	var data []byte
+	for _, f := range z.File {
+		if f.Name == "trace.trace" {
+			rc, _ := f.Open()
+			data, _ = io.ReadAll(rc)
+			rc.Close()
+		}
+	}
+	var out bytes.Buffer
+	w := zip.NewWriter(&out)
+	for i := range maxEntries + 1 {
+		dst, _ := w.Create(strings.Repeat("a", i+1) + ".trace")
+		dst.Write(data)
+	}
+	w.Close()
+	if _, err := read(t, out.Bytes()); !errors.Is(err, ErrTooBig) {
+		t.Fatalf("%d trace entries = %v, want ErrTooBig", maxEntries+1, err)
+	}
+}

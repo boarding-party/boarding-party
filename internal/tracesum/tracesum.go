@@ -28,9 +28,15 @@ const SummaryName = "trace-summary.json"
 // ErrNotTrace means the zip holds no Playwright trace.
 var ErrNotTrace = errors.New("not a Playwright trace")
 
+// ErrTooBig means the zip holds more trace entries than any run makes.
+var ErrTooBig = errors.New("the trace has too many parts to read")
+
 // Bounds on what is read: a trace is the site's data and can be anything.
 const (
-	maxEntryBytes = 64 << 20 // uncompressed, per .trace or .network entry
+	maxEntryBytes = 64 << 20  // uncompressed, per .trace or .network entry
+	maxTotalBytes = 256 << 20 // uncompressed, all entries together
+	maxEntries    = 32        // .trace and .network entries: a run makes one or two of each
+	maxActions    = 20000
 	maxLine       = 1 << 20  // snapshot lines carry whole pages; longer ones are skipped
 	maxResources  = 5000
 	maxHeader     = 1024
@@ -80,22 +86,33 @@ func Read(r io.ReaderAt, size int64) (Summary, error) {
 		return Summary{}, err
 	}
 	out := Summary{Actions: []Action{}, Network: []Resource{}}
-	traces := 0
+	traces, entries := 0, 0
+	budget := int64(maxTotalBytes) // shared by every entry read
 	for _, f := range z.File {
-		switch path.Ext(f.Name) {
+		ext := path.Ext(f.Name)
+		if ext != ".trace" && ext != ".network" {
+			continue
+		}
+		if entries++; entries > maxEntries {
+			return Summary{}, ErrTooBig
+		}
+		if budget <= 0 {
+			break
+		}
+		switch ext {
 		case ".trace":
-			acts, err := readEntry(f, readActions)
+			acts, err := readEntry(f, &budget, readActions)
 			if err != nil {
 				return Summary{}, err
 			}
 			traces++
-			out.Actions = append(out.Actions, acts...)
+			out.Actions = append(out.Actions, acts[:min(len(acts), maxActions-len(out.Actions))]...)
 		case ".network":
-			res, err := readEntry(f, readNetwork)
+			res, err := readEntry(f, &budget, readNetwork)
 			if err != nil {
 				return Summary{}, err
 			}
-			out.Network = append(out.Network, res...)
+			out.Network = append(out.Network, res[:min(len(res), maxResources-len(out.Network))]...)
 		}
 	}
 	if traces == 0 {
@@ -103,20 +120,21 @@ func Read(r io.ReaderAt, size int64) (Summary, error) {
 	}
 	sort.SliceStable(out.Actions, func(i, j int) bool { return out.Actions[i].Start.Before(out.Actions[j].Start) })
 	sort.SliceStable(out.Network, func(i, j int) bool { return out.Network[i].Start.Before(out.Network[j].Start) })
-	if len(out.Network) > maxResources {
-		out.Network = out.Network[:maxResources]
-	}
 	return out, nil
 }
 
-func readEntry[T any](f *zip.File, read func(iter.Seq[[]byte]) ([]T, error)) ([]T, error) {
+// readEntry reads one entry, at most maxEntryBytes of it and never more than
+// what is left of *budget, which it lowers by what it read.
+func readEntry[T any](f *zip.File, budget *int64, read func(iter.Seq[[]byte]) ([]T, error)) ([]T, error) {
 	rc, err := f.Open()
 	if err != nil {
 		return nil, err
 	}
 	defer rc.Close()
+	lr := &io.LimitedReader{R: rc, N: min(maxEntryBytes, *budget)}
+	defer func(n int64) { *budget -= n - lr.N }(lr.N)
 	var readErr error
-	out, err := read(lines(bufio.NewReaderSize(io.LimitReader(rc, maxEntryBytes), 64<<10), &readErr))
+	out, err := read(lines(bufio.NewReaderSize(lr, 64<<10), &readErr))
 	if err != nil {
 		return nil, err
 	}
