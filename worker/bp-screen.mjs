@@ -61,6 +61,7 @@ function attach(t) {
     let m;
     try { m = JSON.parse(ev.data); } catch { return; }
     if (m.id && calls.has(m.id)) {
+      if (m.error) logOnce('cdp error: ' + JSON.stringify(m.error).slice(0, 200));
       calls.get(m.id).ok(m.result || null);
       calls.delete(m.id);
     } else if (m.method === 'Page.screencastFrame') {
@@ -109,14 +110,15 @@ function call(sock, method, params) {
 async function sharp(sock) {
   const m = await call(sock, 'Page.getLayoutMetrics', {});
   const v = m && m.cssVisualViewport;
-  if (!v || !(v.clientWidth > 0) || !(v.clientHeight > 0)) return null;
+  if (!v || !(v.clientWidth > 0) || !(v.clientHeight > 0)) { logOnce('sharp: no viewport ' + JSON.stringify(m).slice(0, 200)); return null; }
   const scale = Math.min(2, SHARP_EDGE / Math.max(v.clientWidth, v.clientHeight));
   if (scale < 1.25) return null;
   const r = await call(sock, 'Page.captureScreenshot', { format: 'jpeg', quality: SHARP_QUALITY,
     clip: { x: v.pageX, y: v.pageY, width: v.clientWidth, height: v.clientHeight, scale } });
-  if (!r || !r.data) return null;
+  if (!r || !r.data) { logOnce('sharp: capture failed at scale ' + scale); return null; }
   const b = Buffer.from(r.data, 'base64');
-  return b.length <= MAX_FRAME ? b : null;
+  if (b.length > MAX_FRAME) { logOnce('sharp: frame too big, ' + b.length + ' B'); return null; }
+  return b;
 }
 
 function ackPending() {
