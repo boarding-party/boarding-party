@@ -47,3 +47,25 @@ func TestGetTraceSummary(t *testing.T) {
 		t.Fatalf("summary not kept: %v", names)
 	}
 }
+
+// A summary kept by an older reader is worked out again, even though it is
+// newer than the trace.
+func TestGetTraceRereadsOldSummary(t *testing.T) {
+	srv, _, svc := setupBoth(t, 1<<20)
+	run := startRun(t, srv, svc)
+	b, err := os.ReadFile("../tracesum/testdata/trace.zip")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Artifacts.Put(run.ID, "trace.zip", bytes.NewReader(b)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Artifacts.Put(run.ID, tracesum.SummaryName, bytes.NewReader([]byte(`{"actions":[],"network":[]}`))); err != nil {
+		t.Fatal(err)
+	}
+	r := do(t, "GET", srv.URL+"/api/runs/"+run.ID+"/trace", "")
+	var s tracesum.Summary
+	if err := json.NewDecoder(r.Body).Decode(&s); err != nil || len(s.Actions) < 5 || s.Version != tracesum.Version {
+		t.Fatalf("summary = %d actions, version %d, %v", len(s.Actions), s.Version, err)
+	}
+}

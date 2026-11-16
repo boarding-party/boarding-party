@@ -15,7 +15,7 @@ const traceName = "trace.zip"
 
 // getTrace serves the summary of a run's trace: its actions, page URLs and
 // network requests. It is worked out once and kept as an artifact, again
-// whenever the trace is newer than the kept summary.
+// whenever the trace is newer than the kept summary or an older reader kept it.
 func (s *server) getTrace(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	f, err := s.svc.Artifacts.Open(id, traceName)
@@ -31,13 +31,18 @@ func (s *server) getTrace(w http.ResponseWriter, r *http.Request) {
 	}
 	if kept, err := s.svc.Artifacts.Open(id, tracesum.SummaryName); err == nil {
 		ki, err := kept.Stat()
-		if err == nil && !ki.ModTime().Before(fi.ModTime()) {
-			defer kept.Close()
-			w.Header().Set("Content-Type", "application/json")
-			io.Copy(w, kept)
-			return
+		fresh := err == nil && !ki.ModTime().Before(fi.ModTime())
+		var b []byte
+		if fresh {
+			b, err = io.ReadAll(kept)
 		}
 		kept.Close()
+		var v struct{ Version int }
+		if fresh && err == nil && json.Unmarshal(b, &v) == nil && v.Version == tracesum.Version {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write(b)
+			return
+		}
 	}
 	ra, ok := f.(io.ReaderAt)
 	if !ok {

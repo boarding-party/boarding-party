@@ -25,6 +25,9 @@ import (
 // SummaryName is the artifact the director keeps a run's summary in.
 const SummaryName = "trace-summary.json"
 
+// Version is this reader's: a kept summary with another is read again.
+const Version = 2
+
 // ErrNotTrace means the zip holds no Playwright trace.
 var ErrNotTrace = errors.New("not a Playwright trace")
 
@@ -37,7 +40,7 @@ const (
 	maxTotalBytes = 256 << 20 // uncompressed, all entries together
 	maxEntries    = 32        // .trace and .network entries: a run makes one or two of each
 	maxActions    = 20000
-	maxLine       = 1 << 20  // snapshot lines carry whole pages; longer ones are skipped
+	maxLine       = 1 << 20 // snapshot lines carry whole pages; longer ones are skipped
 	maxResources  = 5000
 	maxHeader     = 1024
 	maxTitle      = 200
@@ -45,6 +48,7 @@ const (
 
 // Summary is a trace as the run page uses it.
 type Summary struct {
+	Version int        `json:"version"`
 	Actions []Action   `json:"actions"`
 	Network []Resource `json:"network"`
 }
@@ -85,7 +89,7 @@ func Read(r io.ReaderAt, size int64) (Summary, error) {
 	if err != nil {
 		return Summary{}, err
 	}
-	out := Summary{Actions: []Action{}, Network: []Resource{}}
+	out := Summary{Version: Version, Actions: []Action{}, Network: []Resource{}}
 	traces, entries := 0, 0
 	budget := int64(maxTotalBytes) // shared by every entry read
 	for _, f := range z.File {
@@ -192,11 +196,18 @@ type event struct {
 	Snapshot *struct {
 		SnapshotName string `json:"snapshotName"`
 		FrameURL     string `json:"frameUrl"`
+		CallID       string `json:"callId"`
+		Phase        string `json:"phase"`
+		PageID       string `json:"pageId"`
+		IsMainFrame  bool   `json:"isMainFrame"`
 	} `json:"snapshot"`
 }
 
 // readActions reads one .trace entry. Its times are monotonic milliseconds;
-// the context-options line pins them to the wall clock.
+// the context-options line pins them to the wall clock. Version 8 names a
+// call's page and snapshots on the call; version 10 (what the worker writes)
+// names them on its frame snapshots, by call id and phase. A call with no
+// page is a browser or context call: nothing on the page.
 func readActions(lines iter.Seq[[]byte]) ([]Action, error) {
 	var (
 		wall, mono float64
@@ -205,6 +216,8 @@ func readActions(lines iter.Seq[[]byte]) ([]Action, error) {
 		calls      = map[string]*Action{}
 		snaps      = map[string]string{} // call id -> snapshot name to show
 		pageURL    = map[string]string{} // snapshot name -> main frame URL (its first frame)
+		phases     = map[string]string{} // version 10: call id -> the phase to show
+		pages      = map[string]string{} // version 10: call id -> page id
 	)
 	at := func(ms float64) time.Time {
 		return time.UnixMilli(0).Add(time.Duration((wall + ms - mono) * float64(time.Millisecond))).UTC()
@@ -218,8 +231,8 @@ func readActions(lines iter.Seq[[]byte]) ([]Action, error) {
 		case "context-options":
 			wall, mono, clocked = e.WallTime, e.MonotonicTime, true
 		case "before":
-			if e.PageID == "" || !clocked {
-				continue // browser and context calls: nothing on the page
+			if !clocked {
+				continue
 			}
 			calls[e.CallID] = &Action{Title: title(e.Method, e.Params), Start: at(e.StartTime), End: at(e.StartTime), PageID: e.PageID}
 			snaps[e.CallID] = e.Before
@@ -237,9 +250,20 @@ func readActions(lines iter.Seq[[]byte]) ([]Action, error) {
 				a.Error = cut(cleanText(firstLine(e.Error.Error.Message)), maxTitle)
 			}
 		case "frame-snapshot":
-			if s := e.Snapshot; s != nil && s.SnapshotName != "" {
+			s := e.Snapshot
+			switch {
+			case s == nil:
+			case s.SnapshotName != "":
 				if _, ok := pageURL[s.SnapshotName]; !ok {
 					pageURL[s.SnapshotName] = cleanURL(s.FrameURL)
+				}
+			case s.CallID != "" && (s.Phase == "before" || s.Phase == "after"):
+				pages[s.CallID] = s.PageID
+				if phases[s.CallID] != "after" {
+					phases[s.CallID] = s.Phase
+				}
+				if s.IsMainFrame {
+					pageURL[s.Phase+"@"+s.CallID] = cleanURL(s.FrameURL)
 				}
 			}
 		}
@@ -251,6 +275,12 @@ func readActions(lines iter.Seq[[]byte]) ([]Action, error) {
 	for _, id := range order {
 		a := calls[id]
 		a.Snapshot = snaps[id]
+		if p := phases[id]; p != "" && a.Snapshot == "" {
+			a.Snapshot, a.PageID = p+"@"+id, pages[id]
+		}
+		if a.PageID == "" {
+			continue
+		}
 		a.CallID = id
 		a.Phase, _, _ = strings.Cut(a.Snapshot, "@")
 		a.PageURL = pageURL[a.Snapshot]
@@ -359,7 +389,7 @@ func cleanText(s string) string { return urlInText.ReplaceAllStringFunc(s, clean
 
 var (
 	roleName = regexp.MustCompile(`^internal:role=([a-z]+)\[name="(.*)"[is]?\]$`)
-	quoted   = regexp.MustCompile(`^internal:(?:text|label|testid|attr)=(?:\[[a-z-]+=)?"(.*)"[is]?\]?$`)
+	quoted   = regexp.MustCompile(`^internal:(?:text|label|testid|attr|describe)=(?:\[[a-z-]+=)?"(.*)"[is]?\]?$`)
 )
 
 // title names a call the way a person reads it: "click button "Pay now"".

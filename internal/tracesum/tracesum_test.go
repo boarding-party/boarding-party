@@ -226,3 +226,46 @@ func TestReadCapsWholeTrace(t *testing.T) {
 		t.Fatalf("%d trace entries = %v, want ErrTooBig", maxEntries+1, err)
 	}
 }
+
+// The trace format the worker's Playwright writes (version 10) names no page
+// or snapshot on a call: its frame snapshots carry the call id, the phase
+// and the page. Only calls with a snapshot touch the page.
+func TestReadVersion10(t *testing.T) {
+	lines := []string{
+		`{"type":"context-options","version":10,"wallTime":1794786831088,"monotonicTime":5468.559}`,
+		`{"type":"before","callId":"c@13","startTime":10956.9,"class":"BrowserContext","method":"newPage","params":{}}`,
+		`{"type":"after","callId":"c@13","endTime":11205.5}`,
+		`{"type":"before","callId":"c@42","startTime":11391.57,"class":"Frame","method":"goto","params":{"url":"https://example.com/?token=abc"}}`,
+		`{"type":"frame-snapshot","snapshot":{"callId":"c@42","phase":"before","pageId":"page@1","frameUrl":"about:blank","isMainFrame":true}}`,
+		`{"type":"after","callId":"c@42","endTime":11891.57}`,
+		`{"type":"frame-snapshot","snapshot":{"callId":"c@42","phase":"after","pageId":"page@1","frameUrl":"https://ads.example.net/frame","isMainFrame":false}}`,
+		`{"type":"frame-snapshot","snapshot":{"callId":"c@42","phase":"after","pageId":"page@1","frameUrl":"https://example.com/?token=abc","isMainFrame":true}}`,
+		`{"type":"before","callId":"c@50","startTime":12000,"class":"Frame","method":"title","params":{}}`,
+		`{"type":"after","callId":"c@50","endTime":12001}`,
+		`{"type":"before","callId":"c@84","startTime":16501.7,"class":"Frame","method":"click","params":{"selector":"aria-ref=e136 >> internal:describe=\"Open Invoice Generator link\""}}`,
+		`{"type":"frame-snapshot","snapshot":{"callId":"c@84","phase":"before","pageId":"page@1","frameUrl":"https://example.com/","isMainFrame":true}}`,
+		`{"type":"after","callId":"c@84","endTime":16600,"error":{"error":{"message":"Timeout 5000ms exceeded"}}}`,
+	}
+	var out bytes.Buffer
+	w := zip.NewWriter(&out)
+	dst, _ := w.Create("traces/trace-1.trace")
+	dst.Write([]byte(strings.Join(lines, "\n")))
+	w.Close()
+	s, err := read(t, out.Bytes())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(s.Actions) != 2 {
+		t.Fatalf("got %d actions, want the goto and the click: %+v", len(s.Actions), s.Actions)
+	}
+	g, c := s.Actions[0], s.Actions[1]
+	if g.CallID != "c@42" || g.Phase != "after" || g.PageID != "page@1" || g.PageURL != "https://example.com/" {
+		t.Errorf("goto: %+v", g)
+	}
+	if want := time.UnixMilli(1794786831088 + 11391 - 5468).UTC(); g.Start.Sub(want).Abs() > time.Millisecond {
+		t.Errorf("goto starts %v, want %v", g.Start, want)
+	}
+	if c.CallID != "c@84" || c.Phase != "before" || c.Error == "" || c.Title != `click "Open Invoice Generator link"` {
+		t.Errorf("click: %+v", c)
+	}
+}
