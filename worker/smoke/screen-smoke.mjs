@@ -40,6 +40,10 @@ const p2 = await ctx.newPage();
 await p2.goto('data:text/html,<body style="background:blue"><h1>two</h1>');
 const secondOpened = Date.now();
 await sleep(4000);
+// Measure only (no assertion yet): what pixel size the live frames and a CDP
+// screenshot come out at on a 3x phone, to choose how the live view captures.
+const cdp = await ctx.newCDPSession(p2);
+const shot = Buffer.from((await cdp.send('Page.captureScreenshot', { format: 'jpeg', quality: 80 })).data, 'base64');
 
 screen.kill();
 await ctx.close();
@@ -75,6 +79,13 @@ if (webm && ffdir) {
   if (Math.abs(w / h - want.width / want.height) > 0.01) fail(`video ${w}x${h} not ${want.width}x${want.height}-proportional`);
   videoNote = `video ${w}x${h}`;
 }
+const jpegSize = (b) => {
+  for (let i = 2; i + 9 < b.length; i += 2 + b.readUInt16BE(i + 2)) {
+    if (b[i + 1] >= 0xc0 && b[i + 1] <= 0xc2) return `${b.readUInt16BE(i + 7)}x${b.readUInt16BE(i + 5)}`;
+  }
+  return '?';
+};
+console.log(`measure: dpr ${iphone.deviceScaleFactor}, live frame ${jpegSize(frames.at(-1).body)} (${frames.at(-1).body.length} B), captureScreenshot ${jpegSize(shot)} (${shot.length} B)`);
 console.log(`ok ${frames.length} frames; ${videoNote}`);
 
 // ---- Case 2: the real wrapper end to end over stdio JSON-RPC -------------------------
