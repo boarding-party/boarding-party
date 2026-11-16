@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"iter"
 	"net/url"
 	"path"
 	"regexp"
@@ -30,7 +31,7 @@ var ErrNotTrace = errors.New("not a Playwright trace")
 // Bounds on what is read: a trace is the site's data and can be anything.
 const (
 	maxEntryBytes = 64 << 20 // uncompressed, per .trace or .network entry
-	maxLine       = 1 << 20  // snapshot lines carry whole pages
+	maxLine       = 1 << 20  // snapshot lines carry whole pages; longer ones are skipped
 	maxResources  = 5000
 	maxHeader     = 1024
 	maxTitle      = 200
@@ -108,22 +109,48 @@ func Read(r io.ReaderAt, size int64) (Summary, error) {
 	return out, nil
 }
 
-func readEntry[T any](f *zip.File, read func(*bufio.Scanner) ([]T, error)) ([]T, error) {
+func readEntry[T any](f *zip.File, read func(iter.Seq[[]byte]) ([]T, error)) ([]T, error) {
 	rc, err := f.Open()
 	if err != nil {
 		return nil, err
 	}
 	defer rc.Close()
-	sc := bufio.NewScanner(io.LimitReader(rc, maxEntryBytes))
-	sc.Buffer(make([]byte, 64<<10), maxLine)
-	out, err := read(sc)
+	var readErr error
+	out, err := read(lines(bufio.NewReaderSize(io.LimitReader(rc, maxEntryBytes), 64<<10), &readErr))
 	if err != nil {
 		return nil, err
 	}
-	if err := sc.Err(); err != nil && !errors.Is(err, bufio.ErrTooLong) {
-		return nil, err
+	return out, readErr
+}
+
+// lines yields each line of r, skipping any longer than maxLine (a snapshot
+// of a heavy page): the lines after it still count. A read error other than
+// the end of the entry lands in *err.
+func lines(r *bufio.Reader, err *error) iter.Seq[[]byte] {
+	return func(yield func([]byte) bool) {
+		var line []byte
+		long := false
+		for {
+			chunk, isPrefix, e := r.ReadLine()
+			if e != nil {
+				if !errors.Is(e, io.EOF) {
+					*err = e
+				}
+				return
+			}
+			if !long {
+				line = append(line, chunk...)
+				long = len(line) > maxLine
+			}
+			if isPrefix {
+				continue
+			}
+			if !long && !yield(line) {
+				return
+			}
+			line, long = line[:0], false
+		}
 	}
-	return out, nil
 }
 
 // event is the union of the trace lines read here.
@@ -152,7 +179,7 @@ type event struct {
 
 // readActions reads one .trace entry. Its times are monotonic milliseconds;
 // the context-options line pins them to the wall clock.
-func readActions(sc *bufio.Scanner) ([]Action, error) {
+func readActions(lines iter.Seq[[]byte]) ([]Action, error) {
 	var (
 		wall, mono float64
 		clocked    bool
@@ -164,9 +191,9 @@ func readActions(sc *bufio.Scanner) ([]Action, error) {
 	at := func(ms float64) time.Time {
 		return time.UnixMilli(0).Add(time.Duration((wall + ms - mono) * float64(time.Millisecond))).UTC()
 	}
-	for sc.Scan() {
+	for l := range lines {
 		var e event
-		if json.Unmarshal(sc.Bytes(), &e) != nil {
+		if json.Unmarshal(l, &e) != nil {
 			continue
 		}
 		switch e.Type {
@@ -238,11 +265,14 @@ type harEntry struct {
 	} `json:"snapshot"`
 }
 
-func readNetwork(sc *bufio.Scanner) ([]Resource, error) {
+func readNetwork(lines iter.Seq[[]byte]) ([]Resource, error) {
 	var out []Resource
-	for sc.Scan() && len(out) < maxResources {
+	for l := range lines {
+		if len(out) >= maxResources {
+			break
+		}
 		var e harEntry
-		if json.Unmarshal(sc.Bytes(), &e) != nil || e.Type != "resource-snapshot" {
+		if json.Unmarshal(l, &e) != nil || e.Type != "resource-snapshot" {
 			continue
 		}
 		s := e.Snapshot

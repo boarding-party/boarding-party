@@ -163,3 +163,42 @@ func TestErrorTextLosesQueries(t *testing.T) {
 		t.Fatalf("comma in path kept the query: %q", got)
 	}
 }
+
+// A snapshot line over the line limit is skipped; the actions after it stay.
+func TestReadSkipsHugeLines(t *testing.T) {
+	b := fixture(t)
+	z, err := zip.NewReader(bytes.NewReader(b), int64(len(b)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	w := zip.NewWriter(&out)
+	for _, f := range z.File {
+		rc, _ := f.Open()
+		data, _ := io.ReadAll(rc)
+		rc.Close()
+		if f.Name == "trace.trace" {
+			lines := bytes.Split(data, []byte("\n"))
+			mid := len(lines) / 2
+			huge := []byte(`{"type":"frame-snapshot","snapshot":{"html":"` + strings.Repeat("x", 2<<20) + `"}}`)
+			lines = append(lines[:mid], append([][]byte{huge}, lines[mid:]...)...)
+			data = bytes.Join(lines, []byte("\n"))
+		}
+		dst, _ := w.Create(f.Name)
+		dst.Write(data)
+	}
+	w.Close()
+	want, _ := read(t, b)
+	got, err := read(t, out.Bytes())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Actions) != len(want.Actions) {
+		t.Fatalf("with a 2 MiB line: %d actions, want %d", len(got.Actions), len(want.Actions))
+	}
+	for i, a := range got.Actions {
+		if a.End.Equal(a.Start) && want.Actions[i].End.After(want.Actions[i].Start) {
+			t.Errorf("action %d %q lost its end", i, a.Title)
+		}
+	}
+}
