@@ -12,6 +12,10 @@ import { LeadPage, leadHref } from './leads.js';
 import { Coverage, LEAD_STORY, isLead } from './coverage.js';
 import { ConsoleCard, ConsoleBefore, fenced } from './console.js';
 import { Timeline } from './timeline.js';
+import { Studio } from './studio.js';
+import { ThoughtsPanel, Caption } from './thoughts.js';
+import { NetworkPanel } from './network.js';
+import { captionAt, nearest } from './studio-time.js';
 import { Shot } from './shot.js';
 import { JourneysPage, JourneyPage, journeyHref } from './journeys.js';
 
@@ -231,10 +235,10 @@ function App() {
   const full = withChildren(project, children);
 
   return html`
-    <div class="app">
-      <${Sidebar} route=${route} project=${project} runs=${runs} leads=${leads} children=${children} />
+    <div class=${'app' + (route.page === 'run' ? ' studio-mode' : '')}>
+      ${route.page === 'run' ? null : html`<${Sidebar} route=${route} project=${project} runs=${runs} leads=${leads} children=${children} />`}
       <main>
-        <${RunStrip} director=${director} active=${active} status=${status} onChange=${loadRuns} />
+        ${route.page === 'run' ? null : html`<${RunStrip} director=${director} active=${active} status=${status} onChange=${loadRuns} />`}
         ${route.page === 'run' ? html`<${RunPage} key=${route.id} id=${route.id} onChange=${loadRuns} />`
           : route.page === 'project' ? html`<${ProjectPage} section=${route.section} roleN=${route.roleN} onSaved=${loadProject} onDirty=${onDirty} />`
           : route.page === 'inbox' ? html`<${InboxPage} project=${project} />`
@@ -973,7 +977,35 @@ function RunPage({ id, onChange }) {
   const [frames, setFrames] = useState([]); // kept screen frames, Unix ms
   const [scrub, setScrub] = useState(null); // Unix ms shown instead of live/end; null = live
   const [playing, setPlaying] = useState(false);
+  const [tab, setTab] = useState(() => routeParams().tab || 'thoughts');
+  const [trace, setTrace] = useState({ state: 'loading' });
   const runActive = !!(data && data.run && ACTIVE.has(data.run.state));
+  const hasTrace = !!(data && (data.artifacts || []).includes('trace.zip'));
+  // The trace summary (actions, page URLs, requests) once the run has ended
+  // and uploaded its trace.
+  useEffect(() => {
+    if (!data) return undefined;
+    if (runActive) { setTrace({ state: 'live' }); return undefined; }
+    if (!hasTrace) { setTrace({ state: 'none' }); return undefined; }
+    let live = true;
+    setTrace({ state: 'loading' });
+    api(`api/runs/${encodeURIComponent(id)}/trace`)
+      .then((summary) => { if (live) setTrace({ state: 'ok', summary }); })
+      .catch((e) => { if (live) setTrace({ state: 'error', error: e.message }); });
+    return () => { live = false; };
+  }, [id, runActive, hasTrace, !!data]);
+  const pickTab = (t) => { setTab(t); setParams({ tab: t === 'thoughts' ? '' : t }); };
+  // Space plays and pauses, as in a video player, unless focus is on a control.
+  useEffect(() => {
+    const key = (e) => {
+      if (e.key !== ' ' || e.repeat || e.target.closest?.('input, textarea, select, button, a, video, [contenteditable], [role="tabpanel"]')) return;
+      const v = video.current;
+      if (v) { e.preventDefault(); if (v.paused) v.play().catch(() => {}); else v.pause(); }
+      else if (frames.length) { e.preventDefault(); setPlaying((p) => !p); }
+    };
+    addEventListener('keydown', key);
+    return () => removeEventListener('keydown', key);
+  }, [frames.length]);
   // ?t= is seconds into the run: a link opens there once, and scrubbing or
   // pausing the video writes it back so the address can be shared.
   const wantT = useRef(routeParams().t);
@@ -1066,7 +1098,7 @@ function RunPage({ id, onChange }) {
     return html`<a href=${runHref(rid)}>${c ? `${c.persona} · ${c.story}` : rid}</a>`;
   };
   const continuedBy = links.filter((c) => c.follows === run.id);
-  const files = artifacts.filter((n) => n !== BLOCKED_NAME && n !== USAGE_NAME);
+  const files = artifacts.filter((n) => !HIDDEN_FILES.has(n));
   const webm = artifacts.find((n) => n.toLowerCase().endsWith('.webm'));
   const started = parseTime(run.started), finished = parseTime(run.finished);
   const took = started ? fmtDuration((finished || new Date()) - started) : '';
@@ -1101,102 +1133,151 @@ function RunPage({ id, onChange }) {
     if (framesMode && b) toTime(b.created);
     if (secs !== null && (!duration || secs <= Math.ceil(duration))) seek(secs);
     setLit(b ? b.id : '');
-    const el = document.getElementById('bug-' + i);
-    if (el) el.scrollIntoView({ block: 'nearest', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+    pickTab('bugs');
+    requestAnimationFrame(() => {
+      const el = document.getElementById('bug-' + i);
+      if (el) el.scrollIntoView({ block: 'nearest', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+    });
   };
   const toEvent = (i) => {
     if (framesMode && events[i]) toTime(events[i].at);
+    pickTab('console');
     setConFocus((f) => ({ i, n: (f ? f.n : 0) + 1, quiet: framesMode }));
   };
   const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
   const replay = run.kind === 'replay';
 
-  return html`
-    <section class="page runpage">
-      <p class="crumb"><a href="#/runs">Runs</a> / ${run.id}</p>
-      <header class="runhead">
-        <h1>${run.persona} <span class="muted">on</span> ${run.story} <${StateTag} state=${run.state} wait=${wait} /></h1>
-        <ul class="readout">
-          ${replay ? html`<li><b>${replayLabel(run)}</b></li>` : null}
-          <li>${run.role || 'Persona'}</li>
-          <li>Started ${fmtFull(run.started)}</li>
-          ${took ? html`<li><b>${took}</b>${active ? ' so far' : ''}</li>` : null}
-          ${typeof data.cost === 'number' ? html`<li><b>${runCost(run, data.cost)}</b></li>` : null}
-          ${usage ? html`<li><b>${usage.turns || 0}</b> ${usage.turns === 1 ? 'turn' : 'turns'}</li>` : null}
-          <li><a href="#bugs" onClick=${(e) => { e.preventDefault(); document.getElementById('bugs').scrollIntoView({ block: 'start' }); }}><b>${bugs.length}</b> ${bugs.length === 1 ? 'bug' : 'bugs'}</a></li>
-          ${run.story !== LEAD_STORY ? html`<li><a href="#console" class=${conErrors ? 'bad-text' : ''} onClick=${(e) => { e.preventDefault(); document.getElementById('console').scrollIntoView({ block: 'start' }); }}><b>${conErrors}</b> console ${conErrors === 1 ? 'error' : 'errors'}</a></li>` : null}
-          ${blocked.length ? html`<li><a href="#blocked" onClick=${(e) => { e.preventDefault(); const d = document.getElementById('blocked'); d.open = true; d.scrollIntoView({ block: 'start' }); }}>${plural(blocked.length, 'blocked host', 'blocked hosts')}</a></li>` : null}
-        </ul>
-      </header>
-      ${err ? html`<div class="note bad banner">Lost contact with the director: ${err}. ${gaveUp ? 'Reload the page to try again.' : 'Retrying.'}</div>` : null}
-      ${run.restarts?.length ? html`<div class="note banner">Restarted ${run.restarts.length === 1 ? 'once' : `${run.restarts.length} times`}, last at ${fmtFull(run.restarts[run.restarts.length - 1])}:
-        the run's pod was replaced (a Spot node taken back, or an evicted pod) and the agent started again from the beginning.
-        The video covers the last attempt only.</div>` : null}
-      <div class="grid g-side">
-        <div class="stack">
-          <div class="recorder">
-            <div class=${'player' + (active || framesMode ? ' live' : '')}>
-              ${framesMode && (scrub !== null || !active) ? html`<${FrameView} id=${run.id} frames=${frames} at=${scrub} started=${run.started}
-                  active=${active} playing=${playing} onPlay=${setPlaying} onLive=${() => { setPlaying(false); setScrub(null); }} />`
-              : active ? html`<${LiveView} key=${run.id} id=${run.id} stage=${data.stage} reason=${data.stageReason} started=${run.started} />` : webm ? html`<video ref=${video} key=${webm} src=${artifactURL(run.id, webm)} controls preload="metadata" playsinline
-                  onLoadedMetadata=${(e) => { const d = e.currentTarget.duration; setDuration(d > 0 ? d : 0); }}
-                  onTimeUpdate=${(e) => setVt(e.currentTarget.currentTime)} onSeeking=${(e) => setVt(e.currentTarget.currentTime)}
-                  onPause=${(e) => { if (wantT.current == null) setParams({ t: Math.round(e.currentTarget.currentTime) }); }}></video>`
-                : html`<p>This run has no recording.</p>`}
-            </div>
-            <${Timeline} run=${run} bugs=${bugs} events=${run.story !== LEAD_STORY ? events : null} blocked=${blocked}
-              active=${active} onBug=${toBug} onEvent=${toEvent}
-              scrubs=${framesMode || videoSync} scrub=${framesMode ? (scrub ?? (active ? null : frames[frames.length - 1])) : videoSync ? videoStart + vt * 1000 : null}
-              onScrub=${framesMode ? (ms) => { setPlaying(false); setScrub(frames[frameAt(frames, ms)]); } : toVideo} />
-          </div>
-          <div class="card" id="bugs">
-            <div class="row between"><h2>Bugs</h2><span class="small muted">${bugs.length && webm ? 'A bug with a time jumps the video there.' : ''}</span></div>
-            ${bugs.length ? html`<ol class="bugs">${bugs.map((b, i) => html`<li key=${b.id} id=${'bug-' + i} class=${lit === b.id ? 'lit' : ''}>
-              <${Bug} n=${i + 1} bug=${b} runId=${run.id} artifacts=${artifacts} duration=${webm ? duration : 0} onSeek=${seek} />
-              <${ConsoleBefore} bug=${b} events=${events} blocked=${blocked} started=${run.started} /></li>`)}</ol>`
-              : html`<p class="muted small" style="margin:0">${active ? 'No bugs reported so far.' : 'No bugs reported.'}</p>`}
-          </div>
-          ${run.story !== LEAD_STORY ? html`<${ConsoleCard} events=${events} blocked=${blocked} started=${run.started} active=${active} focus=${conFocus} />` : null}
-        </div>
-        <div class="stack">
-          <div class="card">
-            <h2>Outcome</h2>
-            <p class="runverdict">${run.outcome || (active ? (replay ? 'Replaying. The outcome appears when the journey ends.' : 'Running. The outcome appears when the persona finishes.') : 'No outcome recorded.')}</p>
-          </div>
-          ${replay ? html`<${ReplayCard} run=${run} artifacts=${artifacts} copilot=${data.copilot} />` : null}
-          ${chain || queued ? html`<${Chain} links=${links} current=${run.id} queued=${queued || []} />` : null}
-          ${data.settings && data.settings.length ? html`<${PersonaCard} run=${run} settings=${data.settings} />` : null}
-          <div class="card">
-            <h2>Details</h2>
-            <dl class="facts">
-              ${data.settings && data.settings.length ? null : html`<dt>Persona</dt><dd>${run.persona}</dd>
-              ${run.role ? html`<dt>Role</dt><dd>${run.role}</dd>` : null}`}
-              <dt>Story</dt><dd>${run.story}</dd>
-              <dt>State</dt><dd><${StateTag} state=${run.state} wait=${wait} /></dd>
-              ${wait ? html`<dt>Waiting for</dt><dd>${waitText(wait)}</dd>` : null}
-              ${run.follows && run.via === 'continue' ? html`<dt>Continues</dt><dd>${runLink(run.follows)}</dd>` : null}
-              ${run.follows && run.via === 'handoff' ? html`<dt>Handed off by</dt><dd>${runLink(run.follows)}</dd>` : null}
-              ${continuedBy.length ? html`<dt>Continued by</dt><dd>${continuedBy.map((c, i) => html`${i ? ', ' : ''}${runLink(c.id)}`)}</dd>` : null}
-              <dt>Started</dt><dd>${fmtFull(run.started) || '—'}</dd>
-              <dt>Finished</dt><dd>${fmtFull(run.finished) || '—'}</dd>
-              ${took ? html`<dt>Duration</dt><dd>${took}</dd>` : null}
-              ${usage && usage.byModel ? html`<dt>Model</dt><dd>${fmtModels(usage.byModel)}</dd>` : null}
-              ${usage ? html`<dt>Tokens</dt><dd>${fmtUsage(usage)}</dd>` : null}
-              ${typeof data.cost === 'number' ? html`<dt>Cost</dt><dd>${runCost(run, data.cost)}</dd>` : null}
-              ${run.session ? html`<dt>Session</dt><dd><code>${run.session}</code></dd>` : null}
-            </dl>
-          </div>
-          <div class="card">
-            <h2>Files</h2>
-            ${files.length ? html`<ul class="files">${files.map((n) => html`
-              <li key=${n}><a href=${artifactURL(run.id, n)} download=${n}>${n}</a>
-                ${n === 'trace.zip' ? html`<span class="hint">Open it with <code>npx playwright show-trace trace.zip</code></span>` : null}</li>`)}</ul>`
-              : html`<p class="muted small" style="margin:0">No files yet.</p>`}
-          </div>
-          ${blocked.length ? html`<${BlockedHosts} hosts=${blocked} />` : null}
-        </div>
-      </div>
-    </section>`;
+  const lead = run.story === LEAD_STORY;
+  const narration = data.narration || [];
+  const actions = trace.state === 'ok' ? trace.summary.actions || [] : [];
+  const entries = replay
+    ? actions.map((a) => ({ at: a.start, kind: 'action', text: a.error ? `${a.title}: ${a.error}` : a.title }))
+    : narration;
+  // The playhead on the run's clock (Unix ms): the frame shown, the video's
+  // time, or now while live.
+  const playhead = framesMode ? (scrub ?? (active ? Date.now() : frames[frames.length - 1]))
+    : videoSync ? videoStart + vt * 1000
+    : active ? Date.now() : null;
+  const caption = replay || playhead == null ? null
+    : captionAt(narration, playhead, active && !framesMode ? 20000 : 6000);
+  const seekMs = (ms) => {
+    if (!Number.isFinite(ms)) return;
+    if (framesMode) { setPlaying(false); setScrub(frames[frameAt(frames, ms)]); }
+    else if (videoSync) toVideo(ms);
+  };
+  const pageURL = actions.length && playhead != null
+    ? actions[nearest(actions, playhead, (a) => Date.parse(a.start))].pageUrl || '' : '';
+  const network = trace.state === 'ok' ? trace.summary.network || [] : [];
+  const netBad = network.filter((r) => r.failed || r.status >= 400).length;
+  const toTab = (t, el) => (e) => {
+    e.preventDefault();
+    pickTab(t);
+    if (el) requestAnimationFrame(() => { const d = document.getElementById(el); if (d) { d.open = true; d.scrollIntoView({ block: 'start' }); } });
+  };
+
+  const top = html`
+    <header class="studio-top">
+      <a class="back" href="#/runs">← Runs</a>
+      <h1>${run.persona} <span class="muted">on</span> ${run.story} <${StateTag} state=${run.state} wait=${wait} /></h1>
+      <ul class="readout">
+        ${replay ? html`<li><b>${replayLabel(run)}</b></li>` : null}
+        <li>${run.role || 'Persona'}</li>
+        <li>Started ${fmtFull(run.started)}</li>
+        ${took ? html`<li><b>${took}</b>${active ? ' so far' : ''}</li>` : null}
+        ${typeof data.cost === 'number' ? html`<li><b>${runCost(run, data.cost)}</b></li>` : null}
+        ${usage ? html`<li><b>${usage.turns || 0}</b> ${usage.turns === 1 ? 'turn' : 'turns'}</li>` : null}
+        ${blocked.length ? html`<li><a href="#blocked" onClick=${toTab('info', 'blocked')}>${plural(blocked.length, 'blocked host', 'blocked hosts')}</a></li>` : null}
+      </ul>
+    </header>`;
+  const banners = html`
+    ${err ? html`<div class="note bad banner">Lost contact with the director: ${err}. ${gaveUp ? 'Reload the page to try again.' : 'Retrying.'}</div>` : null}
+    ${run.restarts?.length ? html`<div class="note banner">Restarted ${run.restarts.length === 1 ? 'once' : `${run.restarts.length} times`}, last at ${fmtFull(run.restarts[run.restarts.length - 1])}:
+      the run's pod was replaced (a Spot node taken back, or an evicted pod) and the agent started again from the beginning.
+      The video covers the last attempt only.</div>` : null}`;
+
+  const stage = lead ? null : html`
+    <div class="stage-bar">
+      ${pageURL ? html`<span class="urlline" title=${pageURL}>${pageURL}</span>`
+        : html`<span class="urlline muted">${active ? 'The page address shows when the run ends.' : trace.state === 'loading' ? 'Reading the trace…' : ''}</span>`}
+    </div>
+    <div class=${'player' + (active || framesMode ? ' live' : '')}>
+      ${framesMode && (scrub !== null || !active) ? html`<${FrameView} id=${run.id} frames=${frames} at=${scrub} started=${run.started}
+          active=${active} playing=${playing} onPlay=${setPlaying} onLive=${() => { setPlaying(false); setScrub(null); }} />`
+      : active ? html`<${LiveView} key=${run.id} id=${run.id} stage=${data.stage} reason=${data.stageReason} started=${run.started} />` : webm ? html`<video ref=${video} key=${webm} src=${artifactURL(run.id, webm)} controls preload="metadata" playsinline
+          onLoadedMetadata=${(e) => { const d = e.currentTarget.duration; setDuration(d > 0 ? d : 0); }}
+          onTimeUpdate=${(e) => setVt(e.currentTarget.currentTime)} onSeeking=${(e) => setVt(e.currentTarget.currentTime)}
+          onPause=${(e) => { if (wantT.current == null) setParams({ t: Math.round(e.currentTarget.currentTime) }); }}></video>`
+        : html`<p>This run has no recording.</p>`}
+      <${Caption} entry=${caption} />
+    </div>
+    <${Timeline} run=${run} bugs=${bugs} events=${events} blocked=${blocked}
+      narration=${replay ? null : narration} onThought=${(i) => seekMs(Date.parse(narration[i].at))}
+      active=${active} onBug=${toBug} onEvent=${toEvent}
+      scrubs=${framesMode || videoSync} scrub=${framesMode ? (scrub ?? (active ? null : frames[frames.length - 1])) : videoSync ? videoStart + vt * 1000 : null}
+      onScrub=${framesMode ? (ms) => { setPlaying(false); setScrub(frames[frameAt(frames, ms)]); } : toVideo} />`;
+
+  const bugsPane = html`
+    ${bugs.length && webm ? html`<p class="small muted pane-note">A bug with a time jumps the video there.</p>` : null}
+    ${bugs.length ? html`<ol class="bugs">${bugs.map((b, i) => html`<li key=${b.id} id=${'bug-' + i} class=${lit === b.id ? 'lit' : ''}>
+      <${Bug} n=${i + 1} bug=${b} runId=${run.id} artifacts=${artifacts} duration=${webm ? duration : 0} onSeek=${seek} />
+      <${ConsoleBefore} bug=${b} events=${events} blocked=${blocked} started=${run.started} /></li>`)}</ol>`
+      : html`<p class="muted small pane-empty">${active ? 'No bugs reported so far.' : 'No bugs reported.'}</p>`}`;
+
+  const infoPane = html`
+    <div class="card">
+      <h2>Outcome</h2>
+      <p class="runverdict">${run.outcome || (active ? (replay ? 'Replaying. The outcome appears when the journey ends.' : 'Running. The outcome appears when the persona finishes.') : 'No outcome recorded.')}</p>
+    </div>
+    ${replay ? html`<${ReplayCard} run=${run} artifacts=${artifacts} copilot=${data.copilot} />` : null}
+    ${chain || queued ? html`<${Chain} links=${links} current=${run.id} queued=${queued || []} />` : null}
+    ${data.settings && data.settings.length ? html`<${PersonaCard} run=${run} settings=${data.settings} />` : null}
+    <div class="card">
+      <h2>Details</h2>
+      <dl class="facts">
+        ${data.settings && data.settings.length ? null : html`<dt>Persona</dt><dd>${run.persona}</dd>
+        ${run.role ? html`<dt>Role</dt><dd>${run.role}</dd>` : null}`}
+        <dt>Story</dt><dd>${run.story}</dd>
+        <dt>State</dt><dd><${StateTag} state=${run.state} wait=${wait} /></dd>
+        ${wait ? html`<dt>Waiting for</dt><dd>${waitText(wait)}</dd>` : null}
+        ${run.follows && run.via === 'continue' ? html`<dt>Continues</dt><dd>${runLink(run.follows)}</dd>` : null}
+        ${run.follows && run.via === 'handoff' ? html`<dt>Handed off by</dt><dd>${runLink(run.follows)}</dd>` : null}
+        ${continuedBy.length ? html`<dt>Continued by</dt><dd>${continuedBy.map((c, i) => html`${i ? ', ' : ''}${runLink(c.id)}`)}</dd>` : null}
+        <dt>Started</dt><dd>${fmtFull(run.started) || '—'}</dd>
+        <dt>Finished</dt><dd>${fmtFull(run.finished) || '—'}</dd>
+        ${took ? html`<dt>Duration</dt><dd>${took}</dd>` : null}
+        ${usage && usage.byModel ? html`<dt>Model</dt><dd>${fmtModels(usage.byModel)}</dd>` : null}
+        ${usage ? html`<dt>Tokens</dt><dd>${fmtUsage(usage)}</dd>` : null}
+        ${typeof data.cost === 'number' ? html`<dt>Cost</dt><dd>${runCost(run, data.cost)}</dd>` : null}
+        ${run.session ? html`<dt>Session</dt><dd><code>${run.session}</code></dd>` : null}
+      </dl>
+    </div>
+    <div class="card">
+      <h2>Files</h2>
+      ${files.length ? html`<ul class="files">${files.map((n) => html`
+        <li key=${n}><a href=${artifactURL(run.id, n)} download=${n}>${n}</a>
+          ${n === 'trace.zip' ? html`<a class="small" href=${traceViewerURL(run.id)} target="_blank" rel="noopener">Open full trace</a>` : null}</li>`)}</ul>`
+        : html`<p class="muted small" style="margin:0">No files yet.</p>`}
+    </div>
+    ${blocked.length ? html`<${BlockedHosts} hosts=${blocked} />` : null}`;
+
+  const tabs = lead
+    ? [{ id: 'thoughts', label: 'Thoughts', body: html`<${ThoughtsPanel} entries=${entries} started=${run.started} playhead=${null} onSeek=${() => {}} active=${active} />` },
+       { id: 'info', label: 'Info', body: infoPane }]
+    : [{ id: 'thoughts', label: replay ? 'Steps' : 'Thoughts', body: html`<${ThoughtsPanel} entries=${entries} started=${run.started}
+          playhead=${playhead} onSeek=${seekMs} active=${active} replay=${replay} />` },
+       { id: 'bugs', label: 'Bugs', count: bugs.length, body: bugsPane },
+       { id: 'console', label: 'Console', count: conErrors, bad: conErrors > 0,
+         body: html`<${ConsoleCard} events=${events} blocked=${blocked} started=${run.started} active=${active} focus=${conFocus} />` },
+       { id: 'network', label: 'Network', count: trace.state === 'ok' ? network.length : null, bad: netBad > 0,
+         body: html`<${NetworkPanel} trace=${trace} started=${run.started} onSeek=${seekMs} />` },
+       { id: 'info', label: 'Info', body: infoPane }];
+
+  return html`<${Studio} top=${top} banners=${banners} stage=${stage} tabs=${tabs} tab=${tab} onTab=${pickTab} />`;
+}
+
+// traceViewerURL opens a run's trace in the full Playwright trace viewer.
+function traceViewerURL(runID) {
+  return 'trace/index.html?trace=' + encodeURIComponent(new URL(artifactURL(runID, 'trace.zip'), location.href).href);
 }
 
 // ReplayCard shows what a replay ran: the journey revision, its seed and
@@ -1289,6 +1370,11 @@ function Chain({ links, current, queued }) {
 // in Details, not as a file.
 const USAGE_NAME = 'usage.json';
 
+// HIDDEN_FILES are the director's own records of a run, shown in their tabs
+// rather than as files: refused hosts (runs.BlockedName), token usage, the
+// narration (runs.NarrationName) and the trace summary (tracesum.SummaryName).
+const HIDDEN_FILES = new Set(['blocked-hosts.json', USAGE_NAME, 'narration.json', 'trace-summary.json']);
+
 // fmtUsage says how many tokens the agent read and wrote. Every turn re-reads
 // the conversation so far, so most of what it reads comes from the cache,
 // which costs a tenth of fresh input.
@@ -1313,9 +1399,6 @@ function fmtCount(n) {
   return String(n);
 }
 
-// BLOCKED_NAME is the director's saved list of refused hosts (runs.BlockedName);
-// the run page shows it as its own card, not as a file.
-const BLOCKED_NAME = 'blocked-hosts.json';
 const MAX_BLOCKED = 50;
 
 // PersonaCard is the profile the persona had when the run started: what the

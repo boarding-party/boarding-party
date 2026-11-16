@@ -16,6 +16,7 @@ jobs:
           go-version-file: go.mod
       - run: go vet ./...
       - run: go test -race ./...
+      - run: node --test 'internal/board/uitest/*.test.mjs'
 
   worker-smoke:
     needs: test

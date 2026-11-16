@@ -27,7 +27,9 @@ function ticks(span) {
 // With scrubs the track scrubs: click or drag to see the screen or the video
 // at that moment (onScrub gets Unix ms), and scrub (Unix ms, or null for live)
 // draws the playhead.
-export function Timeline({ run, bugs, events, blocked, active, onBug, onEvent, scrubs, scrub, onScrub }) {
+// narration, when given, adds a lane: thoughts as marks that seek, actions as
+// faint ticks that show how busy the persona was.
+export function Timeline({ run, bugs, events, blocked, narration, onThought, active, onBug, onEvent, scrubs, scrub, onScrub }) {
   const [now, setNow] = useState(Date.now());
   const [tip, setTip] = useState(null); // {x, text}
   useEffect(() => {
@@ -69,6 +71,13 @@ export function Timeline({ run, bugs, events, blocked, active, onBug, onEvent, s
     if (s !== null) conMarks.push({ e, i, s });
   });
   const errors = conMarks.filter((m) => m.e.level === 'error').length;
+  const saidMarks = [], didMarks = [];
+  (narration || []).forEach((e, i) => {
+    const s = at(e.at);
+    if (s === null) return;
+    if (e.kind === 'thought' && saidMarks.length < MAX_MARKS) saidMarks.push({ e, i, s });
+    else if (e.kind === 'action' && didMarks.length < MAX_MARKS) didMarks.push({ s });
+  });
   // Before the browser's first logged activity the run was starting: a
   // machine, the images, the agent. Shade it so the gap reads as setup.
   const first = (events || []).reduce((min, e) => { const s = at(e.at); return s !== null && (min === null || s < min) ? s : min; }, null);
@@ -115,6 +124,16 @@ export function Timeline({ run, bugs, events, blocked, active, onBug, onEvent, s
                 onClick=${() => onBug(i)}>${i + 1}</button>`; })}
           </div>
         </div>
+        ${narration ? html`<div class="tl-lane">
+          <span class="tl-name">Thoughts <b>${saidMarks.length}</b></span>
+          <div class="tl-track">
+            ${didMarks.map(({ s }, k) => html`<span key=${'a' + k} class="tl-did" style=${{ left: pct(s) }} aria-hidden="true"></span>`)}
+            ${saidMarks.map(({ e, i, s }) => html`
+              <button key=${i} type="button" class="tl-said" style=${{ left: pct(s) }} aria-label=${`Thought at ${clock(s)}: ${e.text}`}
+                onMouseEnter=${show(s, e.text)} onFocus=${show(s, e.text)} onBlur=${hide}
+                onClick=${() => onThought(i)}></button>`)}
+          </div>
+        </div>` : null}
         ${events ? html`<div class="tl-lane">
           <span class="tl-name">Console <b class=${errors ? 'bad' : ''}>${errors}</b></span>
           <div class="tl-track">
