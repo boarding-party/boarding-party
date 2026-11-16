@@ -40,21 +40,6 @@ const p2 = await ctx.newPage();
 await p2.goto('data:text/html,<body style="background:blue"><h1>two</h1>');
 const secondOpened = Date.now();
 await sleep(4000);
-// Measure only (no assertion yet): what pixel size the live frames and a CDP
-// screenshot come out at on a 3x phone, to choose how the live view captures.
-const cdp = await ctx.newCDPSession(p2);
-const shot = Buffer.from((await cdp.send('Page.captureScreenshot', { format: 'jpeg', quality: 80 })).data, 'base64');
-await p2.setContent('<p style="font:11px serif">' + 'Invoice total £540.00 VAT £90.00 '.repeat(200) + '</p>');
-let t0 = Date.now();
-const vp2 = p2.viewportSize();
-let scaled;
-for (let i = 0; i < 10; i++) scaled = Buffer.from((await cdp.send('Page.captureScreenshot', { format: 'jpeg', quality: 80, clip: { x: 0, y: 0, width: vp2.width, height: vp2.height, scale: 2 } })).data, 'base64');
-const scaledMs = (Date.now() - t0) / 10;
-t0 = Date.now();
-let plain;
-for (let i = 0; i < 10; i++) plain = Buffer.from((await cdp.send('Page.captureScreenshot', { format: 'jpeg', quality: 80 })).data, 'base64');
-const plainMs = (Date.now() - t0) / 10;
-const pw = await p2.screenshot({ type: 'jpeg', quality: 80 });
 
 screen.kill();
 await ctx.close();
@@ -96,9 +81,11 @@ const jpegSize = (b) => {
   }
   return '?';
 };
-console.log(`measure: dpr ${iphone.deviceScaleFactor}, live frame ${jpegSize(frames.at(-1).body)} (${frames.at(-1).body.length} B), captureScreenshot ${jpegSize(shot)} (${shot.length} B)`);
-console.log(`measure: text page plain ${jpegSize(plain)} ${plain.length} B ${plainMs} ms; clip scale 2 ${jpegSize(scaled)} ${scaled.length} B ${scaledMs} ms; playwright screenshot ${jpegSize(pw)}`);
-console.log(`ok ${frames.length} frames; ${videoNote}`);
+// Live frames on a 3x phone are drawn again at twice the CSS viewport, not
+// the screencast's CSS size, so small text stays readable.
+const [fw] = jpegSize(after.at(-1).body).split('x').map(Number);
+if (!(fw >= iphone.viewport.width * 1.9)) fail(`live frame ${jpegSize(after.at(-1).body)}, want about twice the ${iphone.viewport.width}px viewport`);
+console.log(`ok ${frames.length} frames, live ${jpegSize(after.at(-1).body)}; ${videoNote}`);
 
 // ---- Case 2: the real wrapper end to end over stdio JSON-RPC -------------------------
 // bp-browser starts bp-screen and execs Playwright MCP; stdout must carry only JSON-RPC.

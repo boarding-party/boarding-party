@@ -1,4 +1,7 @@
-// Streams the Chromium screen (CDP screencast) to the director as JPEG PUTs.
+// Streams the Chromium screen to the director as JPEG PUTs. The CDP
+// screencast says when the page changed; its frames are the CSS viewport
+// whatever the pixel density, so on a phone each one sent is a screenshot
+// taken again at up to twice the size, sharp enough to read small text.
 // Logs go to stderr only; it never exits on its own.
 // The URL carries the run token: --url-stdin takes it from stdin (replay
 // runs), so it is never on a command line anything in the pod can read.
@@ -20,12 +23,17 @@ const CDP = 'http://127.0.0.1:' + (process.env.BP_CDP_PORT || '9222');
 const FAST_MS = 250; // someone is watching
 const BASE_MS = 1000; // nobody watching: the director still keeps a frame a second for scrolling back
 const SLOW_MS = 5000; // idle page keepalive
+const SHARP_EDGE = 1400; // a sharp frame's longer side at most, in pixels
+const SHARP_QUALITY = 70;
+const MAX_FRAME = 500 << 10; // under the director's 512 KiB; a bigger sharp frame falls back to the screencast's
+const CALL_MS = 2000;
 
 let ws = null;
 let targetId = '';
 let msgId = 0;
 let pending = null; // newest screencast frame {data (base64), sessionId}; unacked until sent
 let latest = null; // Buffer waiting to be sent (retry/keepalive)
+let pendingSock = null; // the socket the last acked frame came from
 let last = null; // last frame the director accepted (keepalive)
 const seen = new Set();
 let inflight = false;
@@ -33,6 +41,7 @@ let lastSend = 0;
 let watchers = 0;
 let over = false;
 let lastErr = '';
+const calls = new Map(); // CDP message id -> {ok, sock}
 
 function logOnce(msg) {
   if (msg !== lastErr) { lastErr = msg; log(msg); }
@@ -51,7 +60,10 @@ function attach(t) {
   sock.onmessage = (ev) => {
     let m;
     try { m = JSON.parse(ev.data); } catch { return; }
-    if (m.method === 'Page.screencastFrame') {
+    if (m.id && calls.has(m.id)) {
+      calls.get(m.id).ok(m.result || null);
+      calls.delete(m.id);
+    } else if (m.method === 'Page.screencastFrame') {
       // Ack lazily (in tick/send): Chromium only encodes the next frame after an ack,
       // so this caps encoding at about one frame per send interval.
       pending = { data: m.params.data, sessionId: m.params.sessionId, sock };
@@ -80,10 +92,38 @@ async function poll() {
   }
 }
 
+// call sends one CDP command and resolves to its result, or null on an
+// error, a closed socket or after CALL_MS.
+function call(sock, method, params) {
+  return new Promise((ok) => {
+    if (sock.readyState !== 1) return ok(null);
+    const id = ++msgId;
+    const t = setTimeout(() => { calls.delete(id); ok(null); }, CALL_MS);
+    calls.set(id, { ok: (r) => { clearTimeout(t); ok(r); } });
+    try { sock.send(JSON.stringify({ id, method, params })); } catch { clearTimeout(t); calls.delete(id); ok(null); }
+  });
+}
+
+// sharp is the visible page drawn again at up to twice its CSS size, or null
+// when that would not be sharper (a desktop viewport) or did not work.
+async function sharp(sock) {
+  const m = await call(sock, 'Page.getLayoutMetrics', {});
+  const v = m && m.cssVisualViewport;
+  if (!v || !(v.clientWidth > 0) || !(v.clientHeight > 0)) return null;
+  const scale = Math.min(2, SHARP_EDGE / Math.max(v.clientWidth, v.clientHeight));
+  if (scale < 1.25) return null;
+  const r = await call(sock, 'Page.captureScreenshot', { format: 'jpeg', quality: SHARP_QUALITY,
+    clip: { x: v.pageX, y: v.pageY, width: v.clientWidth, height: v.clientHeight, scale } });
+  if (!r || !r.data) return null;
+  const b = Buffer.from(r.data, 'base64');
+  return b.length <= MAX_FRAME ? b : null;
+}
+
 function ackPending() {
   const p = pending;
   pending = null;
   if (!p) return null;
+  pendingSock = p.sock;
   try {
     if (p.sock.readyState === 1) {
       p.sock.send(JSON.stringify({ id: ++msgId, method: 'Page.screencastFrameAck', params: { sessionId: p.sessionId } }));
@@ -128,13 +168,19 @@ async function send() {
   }
 }
 
-function tick() {
+async function tick() {
   if (over || inflight) return;
   const gap = watchers > 0 ? FAST_MS : BASE_MS;
   if (Date.now() - lastSend < gap) return;
   // a fresh frame supersedes a queued retry
-  if (pending) latest = ackPending();
-  else if (!latest) {
+  if (pending) {
+    inflight = true;
+    const frame = ackPending();
+    const better = await sharp(pendingSock).catch(() => null);
+    inflight = false;
+    if (over) return;
+    latest = better || frame;
+  } else if (!latest) {
     // idle page: re-send the last good frame so the director keeps it
     if (!last || Date.now() - lastSend < SLOW_MS) return;
     latest = last;
