@@ -22,6 +22,7 @@ import (
 	"github.com/boarding-party/boardingparty/internal/runs"
 	"github.com/boarding-party/boardingparty/internal/sched"
 	"github.com/boarding-party/boardingparty/internal/store"
+	"github.com/boarding-party/boardingparty/internal/tracesum"
 )
 
 // MaxArtifactBytes is the default per-artifact upload limit (500 MB).
@@ -624,6 +625,11 @@ func (s *server) getArtifact(w http.ResponseWriter, r *http.Request) {
 	http.ServeContent(w, r, name, fi.ModTime(), f)
 }
 
+// recordNames are the artifacts the director writes itself; uploads may not
+// replace them.
+var recordNames = map[string]bool{runs.UsageName: true, runs.NarrationName: true, runs.BlockedName: true,
+	runs.ReplayResultName: true, tracesum.SummaryName: true}
+
 func (s *server) putArtifact(w http.ResponseWriter, r *http.Request) {
 	run, err := s.svc.Active(r.PathValue("token"))
 	if err != nil {
@@ -632,6 +638,10 @@ func (s *server) putArtifact(w http.ResponseWriter, r *http.Request) {
 	}
 	if isProfileName(r.PathValue("name")) {
 		http.Error(w, "the browser profile holds session cookies: upload it to profileURL, not as an artifact", http.StatusBadRequest)
+		return
+	}
+	if recordNames[r.PathValue("name")] {
+		http.Error(w, "that name is the director's own record of the run", http.StatusBadRequest)
 		return
 	}
 	body := http.MaxBytesReader(w, r.Body, s.maxBytes)

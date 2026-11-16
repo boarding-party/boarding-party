@@ -28,12 +28,27 @@ func TestPutNarration(t *testing.T) {
 
 	var got struct {
 		Narration []struct{ At, Kind, Text string } `json:"narration"`
-		Artifacts []string                         `json:"artifacts"`
+		Artifacts []string                          `json:"artifacts"`
 	}
 	if err := json.NewDecoder(do(t, "GET", srv.URL+"/api/runs/"+run.ID, "").Body).Decode(&got); err != nil {
 		t.Fatal(err)
 	}
 	if len(got.Narration) != 2 || got.Narration[0].Kind != "thought" || got.Narration[1].Text != "browser_click: Basket" {
 		t.Fatalf("run narration = %+v", got.Narration)
+	}
+}
+
+// The director's own records of a run are never taken as uploads: an agent
+// the site steered could otherwise fake its narration or trace summary.
+func TestPutArtifactRefusesRecordNames(t *testing.T) {
+	srv, wsrv, svc := setupBoth(t, 1<<20)
+	run := startRun(t, srv, svc)
+	for _, n := range []string{"narration.json", "trace-summary.json", "usage.json", "blocked-hosts.json", "replay-result.json"} {
+		if r := do(t, "PUT", wsrv.URL+"/artifacts/"+run.Token+"/"+n, `[]`); r.StatusCode != 400 {
+			t.Errorf("upload %s = %d, want 400", n, r.StatusCode)
+		}
+	}
+	if r := do(t, "PUT", wsrv.URL+"/artifacts/"+run.Token+"/bug-1.png", `x`); r.StatusCode != 201 {
+		t.Errorf("ordinary upload = %d, want 201", r.StatusCode)
 	}
 }
