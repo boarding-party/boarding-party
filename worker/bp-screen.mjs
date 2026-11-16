@@ -112,7 +112,7 @@ async function sharp(sock) {
   const v = m && m.cssVisualViewport;
   if (!v || !(v.clientWidth > 0) || !(v.clientHeight > 0)) { logOnce('sharp: no viewport ' + JSON.stringify(m).slice(0, 200)); return null; }
   const scale = Math.min(2, SHARP_EDGE / Math.max(v.clientWidth, v.clientHeight));
-  if (scale < 1.25) return null;
+  if (scale < 1.25) { logOnce('sharp: not sharper at ' + JSON.stringify(v)); return null; }
   const r = await call(sock, 'Page.captureScreenshot', { format: 'jpeg', quality: SHARP_QUALITY,
     clip: { x: v.pageX, y: v.pageY, width: v.clientWidth, height: v.clientHeight, scale } });
   if (!r || !r.data) { logOnce('sharp: capture failed at scale ' + scale); return null; }
@@ -178,7 +178,7 @@ async function tick() {
   if (pending) {
     inflight = true;
     const frame = ackPending();
-    const better = await sharp(pendingSock).catch(() => null);
+    const better = await sharp(pendingSock).catch((e) => { logOnce('sharp: ' + e.message); return null; });
     inflight = false;
     if (over) return;
     latest = better || frame;
