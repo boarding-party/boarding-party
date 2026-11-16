@@ -90,6 +90,7 @@ func admin(svc *runs.Service, maxBytes int64, token string, hub *live.Hub, mail 
 	mux.HandleFunc("GET /api/digest", s.getDigest)
 	mux.HandleFunc("PUT /api/pause", s.putPause)
 	mux.HandleFunc("GET /api/runs/{id}/artifacts/{name}", s.getArtifact)
+	mux.HandleFunc("GET /api/runs/{id}/trace", s.getTrace)
 	mux.HandleFunc("GET /api/runs/{id}/live", s.streamLive)
 	mux.HandleFunc("GET /api/runs/{id}/live.jpg", s.liveStill)
 	mux.HandleFunc("GET /api/runs/{id}/rewind", s.rewindIndex)
