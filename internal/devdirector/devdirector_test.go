@@ -109,6 +109,21 @@ func TestRunLifecycle(t *testing.T) {
 	if resp.StatusCode != http.StatusOK || len(vid) != len(sampleWebm) {
 		t.Fatalf("artifact: %d, %d bytes (want %d)", resp.StatusCode, len(vid), len(sampleWebm))
 	}
+	// A finished run carries narration and a trace, like a real one.
+	resp, b = do(t, d, "GET", "/api/runs/"+run.ID, "", d.Token, "")
+	var page struct {
+		Narration []struct{ Kind, Text string } `json:"narration"`
+		Artifacts []string                      `json:"artifacts"`
+	}
+	if err := json.Unmarshal(b, &page); err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("run page: %d %v", resp.StatusCode, err)
+	}
+	if len(page.Narration) < 5 || !slices.Contains(page.Artifacts, "trace.zip") {
+		t.Fatalf("narration %d entries, artifacts %v", len(page.Narration), page.Artifacts)
+	}
+	if resp, _ := do(t, d, "GET", "/api/runs/"+run.ID+"/trace", "", d.Token, ""); resp.StatusCode != http.StatusOK {
+		t.Fatalf("trace summary: %d", resp.StatusCode)
+	}
 	// The session is gone, so the next run can start.
 	if resp, _ := do(t, d, "POST", "/api/runs", "application/json", d.Token, `{"persona":"Ada","story":"todos"}`); resp.StatusCode >= 300 {
 		t.Fatalf("start after finish: got %d", resp.StatusCode)

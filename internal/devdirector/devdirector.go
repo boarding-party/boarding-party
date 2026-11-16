@@ -44,6 +44,9 @@ import (
 //go:embed testdata/sample.webm
 var sampleWebm []byte
 
+//go:embed testdata/trace.zip
+var sampleTrace []byte
+
 //go:embed testdata/todomvc.yaml
 var sampleProject []byte
 
@@ -202,11 +205,49 @@ func fakeScreenshot() []byte {
 	return buf.Bytes()
 }
 
+// sampleNarration is what a fake run's agent says and does, one entry every
+// two seconds from the run's start.
+var sampleNarration = []struct{ kind, text string }{
+	{"thought", "I'll start with the groceries I always forget."},
+	{"action", "browser_click: New todo"},
+	{"action", "browser_type: New todo"},
+	{"thought", "Three items in. The counter should say 3 left."},
+	{"action", "browser_click: Toggle Milk"},
+	{"thought", "I ticked Milk, but it still says 3 items left. That's wrong."},
+	{"action", "browser_take_screenshot"},
+	{"thought", "Let me check whether the filter buttons agree."},
+	{"action", "browser_click: Active"},
+	{"thought", "Active shows two, so only the counter is out of date."},
+}
+
+// narrate saves the sample narration, growing as the run goes on, and all of
+// it once the run is done.
+func (l *Launcher) narrate(r store.Run, begin time.Time, all bool) {
+	var n []runs.NarrationEntry
+	for i, e := range sampleNarration {
+		at := begin.Add(time.Duration(i) * 2 * time.Second)
+		if !all && at.After(time.Now()) {
+			break
+		}
+		n = append(n, runs.NarrationEntry{At: at, Kind: e.kind, Text: e.text})
+	}
+	if len(n) > 0 {
+		_ = l.Svc.SaveNarration(r.Token, n, time.Now())
+	}
+}
+
 func (l *Launcher) finishLater(r store.Run) {
-	time.Sleep(l.Duration)
+	begin := time.Now().UTC()
+	for end := begin.Add(l.Duration); time.Now().Before(end); {
+		time.Sleep(min(2*time.Second, time.Until(end)))
+		if r.Kind != store.RunReplay {
+			l.narrate(r, begin, false)
+		}
+	}
 	if _, err := l.Svc.Active(r.Token); err != nil {
 		return // already ended
 	}
+	_, _ = l.Svc.Artifacts.Put(r.ID, "trace.zip", bytes.NewReader(sampleTrace))
 	if r.Kind == store.RunReplay {
 		// A replay plays the journey back: a recording and a result, no bugs.
 		_, _ = l.Svc.Artifacts.Put(r.ID, "replay-1.webm", bytes.NewReader(sampleWebm))
@@ -214,6 +255,7 @@ func (l *Launcher) finishLater(r store.Run) {
 			Inputs: map[string]any{"int1": 3, "plusEmail1": fmt.Sprintf("sam+%d@example.test", r.Seed)}}, time.Now().UTC())
 		return
 	}
+	l.narrate(r, begin, true)
 	if _, err := l.Svc.Artifacts.Put(r.ID, SampleArtifact, bytes.NewReader(sampleWebm)); err != nil {
 		_ = l.Svc.Finish(context.Background(), r.Token, store.RunFailed, "fake run: "+err.Error())
 		return
