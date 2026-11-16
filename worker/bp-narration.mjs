@@ -41,7 +41,18 @@ function actionText(name, input) {
   return what ? `${tool}: ${what.trim()}` : tool;
 }
 
-// capEntries keeps the newest max entries.
-export function capEntries(list, max = 2000) {
-  return list.length > max ? list.slice(list.length - max) : list;
+// The director's bounds: entries per run and bytes per report.
+const MAX_ENTRIES = 2000;
+const MAX_BYTES = (2 << 20) - (64 << 10); // under the director's 2 MiB body limit
+
+// capEntries orders entries by time (several transcripts, such as a
+// subagent's, arrive file by file) and keeps the newest that fit the
+// director's bounds.
+export function capEntries(list, max = MAX_ENTRIES, maxBytes = MAX_BYTES) {
+  const sorted = [...list].sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0));
+  let out = sorted.length > max ? sorted.slice(sorted.length - max) : sorted;
+  let bytes = Buffer.byteLength(JSON.stringify(out));
+  let drop = 0;
+  while (bytes > maxBytes && drop < out.length) bytes -= Buffer.byteLength(JSON.stringify(out[drop++])) + 1;
+  return drop ? out.slice(drop) : out;
 }

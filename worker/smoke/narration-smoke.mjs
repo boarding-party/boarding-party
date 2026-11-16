@@ -55,4 +55,14 @@ assert.equal(kept.length, 2000);
 assert.equal(kept[0].text, '500');
 assert.equal(kept[1999].text, '2499');
 
+// Entries from several transcripts (subagents) come in file order: kept by time.
+const mixed = capEntries([{ at: '2026-11-16T10:00:05Z', kind: 'thought', text: 'b' }, { at: '2026-11-16T10:00:01Z', kind: 'thought', text: 'a' }]);
+assert.deepEqual(mixed.map((e) => e.text), ['a', 'b']);
+
+// The director takes at most 2 MiB: long non-Latin text is capped by bytes, oldest first.
+const wide = Array.from({ length: 2000 }, (_, i) => ({ at: new Date(Date.UTC(2026, 10, 16) + i * 1000).toISOString(), kind: 'thought', text: String(i).padEnd(500, '漢') }));
+const fit = capEntries(wide);
+assert.ok(Buffer.byteLength(JSON.stringify(fit)) < 2 << 20, 'over the director body limit: ' + Buffer.byteLength(JSON.stringify(fit)));
+assert.ok(fit.length > 1000 && fit[fit.length - 1].text.startsWith('1999'), 'kept the wrong end');
+
 console.log('narration smoke ok');
