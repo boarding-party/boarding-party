@@ -629,7 +629,11 @@ pre.diff { padding: 6px 0; margin-top: 8px; }
 .studio-top h1 .tag { align-self: center; }
 .studio-top .readout { margin-left: auto; font-size: 12.5px; }
 .studio-banners .banner { margin: 0; border-radius: 0; border-width: 0 0 1px; }
-.studio-body { display: grid; grid-template-columns: minmax(0, 1fr) clamp(380px, 30vw, 440px); min-height: 0; }
+.studio-body { display: grid; grid-template-columns: minmax(0, 1fr) var(--panel-w, clamp(380px, 30vw, 440px)); min-height: 0; }
+.studio-split { position: absolute; top: 0; bottom: 0; left: -5px; width: 9px; z-index: 3; cursor: col-resize; touch-action: none; }
+.studio-split::after { content: ""; position: absolute; top: 0; bottom: 0; left: 4px; width: 1px; background: transparent; transition: background-color .12s; }
+.studio-split:hover::after, .studio-split:focus-visible::after { background: var(--accent); width: 2px; left: 3.5px; }
+.studio-split:focus-visible { outline: none; }
 .studio.nostage .studio-body { grid-template-columns: minmax(0, 1fr); }
 .studio.nostage .studio-panel { max-width: 860px; width: 100%; margin: 0 auto; border-left: 0; }
 
@@ -645,7 +649,14 @@ pre.diff { padding: 6px 0; margin-top: 8px; }
 .caption p { display: inline; margin: 0; padding: 4px 10px; font-size: 14.5px; line-height: 1.75; color: #fff; background: rgba(12, 16, 22, .82); border-radius: 5px; box-decoration-break: clone; -webkit-box-decoration-break: clone; }
 .player.live .caption { bottom: 16px; }
 
-.studio-panel { display: flex; flex-direction: column; min-height: 0; min-width: 0; background: var(--surface); border-left: 1px solid var(--line); }
+.studio-panel { position: relative; display: flex; flex-direction: column; min-height: 0; min-width: 0; background: var(--surface); border-left: 1px solid var(--line); }
+.studio-pane { container: pane / inline-size; }
+.studio-pane .finding.with-shot { grid-template-columns: minmax(0, 1fr); }
+.studio-pane .finding .shot { margin-left: 22px; max-width: 420px; }
+@container pane (min-width: 620px) {
+  .studio-pane .finding.with-shot { grid-template-columns: minmax(0, 1fr) 260px; }
+  .studio-pane .finding .shot { margin-left: 0; }
+}
 .studio-tabs { display: flex; flex: none; gap: 2px; padding: 0 10px; border-bottom: 1px solid var(--line); overflow-x: auto; scrollbar-width: none; }
 .studio-tabs button { border: 0; background: none; padding: 11px 9px 9px; font-size: 13px; font-weight: 500; color: var(--muted); border-bottom: 2px solid transparent; white-space: nowrap; }
 .studio-tabs button:hover { color: var(--ink); }
@@ -703,6 +714,7 @@ pre.diff { padding: 6px 0; margin-top: 8px; }
   .studio-body { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
   .studio-stage .player { flex: none; aspect-ratio: 16 / 10; max-height: 45vh; }
   .studio-panel { border-left: 0; border-top: 1px solid var(--line); }
+  .studio-split { display: none; }
   .studio-top .readout { margin-left: 0; width: 100%; }
   .caption, .player.live .caption { top: 8px; bottom: auto; } /* the video's controls take the bottom */
   .caption p { font-size: 13px; }
