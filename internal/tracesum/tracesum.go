@@ -26,7 +26,7 @@ import (
 const SummaryName = "trace-summary.json"
 
 // Version is this reader's: a kept summary with another is read again.
-const Version = 2
+const Version = 3
 
 // ErrNotTrace means the zip holds no Playwright trace.
 var ErrNotTrace = errors.New("not a Playwright trace")
@@ -60,12 +60,20 @@ type Action struct {
 	Start    time.Time `json:"start"`
 	End      time.Time `json:"end"`
 	Error    string    `json:"error,omitempty"`
-	Snapshot string    `json:"snapshot,omitempty"` // the "after" snapshot name, else "before"
+	Snapshot string    `json:"snapshot,omitempty"` // the snapshot to show: "action", else "after", else "before"
 	PageID   string    `json:"pageId,omitempty"`
 	// CallID and Phase address the snapshot in the trace viewer's service
 	// worker: /snapshot/<callId>?phase=<phase>.
 	CallID string `json:"callId,omitempty"`
 	Phase  string `json:"phase,omitempty"`
+	// Point is where a click or key press landed, in the page's CSS pixels,
+	// on the "action" snapshot: the viewer marks it.
+	Point *Point `json:"point,omitempty"`
+}
+
+type Point struct {
+	X float64 `json:"x"`
+	Y float64 `json:"y"`
 }
 
 // Resource is one network request the page made.
@@ -186,6 +194,7 @@ type event struct {
 	Method        string          `json:"method"`
 	Params        json.RawMessage `json:"params"`
 	PageID        string          `json:"pageId"`
+	Point         *Point          `json:"point"`
 	Before        string          `json:"beforeSnapshot"`
 	After         string          `json:"afterSnapshot"`
 	Error         *struct {
@@ -207,7 +216,8 @@ type event struct {
 // the context-options line pins them to the wall clock. Version 8 names a
 // call's page and snapshots on the call; version 10 (what the worker writes)
 // names them on its frame snapshots, by call id and phase. A call with no
-// page is a browser or context call: nothing on the page.
+// page is a browser or context call: nothing on the page. A call that
+// clicks or types shows its "action" snapshot, the moment the input landed.
 func readActions(lines iter.Seq[[]byte]) ([]Action, error) {
 	var (
 		wall, mono float64
@@ -217,6 +227,7 @@ func readActions(lines iter.Seq[[]byte]) ([]Action, error) {
 		snaps      = map[string]string{} // call id -> snapshot name to show
 		pageURL    = map[string]string{} // snapshot name -> main frame URL (its first frame)
 		phases     = map[string]string{} // version 10: call id -> the phase to show
+		points     = map[string]*Point{} // call id -> where its input landed
 		pages      = map[string]string{} // version 10: call id -> page id
 	)
 	at := func(ms float64) time.Time {
@@ -249,6 +260,10 @@ func readActions(lines iter.Seq[[]byte]) ([]Action, error) {
 			if e.Error != nil && e.Error.Error.Message != "" {
 				a.Error = cut(cleanText(firstLine(e.Error.Error.Message)), maxTitle)
 			}
+		case "input":
+			if e.Point != nil {
+				points[e.CallID] = e.Point
+			}
 		case "frame-snapshot":
 			s := e.Snapshot
 			switch {
@@ -257,9 +272,9 @@ func readActions(lines iter.Seq[[]byte]) ([]Action, error) {
 				if _, ok := pageURL[s.SnapshotName]; !ok {
 					pageURL[s.SnapshotName] = cleanURL(s.FrameURL)
 				}
-			case s.CallID != "" && (s.Phase == "before" || s.Phase == "after"):
+			case s.CallID != "" && phaseRank[s.Phase] > 0:
 				pages[s.CallID] = s.PageID
-				if phases[s.CallID] != "after" {
+				if phaseRank[s.Phase] > phaseRank[phases[s.CallID]] {
 					phases[s.CallID] = s.Phase
 				}
 				if s.IsMainFrame {
@@ -284,10 +299,17 @@ func readActions(lines iter.Seq[[]byte]) ([]Action, error) {
 		a.CallID = id
 		a.Phase, _, _ = strings.Cut(a.Snapshot, "@")
 		a.PageURL = pageURL[a.Snapshot]
+		if a.Phase == "action" {
+			a.Point = points[id]
+		}
 		out = append(out, *a)
 	}
 	return out, nil
 }
+
+// phaseRank orders a call's snapshots by which to show: the input's moment,
+// else the page after the call, else before it.
+var phaseRank = map[string]int{"before": 1, "after": 2, "action": 3}
 
 type header struct{ Name, Value string }
 

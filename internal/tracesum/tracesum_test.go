@@ -244,6 +244,8 @@ func TestReadVersion10(t *testing.T) {
 		`{"type":"after","callId":"c@50","endTime":12001}`,
 		`{"type":"before","callId":"c@84","startTime":16501.7,"class":"Frame","method":"click","params":{"selector":"aria-ref=e136 >> internal:describe=\"Open Invoice Generator link\""}}`,
 		`{"type":"frame-snapshot","snapshot":{"callId":"c@84","phase":"before","pageId":"page@1","frameUrl":"https://example.com/","isMainFrame":true}}`,
+		`{"type":"input","callId":"c@84","point":{"x":196.5,"y":329.25},"box":{"x":12,"y":224,"width":369,"height":210}}`,
+		`{"type":"frame-snapshot","snapshot":{"callId":"c@84","phase":"action","pageId":"page@1","frameUrl":"https://example.com/","isMainFrame":true}}`,
 		`{"type":"after","callId":"c@84","endTime":16600,"error":{"error":{"message":"Timeout 5000ms exceeded"}}}`,
 	}
 	var out bytes.Buffer
@@ -259,13 +261,17 @@ func TestReadVersion10(t *testing.T) {
 		t.Fatalf("got %d actions, want the goto and the click: %+v", len(s.Actions), s.Actions)
 	}
 	g, c := s.Actions[0], s.Actions[1]
-	if g.CallID != "c@42" || g.Phase != "after" || g.PageID != "page@1" || g.PageURL != "https://example.com/" {
+	if g.CallID != "c@42" || g.Phase != "after" || g.PageID != "page@1" || g.PageURL != "https://example.com/" || g.Point != nil {
 		t.Errorf("goto: %+v", g)
 	}
 	if want := time.UnixMilli(1794786831088 + 11391 - 5468).UTC(); g.Start.Sub(want).Abs() > time.Millisecond {
 		t.Errorf("goto starts %v, want %v", g.Start, want)
 	}
-	if c.CallID != "c@84" || c.Phase != "before" || c.Error == "" || c.Title != `click "Open Invoice Generator link"` {
+	// A click shows the moment it landed, and where.
+	if c.CallID != "c@84" || c.Phase != "action" || c.Error == "" || c.Title != `click "Open Invoice Generator link"` || c.PageURL != "https://example.com/" {
 		t.Errorf("click: %+v", c)
+	}
+	if c.Point == nil || *c.Point != (Point{X: 196.5, Y: 329.25}) {
+		t.Errorf("click point = %+v, want 196.5,329.25", c.Point)
 	}
 }
