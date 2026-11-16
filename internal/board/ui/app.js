@@ -16,6 +16,7 @@ import { Studio } from './studio.js';
 import { ThoughtsPanel, Caption } from './thoughts.js';
 import { NetworkPanel } from './network.js';
 import { PageView } from './pageview.js';
+import { runMatches } from './run-search.js';
 import { captionAt, nearest } from './studio-time.js';
 import { Shot } from './shot.js';
 import { personaLabel } from './persona-label.js';
@@ -662,7 +663,7 @@ function RunsBoard({ runs, project }) {
   // Every filter but the state one, so each state chip can count its runs.
   const base = runs.filter((r) => (!f.persona || r.persona === f.persona) && (!f.story || r.story === f.story)
     && (!f.bugs || r.bugs > 0)
-    && (!q || `${r.persona} ${r.role || ''} ${r.story} ${r.outcome || ''}`.toLowerCase().includes(q)));
+    && runMatches(r, q));
   const test = (STATE_FILTERS.find(([k]) => k === f.state) || STATE_FILTERS[0])[2];
   const shown = base.filter(test);
   const filtered = f.state !== 'all' || f.persona || f.story || f.bugs || q;
@@ -695,7 +696,7 @@ function RunsBoard({ runs, project }) {
           <select aria-label="Story" value=${f.story} onChange=${(e) => set({ story: e.currentTarget.value })}>
             <option value="">All stories</option>${stories.map((st) => html`<option key=${st} value=${st}>${st}</option>`)}
           </select>
-          <input type="search" placeholder="Search outcomes" aria-label="Search outcomes" value=${f.q} onInput=${(e) => set({ q: e.currentTarget.value })} />`}
+          <input type="search" placeholder="Search runs or run ID" aria-label="Search runs or run ID" value=${f.q} onInput=${(e) => set({ q: e.currentTarget.value })} />`}
           <div class="viewtoggle" role="group" aria-label="View">
             <button type="button" class=${view === 'cards' ? 'on' : ''} aria-pressed=${view === 'cards'} onClick=${() => pickView('cards')}>Cards</button>
             <button type="button" class=${view === 'list' ? 'on' : ''} aria-pressed=${view === 'list'} onClick=${() => pickView('list')}>List</button>
