@@ -60,3 +60,15 @@ func TestPromptExplainsReplayNote(t *testing.T) {
 		t.Error("prompt does not explain a fix check's replayNote")
 	}
 }
+
+func TestRunPromptNarrates(t *testing.T) {
+	p := Prompt(store.Run{})
+	for _, want := range []string{
+		"before each browser action, write one short sentence in your persona's own voice",
+		"cd /workspace/out/traces && zip -r ../trace.zip .",
+	} {
+		if !strings.Contains(p, want) {
+			t.Errorf("prompt lacks %q", want)
+		}
+	}
+}
