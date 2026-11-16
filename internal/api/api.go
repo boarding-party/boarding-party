@@ -134,6 +134,7 @@ func Worker(svc *runs.Service, maxBytes int64, hub *live.Hub) http.Handler {
 	mux.HandleFunc("PUT /artifacts/{token}/{name}", s.putArtifact)
 	mux.HandleFunc("PUT /live/{token}", s.putLive)
 	mux.HandleFunc("PUT /usage/{token}", s.putUsage)
+	mux.HandleFunc("PUT /narration/{token}", s.putNarration)
 	mux.HandleFunc("PUT /console/{token}", s.putConsole)
 	mux.HandleFunc("GET /files/{token}/{$}", s.workerFiles)
 	mux.HandleFunc("GET /files/{token}/{name}", s.workerFile)
@@ -156,7 +157,7 @@ func fail(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, store.ErrNotFound), errors.Is(err, artifacts.ErrNotFound), errors.Is(err, runs.ErrNotActive):
 		http.Error(w, "not found", http.StatusNotFound)
-	case errors.Is(err, runs.ErrBadUsage), errors.Is(err, runs.ErrBadProfile), errors.Is(err, runs.ErrInvalid),
+	case errors.Is(err, runs.ErrBadUsage), errors.Is(err, runs.ErrBadNarration), errors.Is(err, runs.ErrBadProfile), errors.Is(err, runs.ErrInvalid),
 		errors.Is(err, runs.ErrBadReplay):
 		http.Error(w, err.Error(), http.StatusBadRequest)
 	case errors.Is(err, runs.ErrBusy):
@@ -445,6 +446,11 @@ func (s *server) getRun(w http.ResponseWriter, r *http.Request) {
 		out["usage"] = u
 		out["cost"] = runs.Cost(*u)
 	}
+	if n, err := s.svc.Narration(run.ID); err != nil {
+		log.Printf("api: run %s narration: %v", run.ID, err)
+	} else if len(n) > 0 {
+		out["narration"] = n
+	}
 	if stage, reason, isLive := s.progress(r.Context(), run); stage != "" || isLive {
 		if stage != "" {
 			out["stage"] = stage
@@ -645,6 +651,22 @@ func (s *server) putUsage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.svc.SaveUsage(r.PathValue("token"), u, time.Now()); err != nil {
+		fail(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// putNarration takes a worker's running narration for its run.
+func (s *server) putNarration(w http.ResponseWriter, r *http.Request) {
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 2<<20))
+	dec.DisallowUnknownFields()
+	var n []runs.NarrationEntry
+	if err := dec.Decode(&n); err != nil {
+		http.Error(w, "bad narration", http.StatusBadRequest)
+		return
+	}
+	if err := s.svc.SaveNarration(r.PathValue("token"), n, time.Now()); err != nil {
 		fail(w, err)
 		return
 	}
