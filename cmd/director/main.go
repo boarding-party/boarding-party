@@ -130,7 +130,7 @@ func newServers(cfg config, svc *runs.Service, st *store.Store, hub *live.Hub, m
 		if cfg.Frame != nil {
 			frame = cfg.Frame(r.Context())
 		}
-		board.UIHeaders(w.Header(), frame)
+		board.PageHeaders(w.Header(), r.URL.Path, frame)
 		static.ServeHTTP(w, r)
 	}))
 	admin = api.Guard(cfg.AdminToken, top)

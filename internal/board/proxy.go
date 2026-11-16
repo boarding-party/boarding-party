@@ -73,7 +73,11 @@ func NewProxy(fw Forwarder, adminToken string) *Proxy {
 		},
 		Transport: &reconnectTransport{p: p, next: tr},
 		ModifyResponse: func(r *http.Response) error {
-			apiHeaders(r.Header)
+			if r.Request != nil && strings.HasPrefix(r.Request.URL.Path, TracePrefix) {
+				TraceHeaders(r.Header, "'none'") // the local board is never framed
+			} else {
+				apiHeaders(r.Header)
+			}
 			if r.StatusCode == http.StatusNotFound && r.Request != nil && r.Request.URL.Path == "/" {
 				oldDirector(r)
 			}

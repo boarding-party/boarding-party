@@ -42,3 +42,37 @@ func UIHeaders(h http.Header, frameAncestors string) {
 	}
 	h.Set("Cache-Control", "no-cache")
 }
+
+// TracePrefix is where the board serves Playwright's trace viewer.
+const TracePrefix = "/trace/"
+
+// traceCSP lets the trace viewer run: its service worker, and the blob: and
+// data: images it builds. Its snapshots are drawn by that worker, which gives
+// each one its own script-nonce policy.
+const traceCSP = "default-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; " +
+	"style-src 'self' 'unsafe-inline'; font-src 'self' data:; worker-src 'self'; connect-src 'self'; " +
+	"frame-ancestors 'self'"
+
+// TraceHeaders sets the headers of the trace viewer's files: the security
+// headers, the viewer's CSP, which the board itself and the frame-ancestors
+// origins may frame, and no X-Frame-Options.
+func TraceHeaders(h http.Header, frameAncestors string) {
+	SecurityHeaders(h)
+	csp := traceCSP
+	if frameAncestors != "'none'" {
+		csp += " " + frameAncestors
+	}
+	h.Set("Content-Security-Policy", csp)
+	h.Del("X-Frame-Options")
+	h.Set("Cache-Control", "no-cache")
+}
+
+// PageHeaders sets the headers of a board page or file at urlPath: the trace
+// viewer's under TracePrefix, the board's everywhere else.
+func PageHeaders(h http.Header, urlPath, frameAncestors string) {
+	if strings.HasPrefix(urlPath, TracePrefix) {
+		TraceHeaders(h, frameAncestors)
+		return
+	}
+	UIHeaders(h, frameAncestors)
+}

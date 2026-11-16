@@ -414,6 +414,19 @@ func TestSecurityHeadersEverywhere(t *testing.T) {
 	}
 }
 
+// The trace viewer's files keep the viewer's own policy through the local
+// board too: its service worker and snapshot frames need it.
+func TestProxyTraceHeaders(t *testing.T) {
+	srv, _ := backendDir(t)
+	h, _ := newTestHandler(t, &fakeForwarder{bases: []string{srv.URL}})
+	w := do(h, authed(h, httptest.NewRequest(http.MethodGet, "/trace/sw.bundle.js", nil)))
+	hd := w.Header()
+	if !strings.Contains(hd.Get("Content-Security-Policy"), "worker-src 'self'") || hd.Get("X-Frame-Options") != "" ||
+		hd.Get("X-Content-Type-Options") != "nosniff" || len(hd.Values("Content-Security-Policy")) != 1 {
+		t.Fatalf("trace headers %v", hd)
+	}
+}
+
 func TestAPIKeepsDirectorCacheControl(t *testing.T) {
 	dir := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "max-age=60")

@@ -357,7 +357,7 @@ func start(ctx context.Context, dir string, projectYAML []byte, duration time.Du
 	top.Handle("/api", routes)
 	top.Handle("/api/", routes)
 	top.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		board.UIHeaders(w.Header(), "'none'")
+		board.PageHeaders(w.Header(), r.URL.Path, "'none'")
 		static.ServeHTTP(w, r)
 	}))
 	srv := &http.Server{Handler: api.Guard(token, top), ReadHeaderTimeout: 10 * time.Second}
