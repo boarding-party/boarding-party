@@ -17,6 +17,7 @@ import { ThoughtsPanel, Caption } from './thoughts.js';
 import { NetworkPanel } from './network.js';
 import { PageView } from './pageview.js';
 import { runMatches } from './run-search.js';
+import { withoutPlumbing } from './plumbing.js';
 import { captionAt, nearest } from './studio-time.js';
 import { Shot } from './shot.js';
 import { personaLabel } from './persona-label.js';
@@ -1155,7 +1156,7 @@ function RunPage({ id, onChange }) {
   const replay = run.kind === 'replay';
 
   const lead = run.story === LEAD_STORY;
-  const narration = data.narration || [];
+  const narration = withoutPlumbing(data.narration || []);
   const actions = trace.state === 'ok' ? trace.summary.actions || [] : [];
   const entries = replay
     ? actions.map((a) => ({ at: a.start, kind: 'action', text: a.error ? `${a.title}: ${a.error}` : a.title }))
