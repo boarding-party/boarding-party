@@ -286,7 +286,7 @@ function Sidebar({ route, project, runs, leads, children }) {
     <aside>
       <div class="brand">boardingparty</div>
       ${project ? html`<div class="proj">${project.name || 'Unnamed project'}<small>${host || 'no site yet'}</small></div>`
-        : project === null ? html`<div class="proj">No project yet<small><a href="#/project" style="color:inherit">Set one up</a></small></div>`
+        : project === null ? html`<div class="proj">Not set up yet<small><a href="#/project" style="color:inherit">Add a site and personas</a></small></div>`
         : null}
       <nav aria-label="Main">
         <a href="#/runs" class=${on('runs')}>Runs ${runs ? html`<span class="count">${runs.length}</span>` : null}</a>
