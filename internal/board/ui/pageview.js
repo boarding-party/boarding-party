@@ -15,6 +15,12 @@ const START_MS = 10000; // for the worker to start
 const SLOW_MS = 60000; // the first snapshot downloads and reads the whole trace
 
 let worker = null; // one registration per page load
+// The worker drops a trace that no open frame holds when it starts loading
+// it, and the first snapshot's frame does not exist yet at that moment: the
+// page comes from that load, but its styles and images ask a second copy
+// that never served it, and get 404s. The second copy stays, so the first
+// snapshot of a page load is loaded again before it is shown.
+let primed = false;
 function startWorker() {
   if (!worker) {
     worker = (async () => {
@@ -76,6 +82,7 @@ export function PageView({ actions, playhead, traceURL, viewer, size }) {
   }, [state, src, attempt]);
   const onLoad = (s, el) => {
     if (s !== src) return; // a step already left behind
+    if (!primed) { primed = true; el.contentWindow.location.reload(); return; }
     const doc = el.contentDocument;
     const type = doc ? doc.contentType : '';
     // Typing needs no scrolling, so a field can sit off screen in its
