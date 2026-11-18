@@ -191,3 +191,45 @@ func TestJoinReport(t *testing.T) {
 		t.Fatalf("already there: %v", err)
 	}
 }
+
+func TestJoinMarksJoined(t *testing.T) {
+	s := open(t)
+	id := threeReports(t, s)
+	addBug(t, s, Bug{ID: "x1", RunID: "r1", Summary: "other", Created: t0})
+	if err := s.JoinReport("x1", id, t0.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if r := reportsByID(t, s, id)["x1"]; r.Match != MatchJoined || r.Difference != "" {
+		t.Fatalf("joined %+v", r)
+	}
+}
+
+func TestJoinAwayMainReport(t *testing.T) {
+	s := open(t)
+	x := threeReports(t, s)
+	addBug(t, s, Bug{ID: "y1", RunID: "r1", Summary: "Y", Created: t0})
+	var y string
+	for _, b := range mustBugs(t, s, "r1") {
+		if b.ID == "y1" {
+			y = b.IssueID
+		}
+	}
+	if err := s.JoinReport("b1", y, t0.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if is, _ := s.Issue(x); is.Main != "b2" || is.Summary != "B" {
+		t.Fatalf("left issue %+v", is)
+	}
+	if is, _ := s.Issue(y); is.Main != "y1" || is.Summary != "Y" {
+		t.Fatalf("target issue %+v", is)
+	}
+}
+
+func mustBugs(t *testing.T, s *Store, runID string) []Bug {
+	t.Helper()
+	bugs, err := s.Bugs(runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return bugs
+}

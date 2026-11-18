@@ -260,6 +260,86 @@ func (s *Store) IssueReports(id string) ([]Report, error) {
 	return out, rows.Err()
 }
 
+// ErrLastReport refuses to split an issue's only report off it.
+var ErrLastReport = errors.New("the issue has only this report")
+
+// reportIn returns the summary of bug when it belongs to issue, else ErrNotFound.
+func reportIn(tx *sql.Tx, issueID, bugID string) (string, error) {
+	var summary string
+	err := tx.QueryRow(`SELECT summary FROM bugs WHERE id = ? AND issue_id = ?`, bugID, issueID).Scan(&summary)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", ErrNotFound
+	}
+	return summary, err
+}
+
+// SetMain makes one of an issue's reports the one it is shown by; the
+// issue takes that report's summary as its title.
+func (s *Store) SetMain(issueID, bugID string) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	summary, err := reportIn(tx, issueID, bugID)
+	if err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`UPDATE issues SET main_bug = ?, summary = ? WHERE id = ?`, bugID, summary, issueID); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// SplitReport moves one report out of an issue into a new open issue that
+// it is the main report of, and returns the new issue's id. The old issue
+// keeps its status, reopened mark and updated time; if it lost its main
+// report, its oldest remaining one takes over.
+func (s *Store) SplitReport(issueID, bugID string, now time.Time) (string, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return "", err
+	}
+	defer tx.Rollback()
+	summary, err := reportIn(tx, issueID, bugID)
+	if err != nil {
+		return "", err
+	}
+	var n int
+	if err := tx.QueryRow(`SELECT count(*) FROM bugs WHERE issue_id = ?`, issueID).Scan(&n); err != nil {
+		return "", err
+	}
+	if n < 2 {
+		return "", ErrLastReport
+	}
+	id, err := newIssueID()
+	if err != nil {
+		return "", err
+	}
+	if _, err := tx.Exec(`INSERT INTO issues(id, summary, status, created, updated, main_bug) VALUES(?,?,?,?,?,?)`,
+		id, summary, string(IssueOpen), ts(now), ts(now), bugID); err != nil {
+		return "", err
+	}
+	if _, err := tx.Exec(`UPDATE bugs SET issue_id = ?, match_kind = '', difference = '' WHERE id = ?`, id, bugID); err != nil {
+		return "", err
+	}
+	if err := fixMain(tx, issueID); err != nil {
+		return "", err
+	}
+	return id, tx.Commit()
+}
+
+// fixMain gives an issue whose main report has left it a new one: its
+// oldest remaining report, whose summary becomes the title. An issue with
+// no reports is left alone.
+func fixMain(tx *sql.Tx, issueID string) error {
+	_, err := tx.Exec(`UPDATE issues SET (main_bug, summary) = (SELECT b.id, b.summary FROM bugs b WHERE b.issue_id = issues.id
+		ORDER BY b.created, b.rowid LIMIT 1)
+		WHERE id = ? AND EXISTS (SELECT 1 FROM bugs WHERE issue_id = issues.id)
+		AND NOT EXISTS (SELECT 1 FROM bugs WHERE id = issues.main_bug AND issue_id = issues.id)`, issueID)
+	return err
+}
+
 // KnownIssuesClosedFor is how long a closed issue stays among the known
 // issues, so a returning problem can still be matched and reopened.
 const KnownIssuesClosedFor = 30 * 24 * time.Hour

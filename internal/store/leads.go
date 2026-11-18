@@ -237,7 +237,8 @@ func (s *Store) LeadLog(lead string, limit int) ([]LeadAction, error) {
 }
 
 // JoinReport moves a report to another issue, as a lead tidying the bug
-// list does. An issue left without reports is removed. No status changes.
+// list does, marking it joined. An issue left without reports is removed;
+// one left without its main report gets its oldest. No status changes.
 func (s *Store) JoinReport(bugID, issueID string, now time.Time) error {
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -258,7 +259,10 @@ func (s *Store) JoinReport(bugID, issueID string, now time.Time) error {
 	if old == issueID {
 		return nil // nothing moves; the rollback keeps updated as it was
 	}
-	if _, err := tx.Exec(`UPDATE bugs SET issue_id = ? WHERE id = ?`, issueID, bugID); err != nil {
+	if _, err := tx.Exec(`UPDATE bugs SET issue_id = ?, match_kind = ?, difference = '' WHERE id = ?`, issueID, MatchJoined, bugID); err != nil {
+		return err
+	}
+	if err := fixMain(tx, old); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(`DELETE FROM issues WHERE id = ? AND NOT EXISTS (SELECT 1 FROM bugs WHERE issue_id = ?)`, old, old); err != nil {

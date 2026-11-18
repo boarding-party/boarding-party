@@ -3,6 +3,7 @@ package store
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"path/filepath"
 	"testing"
 	"time"
@@ -498,5 +499,102 @@ func TestMainBackfill(t *testing.T) {
 		if r.Match != "" || r.Page != "" {
 			t.Fatalf("report %+v", r)
 		}
+	}
+}
+
+// threeReports opens an issue with reports b1 "A" (t0), b2 "B" (t0+1h) and
+// b3 "C" (t0+2h), b1 its main, and returns its id.
+func threeReports(t *testing.T, s *Store) string {
+	t.Helper()
+	withRun(t, s, "r1", "Ada", "todos")
+	addBug(t, s, Bug{ID: "b1", RunID: "r1", Summary: "A", Created: t0})
+	id := onlyIssue(t, s).ID
+	addBug(t, s, Bug{ID: "b2", RunID: "r1", Summary: "B", Created: t0.Add(time.Hour), IssueID: id, Difference: "on mobile", JourneyID: "j1", JourneyRev: 1, JourneyStep: 2})
+	addBug(t, s, Bug{ID: "b3", RunID: "r1", Summary: "C", Created: t0.Add(2 * time.Hour), IssueID: id})
+	return id
+}
+
+func TestSetMain(t *testing.T) {
+	s := open(t)
+	id := threeReports(t, s)
+	before, _ := s.Issue(id)
+	if err := s.SetMain(id, "b2"); err != nil {
+		t.Fatal(err)
+	}
+	is, _ := s.Issue(id)
+	if is.Main != "b2" || is.Summary != "B" || !is.Updated.Equal(before.Updated) {
+		t.Fatalf("issue %+v", is)
+	}
+	withRun(t, s, "r2", "Bob", "todos")
+	addBug(t, s, Bug{ID: "x1", RunID: "r2", Summary: "other", Created: t0})
+	if err := s.SetMain(id, "ghost"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("ghost: %v", err)
+	}
+	if err := s.SetMain(id, "x1"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("other issue's report: %v", err)
+	}
+}
+
+func TestSplitReport(t *testing.T) {
+	s := open(t)
+	id := threeReports(t, s)
+	at := t0.Add(5 * time.Hour)
+	nid, err := s.SplitReport(id, "b2", at)
+	if err != nil || nid == "" || nid == id {
+		t.Fatalf("split %q %v", nid, err)
+	}
+	n, _ := s.Issue(nid)
+	if n.Status != IssueOpen || !n.Created.Equal(at) || !n.Updated.Equal(at) || n.Main != "b2" || n.Summary != "B" || n.Reports != 1 {
+		t.Fatalf("new issue %+v", n)
+	}
+	if r := reportsByID(t, s, nid)["b2"]; r.Match != "" || r.Difference != "" || r.JourneyID != "j1" {
+		t.Fatalf("moved report %+v", r)
+	}
+	if old, _ := s.Issue(id); old.Reports != 2 || old.Main != "b1" || old.Summary != "A" {
+		t.Fatalf("old issue %+v", old)
+	}
+}
+
+func TestSplitRefusesLastReport(t *testing.T) {
+	s := open(t)
+	withRun(t, s, "r1", "Ada", "todos")
+	addBug(t, s, Bug{ID: "b1", RunID: "r1", Summary: "A", Created: t0})
+	id := onlyIssue(t, s).ID
+	if _, err := s.SplitReport(id, "b1", t0); !errors.Is(err, ErrLastReport) {
+		t.Fatalf("last report: %v", err)
+	}
+	if _, err := s.SplitReport(id, "ghost", t0); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("ghost: %v", err)
+	}
+	if _, err := s.SplitReport("nope", "b1", t0); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("wrong issue: %v", err)
+	}
+}
+
+func TestSplitMainMovesTitle(t *testing.T) {
+	s := open(t)
+	id := threeReports(t, s)
+	if _, err := s.SplitReport(id, "b1", t0.Add(5*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if old, _ := s.Issue(id); old.Main != "b2" || old.Summary != "B" {
+		t.Fatalf("old issue %+v", old)
+	}
+}
+
+func TestSplitKeepsOldIssueState(t *testing.T) {
+	s := open(t)
+	id := threeReports(t, s)
+	if _, err := s.db.Exec(`UPDATE issues SET status='verifying', check_chain='c1', reopened=?, updated=? WHERE id=?`,
+		ts(t0.Add(3*time.Hour)), ts(t0.Add(4*time.Hour)), id); err != nil {
+		t.Fatal(err)
+	}
+	before, _ := s.Issue(id)
+	if _, err := s.SplitReport(id, "b3", t0.Add(5*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	old, _ := s.Issue(id)
+	if old.Status != IssueVerifying || old.CheckChain != "c1" || !old.Reopened.Equal(before.Reopened) || !old.Updated.Equal(before.Updated) {
+		t.Fatalf("old issue %+v", old)
 	}
 }
