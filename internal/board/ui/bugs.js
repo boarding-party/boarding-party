@@ -8,7 +8,7 @@ import { useState } from './vendor/hooks.module.js';
 import { html, api, fmtWhen, parseTime, artifactURL, runHref, issueHref, usePoll, useParams, setParams, SEVERITY_TAG, SHOT_TOKEN } from './lib.js';
 import { Shot } from './shot.js';
 import { journeyHref } from './journeys.js';
-import { attention, marking, earliestOf, severityOf } from './issue-rules.js';
+import { attention, seenAgain, marking, earliestOf, severityOf } from './issue-rules.js';
 
 const POLL_MS = 15000;
 const CHECK_POLL_MS = 5000; // while a fix check is under way
@@ -292,7 +292,7 @@ export function IssuePage({ id }) {
       <p class="crumb"><a href="#/bugs">Bugs</a> / ${issue.id}</p>
       <h1>${issue.summary || 'No summary'}</h1>
       <p class="lede issuelede"><${SeverityTag} severity=${issue.severity} /> <${StatusTag} status=${st} />
-        ${parseTime(issue.reopened) && st !== 'closed' && st !== 'not_a_bug' ? html` <span class="reopened">Seen again after fix ${fmtWhen(issue.reopened)}</span>` : null}
+        ${seenAgain(issue) ? html` <span class="reopened">Seen again after fix ${fmtWhen(issue.reopened)}</span>` : null}
         ${' '}<span><b>${plural(issue.reports, 'report', 'reports')}</b> by ${plural((issue.personas || []).length, 'persona', 'personas')}${issue.firstSeen ? ` · first ${fmtWhen(issue.firstSeen)}` : ''}${issue.lastSeen ? ` · last ${fmtWhen(issue.lastSeen)}` : ''}</span></p>
       ${err ? html`<div class="note bad banner">Lost contact with the director: ${err}. Retrying.</div>` : null}
       <div class="issuelayout">

@@ -13,10 +13,12 @@ const within = (iso, now) => {
 };
 
 // attention is the one tag that says an issue needs the owner, or null:
-// back after a fix, first reported in the last day, or reported as
-// different in the last day, in that order.
+// back after a fix (until the owner triages it again), first reported in
+// the last day, or reported as different in the last day, in that order.
+export const seenAgain = (issue) => at(issue.reopened) > 0 && issue.status === 'open';
+
 export function attention(issue, now) {
-  if (at(issue.reopened) && issue.status !== 'closed' && issue.status !== 'not_a_bug') {
+  if (seenAgain(issue)) {
     return { label: 'Seen again after fix', tag: 'bad' };
   }
   if (within(issue.firstSeen, now)) return { label: 'New today', tag: 'run' };

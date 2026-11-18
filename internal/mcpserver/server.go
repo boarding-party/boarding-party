@@ -166,7 +166,7 @@ type knownIssue struct {
 	Status  string `json:"status"`
 	Summary string `json:"summary"`
 	Reason  string `json:"reason,omitempty"` // the user's, for not_a_bug
-	// Page, Step and Severity are the main report's, to match on.
+	// Page and Step are the main report's, Severity the highest of all, to match on.
 	Page     string `json:"page,omitempty"`
 	Step     string `json:"step,omitempty"`
 	Severity string `json:"severity,omitempty"`
@@ -184,7 +184,9 @@ func pagePath(raw string) string {
 	raw = strings.TrimSpace(raw)
 	if u, err := url.Parse(raw); err == nil {
 		raw = u.Path
-	} else if i := strings.IndexAny(raw, "?#"); i >= 0 {
+	}
+	// Cut again after decoding: an encoded "?" must not bring a query back.
+	if i := strings.IndexAny(raw, "?#"); i >= 0 {
 		raw = raw[:i]
 	}
 	return store.Clip(strings.TrimSpace(raw), maxPage)

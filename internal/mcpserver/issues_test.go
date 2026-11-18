@@ -149,9 +149,10 @@ func TestReportBugPagePathOnly(t *testing.T) {
 	cs := connect(t, srv, run.Token)
 	for page, want := range map[string]string{
 		"https://shop.test/invoice/new?key=abc#top": "/invoice/new",
-		"/quote?id=7": "/quote",
-		" /pay#card ": "/pay",
-		"":            "",
+		"/quote?id=7":             "/quote",
+		" /pay#card ":             "/pay",
+		"/reset%3Ftoken%3Dsecret": "/reset",
+		"":                        "",
 	} {
 		text, isErr := call(t, cs, "report_bug", map[string]any{"summary": "x", "step": "s", "evidence": "e", "note": "", "severity_guess": "low", "page": page})
 		if isErr {

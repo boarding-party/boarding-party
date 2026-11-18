@@ -53,3 +53,10 @@ test('severityOf normalises', () => {
   assert.equal(severityOf(''), '');
   assert.equal(severityOf('weird'), '');
 });
+
+test('attention: seen again only while the reopened issue is open', () => {
+  for (const status of ['confirmed', 'fixed', 'verifying']) {
+    const i = { status, reopened: ago(30 * DAY_MS), firstSeen: ago(60 * DAY_MS), differentAt: ago(H) };
+    assert.deepEqual(attention(i, now), { label: 'Something different', tag: 'sup' }, status);
+  }
+});
