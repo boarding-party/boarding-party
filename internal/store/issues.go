@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -38,7 +39,31 @@ type Issue struct {
 	Reports    int         `json:"reports"`
 	LastSeen   time.Time   `json:"lastSeen,omitzero"`
 	Personas   []string    `json:"personas"`
+	// Main is the report the issue is shown by. Page and Step are its.
+	Main      string    `json:"main"`
+	Severity  string    `json:"severity"` // the highest any report gave
+	FirstSeen time.Time `json:"firstSeen,omitzero"`
+	Page      string    `json:"page,omitempty"`
+	Step      string    `json:"step,omitempty"`
+	Stories   []string  `json:"stories"`
+	// DifferentAt is when a report last said it differs from the issue.
+	DifferentAt time.Time `json:"differentAt,omitzero"`
+	// Shot is the screenshot that shows the issue: the main report's, else
+	// the newest report's that has one.
+	Shot *IssueShot `json:"shot,omitempty"`
 }
+
+// IssueShot names a screenshot among a run's artifacts.
+type IssueShot struct {
+	RunID string `json:"runId"`
+	Name  string `json:"name"`
+}
+
+// shotToken finds a bug screenshot's name in a report's evidence, as the
+// board's SHOT_TOKEN does.
+var shotToken = regexp.MustCompile(`(?i)\bbug-\d+\.(?:png|jpe?g)\b`)
+
+func shotName(evidence string) string { return shotToken.FindString(evidence) }
 
 // Report is a bug with the run that reported it.
 type Report struct {
@@ -47,12 +72,13 @@ type Report struct {
 	Story   string `json:"story"`
 }
 
-const bugCols = `id, run_id, summary, step, evidence, severity, note, created, issue_id, journey_id, journey_rev, journey_step`
+const bugCols = `id, run_id, summary, step, evidence, severity, note, created, issue_id, journey_id, journey_rev, journey_step, page, difference, match_kind`
 
 func scanBug(sc interface{ Scan(...any) error }) (Bug, error) {
 	var b Bug
 	var c int64
-	if err := sc.Scan(&b.ID, &b.RunID, &b.Summary, &b.Step, &b.Evidence, &b.Severity, &b.Note, &c, &b.IssueID, &b.JourneyID, &b.JourneyRev, &b.JourneyStep); err != nil {
+	if err := sc.Scan(&b.ID, &b.RunID, &b.Summary, &b.Step, &b.Evidence, &b.Severity, &b.Note, &c, &b.IssueID, &b.JourneyID, &b.JourneyRev, &b.JourneyStep,
+		&b.Page, &b.Difference, &b.Match); err != nil {
 		return Bug{}, err
 	}
 	b.Created = fromTS(c)
@@ -68,7 +94,9 @@ func newIssueID() (string, error) {
 }
 
 // insertBug stores a report, attaching it to b.IssueID when that issue
-// exists (a closed issue reopens) and opening a new issue otherwise.
+// exists (a closed issue reopens) and opening a new issue otherwise. An
+// attached report is marked same, or different when it says what differs;
+// one that opens an issue is its main report and carries no marking.
 func insertBug(tx *sql.Tx, b Bug) error {
 	at := ts(b.Created)
 	attached := false
@@ -86,30 +114,44 @@ func insertBug(tx *sql.Tx, b Bug) error {
 		}
 		attached = n > 0
 	}
-	if !attached {
+	switch {
+	case !attached:
 		id, err := newIssueID()
 		if err != nil {
 			return err
 		}
-		if _, err := tx.Exec(`INSERT INTO issues(id, summary, status, created, updated) VALUES(?,?,?,?,?)`,
-			id, b.Summary, string(IssueOpen), at, at); err != nil {
+		if _, err := tx.Exec(`INSERT INTO issues(id, summary, status, created, updated, main_bug) VALUES(?,?,?,?,?,?)`,
+			id, b.Summary, string(IssueOpen), at, at, b.ID); err != nil {
 			return err
 		}
-		b.IssueID = id
+		b.IssueID, b.Match, b.Difference = id, "", ""
+	case strings.TrimSpace(b.Difference) != "":
+		b.Match = MatchDifferent
+	default:
+		b.Match, b.Difference = MatchSame, ""
 	}
-	_, err := tx.Exec(`INSERT INTO bugs(`+bugCols+`) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`,
-		b.ID, b.RunID, b.Summary, b.Step, b.Evidence, b.Severity, b.Note, at, b.IssueID, b.JourneyID, b.JourneyRev, b.JourneyStep)
+	_, err := tx.Exec(`INSERT INTO bugs(`+bugCols+`) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		b.ID, b.RunID, b.Summary, b.Step, b.Evidence, b.Severity, b.Note, at, b.IssueID, b.JourneyID, b.JourneyRev, b.JourneyStep,
+		b.Page, b.Difference, b.Match)
 	return err
 }
 
-// issueSelect reads issues with their report aggregates; the caller adds
-// WHERE, ORDER BY and LIMIT.
+// issueSelect reads issues with their report aggregates and main report;
+// the caller adds WHERE, ORDER BY and LIMIT.
 const issueSelect = `SELECT i.id, i.summary, i.status, i.reason, i.created, i.updated, i.reopened, i.check_chain, i.check_note,
 	(SELECT COUNT(*) FROM bugs b WHERE b.issue_id = i.id),
 	(SELECT COALESCE(MAX(b.created), 0) FROM bugs b WHERE b.issue_id = i.id),
 	(SELECT COALESCE(GROUP_CONCAT(p, char(31)), '') FROM (SELECT DISTINCT r.persona AS p FROM bugs b JOIN runs r ON r.id = b.run_id
-		WHERE b.issue_id = i.id AND r.persona != '' ORDER BY p))
-	FROM issues i `
+		WHERE b.issue_id = i.id AND r.persona != '' ORDER BY p)),
+	i.main_bug,
+	COALESCE((SELECT b.severity FROM bugs b WHERE b.issue_id = i.id ORDER BY CASE lower(b.severity)
+		WHEN 'high' THEN 0 WHEN 'medium' THEN 1 WHEN 'low' THEN 2 ELSE 3 END, b.created DESC LIMIT 1), ''),
+	(SELECT COALESCE(MIN(b.created), 0) FROM bugs b WHERE b.issue_id = i.id),
+	(SELECT COALESCE(MAX(b.created), 0) FROM bugs b WHERE b.issue_id = i.id AND b.match_kind = 'different'),
+	(SELECT COALESCE(GROUP_CONCAT(st, char(31)), '') FROM (SELECT DISTINCT r.story AS st FROM bugs b JOIN runs r ON r.id = b.run_id
+		WHERE b.issue_id = i.id AND r.story != '' ORDER BY st)),
+	COALESCE(m.page, ''), COALESCE(m.step, ''), COALESCE(m.run_id, ''), COALESCE(m.evidence, '')
+	FROM issues i LEFT JOIN bugs m ON m.id = i.main_bug AND m.issue_id = i.id `
 
 func (s *Store) queryIssues(tail string, args ...any) ([]Issue, error) {
 	rows, err := s.db.Query(issueSelect+tail, args...)
@@ -120,21 +162,61 @@ func (s *Store) queryIssues(tail string, args ...any) ([]Issue, error) {
 	var out []Issue
 	for rows.Next() {
 		var i Issue
-		var status, personas string
-		var created, updated, reopened, last int64
+		var status, personas, stories, mainRun, mainEvidence string
+		var created, updated, reopened, last, first, different int64
 		if err := rows.Scan(&i.ID, &i.Summary, &status, &i.Reason, &created, &updated, &reopened, &i.CheckChain, &i.CheckNote,
-			&i.Reports, &last, &personas); err != nil {
+			&i.Reports, &last, &personas, &i.Main, &i.Severity, &first, &different, &stories,
+			&i.Page, &i.Step, &mainRun, &mainEvidence); err != nil {
 			return nil, err
 		}
 		i.Status = IssueStatus(status)
 		i.Created, i.Updated, i.Reopened, i.LastSeen = fromTS(created), fromTS(updated), fromTS(reopened), fromTS(last)
-		i.Personas = []string{}
-		if personas != "" {
-			i.Personas = strings.Split(personas, "\x1f")
+		i.FirstSeen, i.DifferentAt = fromTS(first), fromTS(different)
+		i.Personas, i.Stories = splitList(personas), splitList(stories)
+		if name := shotName(mainEvidence); name != "" {
+			i.Shot = &IssueShot{RunID: mainRun, Name: name}
 		}
 		out = append(out, i)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	rows.Close()
+	for k := range out {
+		if out[k].Shot != nil || out[k].Reports == 0 {
+			continue
+		}
+		if out[k].Shot, err = s.newestShot(out[k].ID); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
+func splitList(joined string) []string {
+	if joined == "" {
+		return []string{}
+	}
+	return strings.Split(joined, "\x1f")
+}
+
+// newestShot is the screenshot of the issue's newest report that has one, or nil.
+func (s *Store) newestShot(issueID string) (*IssueShot, error) {
+	rows, err := s.db.Query(`SELECT run_id, evidence FROM bugs WHERE issue_id = ? ORDER BY created DESC, rowid DESC`, issueID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var run, evidence string
+		if err := rows.Scan(&run, &evidence); err != nil {
+			return nil, err
+		}
+		if name := shotName(evidence); name != "" {
+			return &IssueShot{RunID: run, Name: name}, nil
+		}
+	}
+	return nil, rows.Err()
 }
 
 // Issues returns every issue, latest activity first.
@@ -157,7 +239,8 @@ func (s *Store) Issue(id string) (Issue, error) {
 // IssueReports returns an issue's reports with the run that made each, newest first.
 func (s *Store) IssueReports(id string) ([]Report, error) {
 	rows, err := s.db.Query(`SELECT b.id, b.run_id, b.summary, b.step, b.evidence, b.severity, b.note, b.created, b.issue_id,
-		b.journey_id, b.journey_rev, b.journey_step, COALESCE(r.persona, ''), COALESCE(r.story, '') FROM bugs b LEFT JOIN runs r ON r.id = b.run_id
+		b.journey_id, b.journey_rev, b.journey_step, b.page, b.difference, b.match_kind,
+		COALESCE(r.persona, ''), COALESCE(r.story, '') FROM bugs b LEFT JOIN runs r ON r.id = b.run_id
 		WHERE b.issue_id = ? ORDER BY b.created DESC, b.rowid DESC`, id)
 	if err != nil {
 		return nil, err
@@ -168,7 +251,7 @@ func (s *Store) IssueReports(id string) ([]Report, error) {
 		var rp Report
 		var c int64
 		if err := rows.Scan(&rp.ID, &rp.RunID, &rp.Summary, &rp.Step, &rp.Evidence, &rp.Severity, &rp.Note, &c, &rp.IssueID,
-			&rp.JourneyID, &rp.JourneyRev, &rp.JourneyStep, &rp.Persona, &rp.Story); err != nil {
+			&rp.JourneyID, &rp.JourneyRev, &rp.JourneyStep, &rp.Page, &rp.Difference, &rp.Match, &rp.Persona, &rp.Story); err != nil {
 			return nil, err
 		}
 		rp.Created = fromTS(c)

@@ -183,7 +183,21 @@ type Bug struct {
 	JourneyID   string `json:"journeyId,omitempty"`
 	JourneyRev  int    `json:"journeyRev,omitempty"`
 	JourneyStep int    `json:"journeyStep,omitempty"`
+	// Page is the path of the page where it happened (no query).
+	Page string `json:"page,omitempty"`
+	// Difference is, on a report of a known issue, what differs from it;
+	// empty means the same. Match is how the report relates to its issue.
+	Difference string `json:"difference,omitempty"`
+	Match      string `json:"match,omitempty"`
 }
+
+// How a report relates to the issue it belongs to (Bug.Match). Empty: no
+// marking (it started the issue, or came before reports said).
+const (
+	MatchSame      = "same"      // a persona said it is the known issue
+	MatchDifferent = "different" // the known issue, with a difference
+	MatchJoined    = "joined"    // a lead moved it here
+)
 
 type Store struct{ db *sql.DB }
 
@@ -322,6 +336,14 @@ var bugsAddedColumns = []addedColumn{
 	{"journey_id", "journey_id TEXT NOT NULL DEFAULT ''"},
 	{"journey_rev", "journey_rev INTEGER NOT NULL DEFAULT 0"},
 	{"journey_step", "journey_step INTEGER NOT NULL DEFAULT 0"},
+	{"page", "page TEXT NOT NULL DEFAULT ''"},
+	{"difference", "difference TEXT NOT NULL DEFAULT ''"},
+	{"match_kind", "match_kind TEXT NOT NULL DEFAULT ''"},
+}
+
+// issuesAddedColumns are the issues columns added after the table first shipped.
+var issuesAddedColumns = []addedColumn{
+	{"main_bug", "main_bug TEXT NOT NULL DEFAULT ''"},
 }
 
 // addColumns adds any missing runs and waits columns to a database made by an
@@ -373,11 +395,22 @@ func addColumns(db *sql.DB) (added bool, err error) {
 			return false, err
 		}
 	}
+	addedIssues, err := addMissing(tx, "issues", issuesAddedColumns)
+	if err != nil {
+		return false, err
+	}
+	if addedIssues["main_bug"] || addedBugs["issue_id"] {
+		// An issue's main report is its first.
+		if _, err := tx.Exec(`UPDATE issues SET main_bug = COALESCE((SELECT b.id FROM bugs b WHERE b.issue_id = issues.id
+			ORDER BY b.created, b.rowid LIMIT 1), '') WHERE main_bug = ''`); err != nil {
+			return false, err
+		}
+	}
 	// Created here, not in schema.sql: on an old database the column exists only now.
 	if _, err := tx.Exec(`CREATE INDEX IF NOT EXISTS runs_chain ON runs(chain)`); err != nil {
 		return false, err
 	}
-	return len(addedRuns)+len(addedWaits)+len(addedBugs)+len(addedQueue)+len(addedJourneys) > 0, tx.Commit()
+	return len(addedRuns)+len(addedWaits)+len(addedBugs)+len(addedQueue)+len(addedJourneys)+len(addedIssues) > 0, tx.Commit()
 }
 
 // addMissing adds the columns table lacks and returns the names it added. A

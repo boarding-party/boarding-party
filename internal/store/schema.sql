@@ -52,11 +52,15 @@ CREATE TABLE IF NOT EXISTS bugs (
   issue_id TEXT NOT NULL DEFAULT '',
   journey_id   TEXT NOT NULL DEFAULT '',
   journey_rev  INTEGER NOT NULL DEFAULT 0,
-  journey_step INTEGER NOT NULL DEFAULT 0
+  journey_step INTEGER NOT NULL DEFAULT 0,
+  page       TEXT NOT NULL DEFAULT '',
+  difference TEXT NOT NULL DEFAULT '',
+  match_kind TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS bugs_run ON bugs(run_id);
 -- An issue is one problem on the site; each bugs row (a report) belongs to
 -- one. check_chain is the chain of the fix check under way, if any.
+-- main_bug is the report the issue is shown by; its summary is the title.
 CREATE TABLE IF NOT EXISTS issues (
   id            TEXT PRIMARY KEY,
   summary       TEXT NOT NULL DEFAULT '',
@@ -66,7 +70,8 @@ CREATE TABLE IF NOT EXISTS issues (
   updated       INTEGER NOT NULL DEFAULT 0,
   reopened      INTEGER NOT NULL DEFAULT 0,
   check_chain TEXT NOT NULL DEFAULT '',
-  check_note    TEXT NOT NULL DEFAULT ''
+  check_note    TEXT NOT NULL DEFAULT '',
+  main_bug      TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS issues_updated ON issues(updated);
 CREATE TABLE IF NOT EXISTS messages (

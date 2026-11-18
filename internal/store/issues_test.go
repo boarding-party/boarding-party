@@ -386,3 +386,117 @@ func TestFirstFindsCreditsTheEarliestReport(t *testing.T) {
 		t.Fatalf("finds %+v, want only r3's: the old issue was found before t0, the noise is not a bug", finds)
 	}
 }
+
+func reportsByID(t *testing.T, s *Store, issue string) map[string]Report {
+	t.Helper()
+	rs, err := s.IssueReports(issue)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := map[string]Report{}
+	for _, r := range rs {
+		out[r.ID] = r
+	}
+	return out
+}
+
+func TestAttachMarksSameOrDifferent(t *testing.T) {
+	s := open(t)
+	withRun(t, s, "r1", "Ada", "todos")
+	addBug(t, s, Bug{ID: "b1", RunID: "r1", Summary: "x", Page: "/invoice", Created: t0})
+	id := onlyIssue(t, s).ID
+	addBug(t, s, Bug{ID: "b2", RunID: "r1", Summary: "x", Created: t0.Add(time.Minute), IssueID: id})
+	addBug(t, s, Bug{ID: "b3", RunID: "r1", Summary: "x", Created: t0.Add(2 * time.Minute), IssueID: id, Difference: "on /quote too"})
+	rs := reportsByID(t, s, id)
+	if rs["b1"].Match != "" || rs["b1"].Page != "/invoice" {
+		t.Fatalf("b1 %+v", rs["b1"])
+	}
+	if rs["b2"].Match != MatchSame || rs["b2"].Difference != "" {
+		t.Fatalf("b2 %+v", rs["b2"])
+	}
+	if rs["b3"].Match != MatchDifferent || rs["b3"].Difference != "on /quote too" {
+		t.Fatalf("b3 %+v", rs["b3"])
+	}
+}
+
+func TestUnknownSameAsIsNoMatch(t *testing.T) {
+	s := open(t)
+	withRun(t, s, "r1", "Ada", "todos")
+	addBug(t, s, Bug{ID: "b1", RunID: "r1", Summary: "x", Created: t0, IssueID: "nope", Difference: "x"})
+	id := onlyIssue(t, s).ID
+	if r := reportsByID(t, s, id)["b1"]; r.Match != "" || r.Difference != "" {
+		t.Fatalf("report %+v", r)
+	}
+}
+
+func TestIssueAggregates(t *testing.T) {
+	s := open(t)
+	withRun(t, s, "r1", "Ada", "first-invoice")
+	withRun(t, s, "r2", "Bob", "check-invoice")
+	addBug(t, s, Bug{ID: "b1", RunID: "r1", Summary: "vat", Severity: "low", Page: "/invoice", Step: "Add line", Evidence: "no image", Created: t0})
+	id := onlyIssue(t, s).ID
+	later := t0.Add(time.Hour)
+	addBug(t, s, Bug{ID: "b2", RunID: "r2", Summary: "vat", Severity: "high", Evidence: "bug-2.png: x", Created: later, IssueID: id, Difference: "VAT 0%"})
+	is := onlyIssue(t, s)
+	if is.Main != "b1" || is.Severity != "high" || !is.FirstSeen.Equal(t0) || is.Page != "/invoice" || is.Step != "Add line" ||
+		!is.DifferentAt.Equal(later) {
+		t.Fatalf("issue %+v", is)
+	}
+	if len(is.Stories) != 2 || is.Stories[0] != "check-invoice" || is.Stories[1] != "first-invoice" {
+		t.Fatalf("stories %v", is.Stories)
+	}
+	if is.Shot == nil || *is.Shot != (IssueShot{RunID: "r2", Name: "bug-2.png"}) {
+		t.Fatalf("shot %+v", is.Shot)
+	}
+}
+
+func TestIssueShotPrefersMain(t *testing.T) {
+	s := open(t)
+	withRun(t, s, "r1", "Ada", "todos")
+	addBug(t, s, Bug{ID: "b1", RunID: "r1", Summary: "x", Evidence: "bug-1.png", Created: t0})
+	id := onlyIssue(t, s).ID
+	addBug(t, s, Bug{ID: "b2", RunID: "r1", Summary: "x", Evidence: "bug-2.png", Created: t0.Add(time.Hour), IssueID: id})
+	if is := onlyIssue(t, s); is.Shot == nil || is.Shot.Name != "bug-1.png" {
+		t.Fatalf("shot %+v", is.Shot)
+	}
+	s2 := open(t)
+	withRun(t, s2, "r1", "Ada", "todos")
+	addBug(t, s2, Bug{ID: "b1", RunID: "r1", Summary: "x", Evidence: "it broke", Created: t0})
+	if is := onlyIssue(t, s2); is.Shot != nil || is.Stories == nil {
+		t.Fatalf("issue %+v", is)
+	}
+}
+
+func TestMainBackfill(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "bp.db")
+	db, err := sql.Open("sqlite", "file:"+path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`CREATE TABLE bugs (id TEXT PRIMARY KEY, run_id TEXT NOT NULL, summary TEXT NOT NULL DEFAULT '',
+		step TEXT NOT NULL DEFAULT '', evidence TEXT NOT NULL DEFAULT '', severity TEXT NOT NULL DEFAULT '',
+		note TEXT NOT NULL DEFAULT '', created INTEGER NOT NULL DEFAULT 0, issue_id TEXT NOT NULL DEFAULT '');
+		CREATE TABLE issues (id TEXT PRIMARY KEY, summary TEXT NOT NULL DEFAULT '', status TEXT NOT NULL,
+		reason TEXT NOT NULL DEFAULT '', created INTEGER NOT NULL DEFAULT 0, updated INTEGER NOT NULL DEFAULT 0,
+		reopened INTEGER NOT NULL DEFAULT 0, check_chain TEXT NOT NULL DEFAULT '', check_note TEXT NOT NULL DEFAULT '');
+		INSERT INTO issues(id, summary, status, created, updated) VALUES('i1', 'old', 'open', 1000, 2000);
+		INSERT INTO bugs(id, run_id, summary, created, issue_id) VALUES('late', 'r1', 'old again', 2000, 'i1');
+		INSERT INTO bugs(id, run_id, summary, created, issue_id) VALUES('early', 'r1', 'old', 1000, 'i1')`); err != nil {
+		t.Fatal(err)
+	}
+	db.Close()
+	s, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	is, err := s.Issue("i1")
+	if err != nil || is.Main != "early" {
+		t.Fatalf("issue %+v %v", is, err)
+	}
+	for _, r := range reportsByID(t, s, "i1") {
+		if r.Match != "" || r.Page != "" {
+			t.Fatalf("report %+v", r)
+		}
+	}
+}
