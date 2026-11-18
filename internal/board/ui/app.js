@@ -22,6 +22,7 @@ import { captionAt, nearest } from './studio-time.js';
 import { Shot } from './shot.js';
 import { personaLabel } from './persona-label.js';
 import { JourneysPage, JourneyPage, journeyHref } from './journeys.js';
+import { InboxPage } from './inbox.js';
 
 const ACTIVE = new Set(['pending', 'running']);
 // LOCAL is the CLI's own board, which listens on loopback only; anywhere
@@ -245,7 +246,7 @@ function App() {
         ${route.page === 'run' ? null : html`<${RunStrip} director=${director} active=${active} status=${status} onChange=${loadRuns} />`}
         ${route.page === 'run' ? html`<${RunPage} key=${route.id} id=${route.id} onChange=${loadRuns} />`
           : route.page === 'project' ? html`<${ProjectPage} section=${route.section} roleN=${route.roleN} onSaved=${loadProject} onDirty=${onDirty} />`
-          : route.page === 'inbox' ? html`<${InboxPage} project=${project} />`
+          : route.page === 'inbox' ? html`<${InboxPage} names=${[...new Set(allPersonas(project).map((p) => p.name))]} />`
           : route.page === 'bugs' ? html`<${BugsPage} />`
           : route.page === 'issue' ? html`<${IssuePage} key=${route.id} id=${route.id} />`
           : route.page === 'lead' ? html`<${LeadPage} key=${route.id} name=${route.id} />`
@@ -769,111 +770,6 @@ function RunsTable({ runs }) {
             </tr>`)}
         </tbody>
       </table>
-    </div>`;
-}
-
-// ---- inbox page ---------------------------------------------------------
-// Mail the director has received for the personas. Everything here is text
-// from strangers: shown as text only, and links never become anchors, so a
-// click here can't use up a one-time link a persona still needs.
-
-const INBOX_POLL_MS = 10000;
-const INBOX_LIMIT = 100;
-
-function InboxPage({ project }) {
-  // Persona, tab and the open message live in the address.
-  const p = useParams();
-  const persona = p.persona || '';
-  const tab = p.tab === 'kept' ? 'kept' : 'received';
-  const openID = p.m || '';
-  const setOpenID = (id) => setParams({ m: id });
-  const [msgs, setMsgs] = useState(null);
-  const [err, setErr] = useState('');
-  const names = [...new Set(allPersonas(project).map((p) => p.name))];
-  const loaded = useRef(false); // the first load for this view has happened
-
-  // Re-poll while visible; a hidden tab waits and checks again, but the first
-  // load of a view always goes ahead.
-  usePoll(async (stale) => {
-    if (document.hidden && loaded.current) return INBOX_POLL_MS;
-    try {
-      const q = `limit=${INBOX_LIMIT}` + (persona ? `&persona=${encodeURIComponent(persona)}` : '') + (tab === 'kept' ? '&filtered=1' : '');
-      const list = (await api(`api/messages?${q}`)) || [];
-      if (stale()) return null;
-      setMsgs(list); setErr(''); loaded.current = true;
-    } catch (e) {
-      if (stale()) return null;
-      setErr(e.message);
-    }
-    return INBOX_POLL_MS;
-  }, [persona, tab]);
-
-  const pick = (patch) => { loaded.current = false; setMsgs(null); setParams({ ...patch, m: '' }); };
-
-  return html`
-    <section class="page wide">
-      <h1>Inbox</h1>
-      <p class="lede">Mail sent to the personas' addresses. The mailbox is set up on the <a href="#/project/inbox">Project</a> page.</p>
-      <div class="stack">
-        <div class="row inboxbar">
-          <div class="field">
-            <label for="ib-persona">Persona</label>
-            <select id="ib-persona" value=${persona} onChange=${(e) => pick({ persona: e.currentTarget.value })}>
-              <option value="" selected=${!persona}>All</option>
-              ${names.map((n) => html`<option key=${n} value=${n} selected=${persona === n}>${n}</option>`)}
-            </select>
-          </div>
-          <div class="tabs" role="tablist">
-            <button type="button" role="tab" aria-selected=${tab === 'received'} class=${tab === 'received' ? 'on' : ''} onClick=${() => pick({ tab: '' })}>Received</button>
-            <button type="button" role="tab" aria-selected=${tab === 'kept'} class=${tab === 'kept' ? 'on' : ''} onClick=${() => pick({ tab: 'kept' })}>Kept out</button>
-          </div>
-        </div>
-        ${err ? html`<div class="note bad" role="alert">Could not load the mail: ${err}</div>` : null}
-        ${msgs === null && !err ? html`<p class="muted">Loading…</p>` : null}
-        ${msgs && msgs.length === 0 ? html`<div class="empty"><b>${tab === 'kept' ? 'Nothing kept out.' : 'No mail yet.'}</b>${tab === 'kept' ? 'Mail from senders you did not accept appears here.' : 'Mail sent to a persona\'s address appears here within about 10 seconds.'}</div>` : null}
-        ${msgs && msgs.length ? html`
-          <div class="card flush tablewrap">
-            <table class="mailtab">
-              <thead><tr><th>Persona</th><th>From</th><th>Subject</th><th>Received</th>${tab === 'kept' ? html`<th>Reason</th>` : null}</tr></thead>
-              <tbody>
-                ${msgs.map((m) => html`
-                  <tr class=${'click' + (openID === m.id ? ' sel' : '')} key=${m.id} tabindex="0" aria-expanded=${openID === m.id}
-                      onClick=${() => setOpenID(openID === m.id ? '' : m.id)}
-                      onKeyDown=${(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setOpenID(openID === m.id ? '' : m.id); } }}>
-                    <td>${m.persona || html`<span class="muted">—</span>`}</td>
-                    <td class="from">${m.from}</td>
-                    <td class="subj">${m.subject || html`<span class="muted">(no subject)</span>`}${m.started ? html` <span class="tag run started">Started ${m.started}</span>` : null}</td>
-                    <td class="when" title=${fmtFull(m.received)}>${fmtWhen(m.received)}</td>
-                    ${tab === 'kept' ? html`<td><span class="tag wait">${m.filtered}</span></td>` : null}
-                  </tr>
-                  ${openID === m.id ? html`<tr class="detail" key=${m.id + ':open'}><td colspan=${tab === 'kept' ? 5 : 4}><${MessageBody} id=${m.id} /></td></tr>` : null}`)}
-              </tbody>
-            </table>
-          </div>` : null}
-      </div>
-    </section>`;
-}
-
-function MessageBody({ id }) {
-  const [m, setM] = useState(null);
-  const [err, setErr] = useState('');
-  useEffect(() => {
-    let live = true;
-    api(`api/messages/${encodeURIComponent(id)}`).then((x) => { if (live) setM(x); }).catch((e) => { if (live) setErr(e.message); });
-    return () => { live = false; };
-  }, [id]);
-  if (err) return html`<div class="note bad">Could not load the message: ${err}</div>`;
-  if (!m) return html`<p class="muted small">Loading…</p>`;
-  return html`
-    <div class="msg">
-      ${m.to && m.to.length ? html`<div class="small muted">To ${m.to.join(', ')}</div>` : null}
-      <pre class="msgtext">${m.text || '(no text)'}</pre>
-      ${m.links && m.links.length ? html`
-        <div class="msglinks">
-          <b class="small">Links in this message</b>
-          <ul>${m.links.map((l, i) => html`<li key=${i}>${l}</li>`)}</ul>
-          <p class="small muted">Links aren't clickable here, so you don't use up a link the persona needs.</p>
-        </div>` : null}
     </div>`;
 }
 

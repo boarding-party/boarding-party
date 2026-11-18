@@ -134,6 +134,7 @@ type messageSummary struct {
 	Persona  string    `json:"persona"`
 	From     string    `json:"from"`
 	Subject  string    `json:"subject"`
+	Preview  string    `json:"preview"` // the text's start, on one line
 	Received time.Time `json:"received"`
 	Filtered string    `json:"filtered"`
 	// Started names the story this message started; set by the list only.
@@ -147,8 +148,22 @@ type messageFull struct {
 	Links []string `json:"links"`
 }
 
+// previewLen caps the preview in runes; the list shows one line of it.
+const previewLen = 160
+
 func summary(m store.Message) messageSummary {
-	return messageSummary{ID: m.ID, Persona: m.Persona, From: m.From, Subject: m.Subject, Received: m.Received, Filtered: m.Filtered}
+	return messageSummary{ID: m.ID, Persona: m.Persona, From: m.From, Subject: m.Subject, Preview: preview(m.Text),
+		Received: m.Received, Filtered: m.Filtered}
+}
+
+// preview is the start of a message's text with all whitespace runs made one
+// space.
+func preview(text string) string {
+	p := strings.Join(strings.Fields(text), " ")
+	if r := []rune(p); len(r) > previewLen {
+		p = string(r[:previewLen])
+	}
+	return p
 }
 
 func (s *server) listMessages(w http.ResponseWriter, r *http.Request) {

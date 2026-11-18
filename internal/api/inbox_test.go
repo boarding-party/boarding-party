@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -11,6 +12,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/boarding-party/boardingparty/internal/artifacts"
 	"github.com/boarding-party/boardingparty/internal/inbox"
@@ -181,7 +183,7 @@ func TestMessagesListAndFilteredSplit(t *testing.T) {
 	add("m2", 2, "bob", "")
 	add("m3", 3, "ann", "sender not allowed")
 	_, body := mailDo(t, "GET", srv.URL+"/api/messages", "")
-	if !strings.Contains(body, `"m1"`) || !strings.Contains(body, `"m2"`) || strings.Contains(body, `"m3"`) || strings.Contains(body, "body m1") {
+	if !strings.Contains(body, `"m1"`) || !strings.Contains(body, `"m2"`) || strings.Contains(body, `"m3"`) || strings.Contains(body, `"text"`) || strings.Contains(body, `"links"`) {
 		t.Fatalf("delivered: %s", body)
 	}
 	_, body = mailDo(t, "GET", srv.URL+"/api/messages?persona=ann", "")
@@ -203,6 +205,28 @@ func TestMessagesListAndFilteredSplit(t *testing.T) {
 	_, body = mailDo(t, "GET", srv.URL+"/api/messages?persona=nobody", "")
 	if strings.TrimSpace(body) != "[]" {
 		t.Fatalf("empty list must be [], got %s", body)
+	}
+}
+
+func TestMessagesListCarriesPreview(t *testing.T) {
+	srv, _, _, st := setupMail(t, okCheck)
+	now := time.Now()
+	text := "You asked   for reminders.\n\nConfirm here:\r\n\thttps://x.test/c " + strings.Repeat("é", 300)
+	if _, err := st.AddMessage(store.Message{ID: "m1", UIDValidity: 1, UID: 1, Persona: "ann", From: "a@x.test",
+		Subject: "s", Text: text, Received: now, Stored: now}); err != nil {
+		t.Fatal(err)
+	}
+	_, body := mailDo(t, "GET", srv.URL+"/api/messages", "")
+	var list []struct{ Preview string }
+	if err := json.Unmarshal([]byte(body), &list); err != nil || len(list) != 1 {
+		t.Fatalf("list: %v %s", err, body)
+	}
+	got := list[0].Preview
+	if !strings.HasPrefix(got, "You asked for reminders. Confirm here: https://x.test/c éé") {
+		t.Fatalf("preview not one line with spaces collapsed: %q", got)
+	}
+	if n := utf8.RuneCountInString(got); n != 160 || !utf8.ValidString(got) {
+		t.Fatalf("preview is %d runes, want 160, valid %v", n, utf8.ValidString(got))
 	}
 }
 
