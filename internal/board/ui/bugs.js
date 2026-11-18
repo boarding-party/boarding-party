@@ -1,5 +1,6 @@
-// Bugs page: one list of issues across all runs, and an issue's own page
-// with its reports and the triage buttons.
+// Bugs page: one list of issues across all runs, and an issue's own page:
+// the issue shown once by its main report, every report a short marked
+// row, and the triage buttons.
 //
 // Issue and report text is agent-written and untrusted: render it only as
 // text through htm/Preact.
@@ -7,6 +8,7 @@ import { useState } from './vendor/hooks.module.js';
 import { html, api, fmtWhen, parseTime, artifactURL, runHref, issueHref, usePoll, useParams, setParams, SEVERITY_TAG, SHOT_TOKEN } from './lib.js';
 import { Shot } from './shot.js';
 import { journeyHref } from './journeys.js';
+import { attention, marking, earliestOf, severityOf } from './issue-rules.js';
 
 const POLL_MS = 15000;
 const CHECK_POLL_MS = 5000; // while a fix check is under way
@@ -23,6 +25,30 @@ const STATUS = new Map([
 function StatusTag({ status }) {
   const s = STATUS.get(status) || { label: status, tag: 'idle' };
   return html`<span class=${'tag ' + s.tag}>${s.label}</span>`;
+}
+
+const SEVERITY_LABEL = new Map([['high', 'High'], ['medium', 'Medium'], ['low', 'Low']]);
+
+function SeverityTag({ severity }) {
+  const s = severityOf(severity);
+  return html`<span class=${'tag ' + (SEVERITY_TAG.get(s) || 'idle')}>${SEVERITY_LABEL.get(s) || 'Unrated'}</span>`;
+}
+
+// where says the page and step a report names, either of which may be missing.
+const where = (page, step) => [page, step ? `step "${step}"` : ''].filter(Boolean).join(' · ');
+
+// who says which personas and stories met an issue.
+function who(personas, stories) {
+  const st = stories && stories.length ? `${stories.length === 1 ? 'story' : 'stories'} ${stories.join(', ')}` : '';
+  return [(personas || []).join(', '), st].filter(Boolean).join(' · ');
+}
+
+// Thumb is an issue's screenshot at row size, or a blank of the same size
+// so rows line up.
+function Thumb({ shot }) {
+  const [broken, setBroken] = useState(false);
+  if (!shot || broken) return html`<span class="thumb none" aria-hidden="true"></span>`;
+  return html`<img class="thumb" loading="lazy" alt="" src=${artifactURL(shot.runId, shot.name)} onError=${() => setBroken(true)} />`;
 }
 
 // Groups in the order the list shows them; closed and not a bug sit behind a toggle.
@@ -70,14 +96,14 @@ export function BugsPage() {
           ${GROUPS.map((g) => {
             let list = issues.filter(g.has);
             if (g.title === 'Open') list = [...list.filter((i) => parseTime(i.reopened)), ...list.filter((i) => !parseTime(i.reopened))];
-            return list.length ? html`<${IssueGroup} key=${g.title} title=${g.title} list=${list} />` : null;
+            return list.length ? html`<${IssueGroup} key=${g.title} title=${g.title} list=${list} status=${g.title === 'Fixed'} />` : null;
           })}
           ${done.length ? html`
             <div>
               <button type="button" class="btn ghost small" aria-expanded=${showDone} onClick=${() => setParams({ done: !showDone })}>
                 ${showDone ? 'Hide' : 'Show'} closed and not a bug (${done.length})</button>
             </div>
-            ${showDone ? html`<${IssueGroup} title="Closed and not a bug" list=${done} />` : null}` : null}
+            ${showDone ? html`<${IssueGroup} title="Closed and not a bug" list=${done} status=${true} />` : null}` : null}
         </div>` : null}
     </section>`;
 }
@@ -148,21 +174,36 @@ function Value({ days, by, open }) {
     </div>`;
 }
 
-function IssueGroup({ title, list }) {
+// IssueGroup lists issues one row each: how bad, what it looks like, where,
+// who met it, how often and when. status shows each row's status, for a
+// group that mixes them.
+function IssueGroup({ title, list, status }) {
+  const now = Date.now();
   return html`
     <div class="card flush">
       <h2 class="issuegroup">${title} <span class="count">${list.length}</span></h2>
       <ul class="issues">
-        ${list.map((i) => html`<li key=${i.id}>
+        ${list.map((i) => {
+          const att = attention(i, now);
+          const at = where(i.page, i.step), by = who(i.personas, i.stories);
+          return html`<li key=${i.id}>
           <a class="issue" href=${issueHref(i.id)}>
-            <${StatusTag} status=${i.status} />
-            <span class="sum">${i.summary || 'No summary'}</span>
-            <span class="when small muted">${i.lastSeen ? `Seen ${fmtWhen(i.lastSeen)}` : ''}</span>
-            <span class="meta small muted">
-              ${parseTime(i.reopened) ? html`<span class="reopened">Reopened</span>` : null}
-              ${plural(i.reports, 'report', 'reports')}${i.personas && i.personas.length ? `, by ${i.personas.join(', ')}` : ''}
+            <span class=${'sevbar sev-' + (severityOf(i.severity) || 'none')} aria-hidden="true"></span>
+            <${Thumb} shot=${i.shot} />
+            <span class="ibody">
+              <span class="itags"><${SeverityTag} severity=${i.severity} />${status ? html`<${StatusTag} status=${i.status} />` : null}${att ? html`<span class=${'tag ' + att.tag}>${att.label}</span>` : null}</span>
+              <span class="sum">${i.summary || 'No summary'}</span>
+              ${at ? html`<span class="where">${at}</span>` : null}
+              ${by ? html`<span class="where">${by}</span>` : null}
             </span>
-          </a></li>`)}
+            <span class="ifacts">
+              <b class="icount">${i.reports}</b>
+              <span>${i.reports === 1 ? 'report' : 'reports'}</span>
+              ${i.firstSeen ? html`<span class="iseen">First seen ${fmtWhen(i.firstSeen)}</span>` : null}
+              ${i.lastSeen && i.reports > 1 ? html`<span class="iseen">Last seen ${fmtWhen(i.lastSeen)}</span>` : null}
+            </span>
+          </a></li>`;
+        })}
       </ul>
     </div>`;
 }
@@ -183,6 +224,9 @@ export function IssuePage({ id }) {
   const [reason, setReason] = useState('');
   const [actErr, setActErr] = useState('');
   const [tick, setTick] = useState(0);
+  const [openRow, setOpenRow] = useState(''); // the report shown in full under its row
+  const [rowBusy, setRowBusy] = useState(false);
+  const [rowErr, setRowErr] = useState('');
 
   usePoll(async (stale) => {
     try {
@@ -212,6 +256,21 @@ export function IssuePage({ id }) {
     }
   };
 
+  // act makes a report main or splits it off; a split goes to the new issue.
+  const act = async (what, report) => {
+    setRowBusy(true); setRowErr('');
+    try {
+      const d = await api(`api/issues/${encodeURIComponent(id)}/${what}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ report }) });
+      if (what === 'split' && d && d.id) { setOpenRow(''); location.hash = issueHref(d.id); return; }
+      setTick((t) => t + 1);
+    } catch (e) {
+      setRowErr(e.message);
+    } finally {
+      setRowBusy(false);
+    }
+  };
+
   if (missing) {
     return html`<section class="page"><p class="crumb"><a href="#/bugs">Bugs</a></p>
       <div class="empty"><b>Bug not found</b><a href="#/bugs">Back to bugs</a>.</div></section>`;
@@ -225,14 +284,16 @@ export function IssuePage({ id }) {
   const st = issue.status;
   const couldNot = (issue.checkNote || '').startsWith('Could not check');
   const verifying = st === 'verifying';
+  const main = reports.find((r) => r.id === issue.main) || reports[reports.length - 1];
+  const earliest = earliestOf(reports);
 
   return html`
     <section class="page wide">
       <p class="crumb"><a href="#/bugs">Bugs</a> / ${issue.id}</p>
       <h1>${issue.summary || 'No summary'}</h1>
-      <p class="lede"><${StatusTag} status=${st} />
-        ${parseTime(issue.reopened) ? html` <span class="reopened">Reopened ${fmtWhen(issue.reopened)}</span>` : null}
-        ${' '}${plural(issue.reports, 'report', 'reports')}${issue.lastSeen ? `, last seen ${fmtWhen(issue.lastSeen)}` : ''}.</p>
+      <p class="lede issuelede"><${SeverityTag} severity=${issue.severity} /> <${StatusTag} status=${st} />
+        ${parseTime(issue.reopened) && st !== 'closed' && st !== 'not_a_bug' ? html` <span class="reopened">Seen again after fix ${fmtWhen(issue.reopened)}</span>` : null}
+        ${' '}<span><b>${plural(issue.reports, 'report', 'reports')}</b> by ${plural((issue.personas || []).length, 'persona', 'personas')}${issue.firstSeen ? ` · first ${fmtWhen(issue.firstSeen)}` : ''}${issue.lastSeen ? ` · last ${fmtWhen(issue.lastSeen)}` : ''}</span></p>
       ${err ? html`<div class="note bad banner">Lost contact with the director: ${err}. Retrying.</div>` : null}
       <div class="issuelayout">
       <div class="stack issueside">
@@ -265,9 +326,14 @@ export function IssuePage({ id }) {
             : 'Mark fixed queues the story that found it, so a persona can look for it again.'}</p>
         </div>
       </div>
-        <div class="card">
-          <h2>Reports</h2>
-          <ul class="bugs">${reports.map((r) => html`<li key=${r.id}><${Report} r=${r} /></li>`)}</ul>
+        <div class="stack">
+          ${main ? html`<div class="card"><${MainReport} r=${main} /></div>` : null}
+          <div class="card flush">
+            <h2 class="issuegroup">Reports <span class="count">${reports.length}</span></h2>
+            <ul class="reprows">${reports.map((r) => html`<${ReportRow} key=${r.id} r=${r} main=${main && main.id} earliest=${earliest}
+              open=${openRow === r.id} onToggle=${() => { setOpenRow(openRow === r.id ? '' : r.id); setRowErr(''); }}
+              canSplit=${reports.length >= 2} busy=${rowBusy} err=${openRow === r.id ? rowErr : ''} act=${act} />`)}</ul>
+          </div>
         </div>
       </div>
     </section>`;
@@ -281,6 +347,7 @@ function Report({ r }) {
       <span class="sum">${r.summary}</span>
       <span class="small muted">${fmtWhen(r.created)}</span>
       <span class="meta"><a href=${runHref(r.run_id)}>${r.persona || 'Unknown persona'}, ${r.story || 'unknown story'}</a></span>
+      ${r.page ? html`<span class="meta"><b>Page:</b> ${r.page}</span>` : null}
       ${r.step ? html`<span class="meta"><b>Step:</b> ${r.step}</span>` : null}
       ${r.journeyId ? html`<span class="meta"><a href=${journeyHref(r.journeyId)}>Journey revision ${r.journeyRev}, step ${r.journeyStep}</a></span>` : null}
       ${r.evidence ? html`<span class="meta"><b>Evidence:</b> ${r.evidence}</span>` : null}
@@ -288,4 +355,42 @@ function Report({ r }) {
     </div>
     ${tok ? html`<div class="report-shot"><${Shot} src=${artifactURL(r.run_id, tok[0])} alt=${'Screenshot for: ' + r.summary} height=${520} /></div>` : null}
   </div>`;
+}
+
+// MainReport is the report an issue is shown by, in full.
+function MainReport({ r }) {
+  const tok = SHOT_TOKEN.exec(r.evidence || '');
+  const at = where(r.page, r.step);
+  return html`<div class=${'report mainrep' + (tok ? ' with-shot' : '')}>
+    <div class="bug">
+      <span class="mainlabel">Main report · <a href=${runHref(r.run_id)}>${r.persona || 'Unknown persona'}, ${r.story || 'unknown story'}</a> · ${fmtWhen(r.created)}</span>
+      ${at ? html`<span class="meta"><b>Where:</b> ${at}</span>` : null}
+      ${r.evidence ? html`<span class="meta"><b>What happens:</b> ${r.evidence}</span>` : null}
+      ${r.note ? html`<span class="meta"><b>Note:</b> ${r.note}</span>` : null}
+      ${r.journeyId ? html`<span class="meta"><a href=${journeyHref(r.journeyId)}>Journey revision ${r.journeyRev}, step ${r.journeyStep}</a></span>` : null}
+    </div>
+    ${tok ? html`<div class="report-shot"><${Shot} src=${artifactURL(r.run_id, tok[0])} alt=${'Screenshot for: ' + r.summary} height=${520} /></div>` : null}
+  </div>`;
+}
+
+// ReportRow is one report as a short line saying how it relates to the
+// issue; open, it shows the report in full with what the owner can do.
+function ReportRow({ r, main, earliest, open, onToggle, canSplit, busy, err, act }) {
+  const m = marking(r, earliest);
+  return html`<li class=${m.kind === 'different' ? 'diff' : ''}>
+    <button type="button" class="reprow" aria-expanded=${open} onClick=${onToggle}>
+      <span class="who"><b>${r.persona || 'Unknown persona'}</b>, ${r.story || 'unknown story'}</span>
+      <span class="what">${r.id === main ? html`<span class="tag run">Main</span> ` : null}${m.kind === 'different'
+        ? html`<span class="tag wait">Different</span> <span class="diffnote">${r.difference}</span>` : m.text}</span>
+      <span class="when">${fmtWhen(r.created)}</span>
+    </button>
+    ${open ? html`<div class="repopen">
+      <${Report} r=${r} />
+      <div class="row">
+        ${r.id !== main ? html`<button type="button" class="btn small" disabled=${busy} onClick=${() => act('main', r.id)}>Make main</button>` : null}
+        ${canSplit ? html`<button type="button" class="btn small" disabled=${busy} onClick=${() => act('split', r.id)}>Split into new issue</button>` : null}
+      </div>
+      ${err ? html`<div class="note bad" role="alert">${err}</div>` : null}
+    </div>` : null}
+  </li>`;
 }

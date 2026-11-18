@@ -263,7 +263,7 @@ func (l *Launcher) finishLater(r store.Run) {
 	if shot := fakeScreenshot(); shot != nil {
 		_, _ = l.Svc.Artifacts.Put(r.ID, "bug-1.png", bytes.NewReader(shot))
 	}
-	_ = l.Svc.Store.AddBug(store.Bug{
+	bug := store.Bug{
 		ID: "bug-" + r.ID, RunID: r.ID,
 		Summary:  "Counter still says 3 items left after completing one",
 		Step:     "00:02 ticked the first todo; the counter did not change",
@@ -271,7 +271,23 @@ func (l *Launcher) finishLater(r store.Run) {
 		Severity: "medium",
 		Note:     "I expected 2 items left, so I stopped trusting the count.",
 		Created:  time.Now().UTC(),
-	})
+		Page:     "/",
+	}
+	// A later fake run reports the same problem as the first, as a persona
+	// would, and every other one says something differs, so the bugs pages
+	// show a grouped issue.
+	if is, err := l.Svc.Store.Issues(); err == nil {
+		for _, i := range is {
+			if i.Summary == bug.Summary {
+				bug.IssueID = i.ID
+				if i.Reports%2 == 1 {
+					bug.Difference = "Also on the second list"
+				}
+				break
+			}
+		}
+	}
+	_ = l.Svc.Store.AddBug(bug)
 	_ = l.Svc.Finish(context.Background(), r.Token, store.RunDone, "Added three todos and completed one. The counter did not update (fake run).")
 }
 
