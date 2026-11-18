@@ -132,3 +132,79 @@ func TestKnownIssuesClipped(t *testing.T) {
 		t.Fatalf("known %d runes, err %v", len([]rune(a.KnownIssues[0].Summary)), err)
 	}
 }
+
+func bugByID(t *testing.T, st *store.Store, runID, id string) store.Bug {
+	t.Helper()
+	for _, b := range mustBugs(t, st, runID) {
+		if b.ID == id {
+			return b
+		}
+	}
+	t.Fatalf("bug %s missing", id)
+	return store.Bug{}
+}
+
+func TestReportBugPagePathOnly(t *testing.T) {
+	_, st, srv, run := setup(t)
+	cs := connect(t, srv, run.Token)
+	for page, want := range map[string]string{
+		"https://shop.test/invoice/new?key=abc#top": "/invoice/new",
+		"/quote?id=7": "/quote",
+		" /pay#card ": "/pay",
+		"":            "",
+	} {
+		text, isErr := call(t, cs, "report_bug", map[string]any{"summary": "x", "step": "s", "evidence": "e", "note": "", "severity_guess": "low", "page": page})
+		if isErr {
+			t.Fatalf("report_bug: %s", text)
+		}
+		if got := bugByID(t, st, run.ID, text).Page; got != want {
+			t.Errorf("page %q stored %q, want %q", page, got, want)
+		}
+	}
+}
+
+func TestReportBugDifferenceNeedsSameAs(t *testing.T) {
+	_, _, srv, run := setup(t)
+	cs := connect(t, srv, run.Token)
+	text, isErr := call(t, cs, "report_bug", map[string]any{"summary": "x", "step": "s", "evidence": "e", "note": "", "severity_guess": "low", "difference": "x"})
+	if !isErr || !strings.Contains(text, "difference goes only with same_as") {
+		t.Fatalf("got %v %s", isErr, text)
+	}
+}
+
+func TestReportBugDifferenceOneLine(t *testing.T) {
+	_, st, srv, run := setup(t)
+	cs := connect(t, srv, run.Token)
+	id := issueFrom(t, st, run.ID, "b1", "footer unreadable")
+	text, isErr := call(t, cs, "report_bug", map[string]any{"summary": "x", "step": "s", "evidence": "e", "note": "", "severity_guess": "low",
+		"same_as": id, "difference": "on mobile\r\n  also the total"})
+	if isErr {
+		t.Fatalf("report_bug: %s", text)
+	}
+	if b := bugByID(t, st, run.ID, text); b.Difference != "on mobile also the total" || b.Match != store.MatchDifferent {
+		t.Fatalf("bug %+v", b)
+	}
+	text, _ = call(t, cs, "report_bug", map[string]any{"summary": "x", "step": "s", "evidence": "e", "note": "", "severity_guess": "low",
+		"same_as": id, "difference": strings.Repeat("d", 1000)})
+	if got := len([]rune(bugByID(t, st, run.ID, text).Difference)); got > maxDifference+1 {
+		t.Fatalf("difference %d runes", got)
+	}
+}
+
+func TestNextAssignmentKnownIssuesWhere(t *testing.T) {
+	_, st, srv, run := setup(t)
+	cs := connect(t, srv, run.Token)
+	if err := st.AddBug(store.Bug{ID: "b1", RunID: run.ID, Summary: "vat", Page: "/invoice", Step: "Add line", Severity: "high", Created: time.Now().UTC()}); err != nil {
+		t.Fatal(err)
+	}
+	var a struct {
+		KnownIssues []map[string]any `json:"knownIssues"`
+	}
+	text, _ := call(t, cs, "next_assignment", nil)
+	if err := json.Unmarshal([]byte(text), &a); err != nil || len(a.KnownIssues) != 1 {
+		t.Fatalf("assignment %s %v", text, err)
+	}
+	if k := a.KnownIssues[0]; k["page"] != "/invoice" || k["step"] != "Add line" || k["severity"] != "high" {
+		t.Fatalf("known %+v", k)
+	}
+}

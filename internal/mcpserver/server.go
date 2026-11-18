@@ -166,7 +166,32 @@ type knownIssue struct {
 	Status  string `json:"status"`
 	Summary string `json:"summary"`
 	Reason  string `json:"reason,omitempty"` // the user's, for not_a_bug
+	// Page, Step and Severity are the main report's, to match on.
+	Page     string `json:"page,omitempty"`
+	Step     string `json:"step,omitempty"`
+	Severity string `json:"severity,omitempty"`
 }
+
+// maxPage and maxDifference cap report_bug's page and difference.
+const (
+	maxPage       = 300
+	maxDifference = 300
+)
+
+// pagePath keeps only the path of the page a report names, so a query or
+// fragment (which may carry a token) is never stored.
+func pagePath(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if u, err := url.Parse(raw); err == nil {
+		raw = u.Path
+	} else if i := strings.IndexAny(raw, "?#"); i >= 0 {
+		raw = raw[:i]
+	}
+	return store.Clip(strings.TrimSpace(raw), maxPage)
+}
+
+// oneLine joins a multi-line text into one line.
+func oneLine(s string) string { return strings.Join(strings.Fields(s), " ") }
 
 type saveArgs struct {
 	State map[string]any `json:"state" jsonschema:"the persona's memory to keep for future runs"`
@@ -179,6 +204,8 @@ type bugArgs struct {
 	SeverityGuess string `json:"severity_guess" jsonschema:"high, medium or low"`
 	Note          string `json:"note" jsonschema:"anything else worth knowing"`
 	SameAs        string `json:"same_as,omitempty" jsonschema:"id of the known issue this is the same problem as; omit for a new problem"`
+	Page          string `json:"page,omitempty" jsonschema:"the path of the page where it happened, from the page URL your browser shows, without the query"`
+	Difference    string `json:"difference,omitempty" jsonschema:"only with same_as: empty when it is the same as the known issue, else one line on what differs (another page, value, step, device or a new symptom)"`
 }
 
 type finishArgs struct {
@@ -332,7 +359,8 @@ func newServer(svc *runs.Service, st *store.Store, directorURL, token string, ma
 			a.KnownIssues = make([]knownIssue, 0, len(known))
 			for _, k := range known {
 				a.KnownIssues = append(a.KnownIssues, knownIssue{ID: k.ID, Status: string(k.Status),
-					Summary: store.Clip(k.Summary, maxKnownIssueText), Reason: k.Reason})
+					Summary: store.Clip(k.Summary, maxKnownIssueText), Reason: k.Reason,
+					Page: k.Page, Step: store.Clip(k.Step, maxKnownIssueText), Severity: k.Severity})
 			}
 			a.ProfileURL = directorURL + "/profile/" + token
 			if _, a.BrowserProfile, err = svc.Profile(token); err != nil {
@@ -377,7 +405,7 @@ func newServer(svc *runs.Service, st *store.Store, directorURL, token string, ma
 		})
 
 	mcp.AddTool(s, &mcp.Tool{Name: "report_bug",
-		Description: "Report a bug you found. If it is the same problem as one in knownIssues, pass that issue's id as same_as. Returns the bug id."},
+		Description: "Report a bug you found, with page (the path where it happened). If it is the same problem as one in knownIssues, pass that issue's id as same_as and say in difference, in one line, what differs (empty when nothing does). Returns the bug id."},
 		func(ctx context.Context, _ *mcp.CallToolRequest, in bugArgs) (*mcp.CallToolResult, any, error) {
 			r, bad, err := active()
 			if bad != nil || err != nil {
@@ -396,12 +424,16 @@ func newServer(svc *runs.Service, st *store.Store, directorURL, token string, ma
 			if strings.TrimSpace(in.Summary) == "" {
 				return toolErr("summary is required")
 			}
+			if strings.TrimSpace(in.Difference) != "" && in.SameAs == "" {
+				return toolErr("difference goes only with same_as: it says how this report differs from that known issue")
+			}
 			raw := make([]byte, 8)
 			if _, err := rand.Read(raw); err != nil {
 				return nil, nil, err
 			}
 			b := store.Bug{ID: hex.EncodeToString(raw), RunID: r.ID, Summary: in.Summary, Step: in.Step,
-				Evidence: in.Evidence, Severity: in.SeverityGuess, Note: in.Note, Created: time.Now().UTC(), IssueID: in.SameAs}
+				Evidence: in.Evidence, Severity: in.SeverityGuess, Note: in.Note, Created: time.Now().UTC(), IssueID: in.SameAs,
+				Page: pagePath(in.Page), Difference: store.Clip(oneLine(in.Difference), maxDifference)}
 			if err := st.AddBug(b); err != nil {
 				return nil, nil, err
 			}

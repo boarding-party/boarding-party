@@ -83,7 +83,7 @@ The agent gets these tools from the director:
 |---|---|
 | `next_assignment` | persona (name, role, traits, synthetic identity), story goal, allowed sites, saved persona state, upload URL |
 | `persona_save` | stores what the persona should remember next time |
-| `report_bug` | summary, step, evidence, severity guess, the persona's own words |
+| `report_bug` | summary, step, page, evidence, severity guess, the persona's own words; with `same_as`, what differs |
 | `finish_run` | `done`, `stuck` or `failed`, with a summary |
 
 A persona is just rows in the director's database. A pod exists only while a
