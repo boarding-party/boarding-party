@@ -5,6 +5,7 @@
 // through htm/Preact, never as markup.
 import { useState, useMemo } from './vendor/hooks.module.js';
 import { html, api, fmtWhen, runHref, issueHref, fixCheckOf, usePoll, confirmDialog } from './lib.js';
+import { storyOf, stepsShown, summaryLine, recordLine } from './journey-rules.js';
 
 const POLL_MS = 15000;
 const MAX_DIFF_LINES = 2000;
@@ -25,14 +26,46 @@ function StateTag({ state }) {
 
 const record = (j) => (j.passed + j.failed ? `${j.passed} passed, ${j.failed} failed` : 'Not replayed yet');
 
-// RecordBar is the share of replays that passed, as a slim two-tone bar.
-function RecordBar({ j }) {
-  const n = j.passed + j.failed;
-  if (!n) return html`<span class="recbar none" aria-hidden="true"></span>`;
-  return html`<span class="recbar" aria-hidden="true"><span style=${{ width: `${(100 * j.passed) / n}%` }}></span></span>`;
+const STEPS_SHOWN = 4;
+
+// ReplayDots are a journey's last replays, oldest first, each a link to its
+// run.
+function ReplayDots({ recent }) {
+  if (!recent || !recent.length) return html`<span class="jdots none" aria-hidden="true"></span>`;
+  return html`<span class="jdots">${[...recent].reverse().map((r) => html`
+    <a key=${r.runId} href=${runHref(r.runId)} class=${r.passed ? 'ok' : 'bad'}
+      title=${`${r.passed ? 'Passed' : 'Failed'} · ${fmtWhen(r.at)}`} aria-label=${`Replay ${r.passed ? 'passed' : 'failed'} ${fmtWhen(r.at)}`}></a>`)}</span>`;
 }
 
-export function JourneysPage() {
+function JourneyCard({ j, project }) {
+  const { goal, role } = storyOf(project, j.persona, j.story);
+  const { shown, more } = stepsShown(j.steps, STEPS_SHOWN);
+  const meta = [j.persona, role, j.story, j.liveRev ? `revision ${j.liveRev}` : 'no live revision'].filter(Boolean).join(' · ');
+  return html`
+    <li class=${'jcard st-' + j.state}>
+      <span class="jbar" aria-hidden="true"></span>
+      <div class="jmain">
+        <div class="jtop">
+          <a class="jtitle" href=${journeyHref(j.id)}>${goal || j.story}</a>
+          ${j.state !== 'live' ? html`<${StateTag} state=${j.state} />` : null}
+        </div>
+        <div class="jmeta">${meta}</div>
+        ${shown.length ? html`
+          <ol class="jsteps">
+            ${shown.map((name, i) => html`<li key=${i} class=${j.blocked && j.blocked.step === i + 1 ? 'stop' : ''}>${name}</li>`)}
+            ${more ? html`<li class="more">+${more} more</li>` : null}
+          </ol>` : null}
+        ${j.blocked ? html`<a class="jblocked" href=${issueHref(j.blocked.issueId)}>Stops at step ${j.blocked.step}: ${j.blocked.summary}</a>` : null}
+      </div>
+      <div class="jhist">
+        <${ReplayDots} recent=${j.record && j.record.recent} />
+        <div>${recordLine(j)}</div>
+        ${fmtWhen(j.lastReplay) ? html`<div>Last replay ${fmtWhen(j.lastReplay)}</div>` : null}
+      </div>
+    </li>`;
+}
+
+export function JourneysPage({ project }) {
   const [list, setList] = useState(null);
   const [err, setErr] = useState('');
   usePoll(async (stale) => {
@@ -54,18 +87,10 @@ export function JourneysPage() {
       ${list === null && !err ? html`<p class="muted">Loading…</p>` : null}
       ${list && list.length === 0 ? html`<div class="empty"><b>No journeys yet.</b>An AI run records one when it finishes a story.</div>` : null}
       ${list && list.length ? html`
-        <div class="card flush">
-          <ul class="journeys">
-            ${list.map((j) => html`<li key=${j.id}>
-              <a class="jrow" href=${journeyHref(j.id)}>
-                <${StateTag} state=${j.state} />
-                <span class="who"><b>${j.persona}</b> ${j.story}</span>
-                <span class="small muted">${j.liveRev ? `Revision ${j.liveRev}` : 'No live revision'}</span>
-                <span class="rec small"><${RecordBar} j=${j} /> ${record(j)}</span>
-                <span class="when small muted">${fmtWhen(j.lastReplay) ? `Replayed ${fmtWhen(j.lastReplay)}` : ''}</span>
-              </a></li>`)}
-          </ul>
-        </div>` : null}
+        <p class="jsummary">${summaryLine(list)}</p>
+        <ul class="card flush jcards">
+          ${list.map((j) => html`<${JourneyCard} key=${j.id} j=${j} project=${project} />`)}
+        </ul>` : null}
     </section>`;
 }
 

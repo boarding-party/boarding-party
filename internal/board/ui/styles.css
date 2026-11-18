@@ -647,21 +647,39 @@ dialog.shotbox::backdrop { background: rgba(10,14,20,.72); }
 .replaycard .inputs dd code { word-break: break-all; }
 .failedstep { display: block; width: 100%; max-height: 320px; object-fit: cover; object-position: top; border: 1px solid var(--line); border-radius: 6px; }
 /* Journeys: the list, and a journey's page. Code is shown as text only. */
-.journeys { list-style: none; margin: 0; padding: 0; }
-.journeys li + li { border-top: 1px solid var(--line-soft); }
-.jrow { display: grid; grid-template-columns: 92px minmax(0, 1.4fr) 120px minmax(0, 1fr) 130px; gap: 4px 14px; align-items: center; padding: 10px 8px; color: var(--ink); border-radius: 6px; }
-.jrow:hover { background: var(--canvas); text-decoration: none; }
-.jrow .tag { justify-self: start; }
-.jrow .who { overflow-wrap: anywhere; }
-.jrow .when { text-align: right; }
-.rec { display: flex; align-items: center; gap: 8px; color: var(--muted); }
-.recbar { display: inline-block; flex: none; width: 64px; height: 6px; border-radius: 3px; background: var(--bad); overflow: hidden; }
-.recbar > span { display: block; height: 100%; background: var(--ok); }
-.recbar.none { background: var(--line); }
-@media (max-width: 760px) {
-  .jrow { grid-template-columns: minmax(0, 1fr) auto; }
-  .jrow .who { grid-column: 1 / 3; grid-row: 1; }
-  .jrow .when { text-align: left; }
+.jsummary { margin: -6px 0 12px; font-size: 13.5px; color: var(--muted); }
+.jcards.card.flush { list-style: none; margin: 0; padding: 0; overflow: hidden; }
+.jcard { position: relative; display: flex; gap: 16px; padding: 14px 18px 14px 14px; }
+.jcard + .jcard { border-top: 1px solid var(--line-soft); }
+.jcard:hover { background: #F7F9FB; }
+.jbar { width: 4px; align-self: stretch; border-radius: 2px; flex: none; background: var(--ok); }
+.st-repairing .jbar { background: #E0A43A; }
+.st-paused .jbar { background: #B8C0CC; }
+.jmain { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.jtop { display: flex; align-items: baseline; gap: 8px; }
+.jtitle { color: var(--ink); font-size: 15px; font-weight: 600; line-height: 1.35; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+.jtitle::after { content: ""; position: absolute; inset: 0; } /* the whole card opens the journey */
+.jtitle:hover { text-decoration: none; }
+.jcard:hover .jtitle { color: var(--accent); }
+.jmeta { font-size: 12.5px; color: var(--muted); overflow-wrap: anywhere; }
+.jsteps { list-style: none; margin: 4px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px 0; font-size: 13px; color: #3A4553; }
+.jsteps li { display: inline-flex; align-items: center; }
+.jsteps li + li::before { content: "›"; color: #A3ADBA; margin: 0 8px; }
+.jsteps li.stop { color: var(--bad); font-weight: 500; }
+.jsteps li.more { color: var(--muted); }
+.jblocked { position: relative; z-index: 1; align-self: flex-start; margin-top: 4px; font-size: 13px; color: var(--bad); background: var(--bad-soft); border-radius: 5px; padding: 2px 8px; overflow-wrap: anywhere; }
+.jhist { position: relative; z-index: 1; flex: none; width: 170px; display: flex; flex-direction: column; align-items: flex-end; gap: 3px; font-size: 12.5px; color: var(--muted); text-align: right; pointer-events: none; }
+.jdots { display: flex; gap: 3px; margin-bottom: 4px; pointer-events: auto; }
+.jdots a { width: 11px; height: 11px; border-radius: 3px; }
+.jdots a.ok { background: #3FAF7A; }
+.jdots a.bad { background: #D9583A; }
+.jdots a:hover { outline: 2px solid var(--ink); outline-offset: 1px; }
+.jdots.none { width: 11px; height: 11px; border-radius: 3px; background: var(--line); }
+@media (max-width: 640px) {
+  .jcard { flex-wrap: wrap; gap: 8px 12px; padding: 12px; }
+  .jmain { flex-basis: calc(100% - 20px); }
+  .jhist { width: auto; flex-basis: 100%; flex-direction: row; flex-wrap: wrap; align-items: center; gap: 4px 10px; padding-left: 16px; text-align: left; }
+  .jdots { margin-bottom: 0; }
 }
 .jactions .field { margin-top: 14px; }
 .jactions .row.nowrap select { flex: 1; min-width: 0; }

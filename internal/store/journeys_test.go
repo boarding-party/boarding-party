@@ -397,3 +397,57 @@ func TestBugLinkFirstWins(t *testing.T) {
 		t.Fatalf("the second link replaced the first: %+v", b)
 	}
 }
+
+func TestReplayRecord(t *testing.T) {
+	s := open(t)
+	j, _ := addRev(t, s, RevisionFull, "a", t0)
+	h := time.Hour
+	replay := func(id string, state RunState, at time.Time) Run {
+		return Run{ID: id, Token: "t-" + id, Persona: "megan", Story: "invoice", State: state, Started: at.Add(-time.Minute), Finished: at,
+			Chain: id, Kind: RunReplay, JourneyID: j.ID, Revision: 1}
+	}
+	fix := replay("fix", RunDone, t0.Add(5*h))
+	fix.Context = []byte(`{"verify":{"issueId":"i1","summary":"s"}}`)
+	other := replay("other", RunDone, t0.Add(4*h))
+	other.JourneyID = "elsewhere"
+	ai := replay("ai", RunDone, t0.Add(4*h))
+	ai.Kind = ""
+	for _, r := range []Run{
+		replay("old", RunDone, t0.Add(-10*24*h)),
+		replay("p1", RunDone, t0.Add(h)),
+		replay("f1", RunFailed, t0.Add(2*h)),
+		replay("s1", RunStuck, t0.Add(3*h)),
+		replay("w1", RunWaiting, t0.Add(4*h)),
+		replay("r1", RunRunning, time.Time{}),
+		fix, other, ai,
+	} {
+		if err := s.CreateRun(r); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rec, err := s.ReplayRecord(j.ID, 3, t0.Add(-24*h))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []ReplayResult{{RunID: "s1", At: t0.Add(3 * h)}, {RunID: "f1", At: t0.Add(2 * h)}, {RunID: "p1", Passed: true, At: t0.Add(h)}}
+	if len(rec.Recent) != 3 {
+		t.Fatalf("recent %+v", rec.Recent)
+	}
+	for i, w := range want {
+		g := rec.Recent[i]
+		if g.RunID != w.RunID || g.Passed != w.Passed || !g.At.Equal(w.At) {
+			t.Fatalf("recent[%d] = %+v, want %+v", i, g, w)
+		}
+	}
+	if rec.WeekPassed != 1 || rec.WeekFailed != 2 {
+		t.Fatalf("since: passed %d failed %d, want 1 and 2", rec.WeekPassed, rec.WeekFailed)
+	}
+	rec, err = s.ReplayRecord(j.ID, 10, t0.Add(-24*h))
+	if err != nil || len(rec.Recent) != 4 || rec.Recent[3].RunID != "old" || rec.WeekPassed != 1 {
+		t.Fatalf("limit 10: %+v %v", rec, err)
+	}
+	rec, err = s.ReplayRecord("none", 10, t0)
+	if err != nil || len(rec.Recent) != 0 || rec.Recent == nil {
+		t.Fatalf("unknown journey: %+v %v", rec, err)
+	}
+}

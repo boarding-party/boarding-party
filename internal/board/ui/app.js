@@ -250,7 +250,7 @@ function App() {
           : route.page === 'bugs' ? html`<${BugsPage} />`
           : route.page === 'issue' ? html`<${IssuePage} key=${route.id} id=${route.id} />`
           : route.page === 'lead' ? html`<${LeadPage} key=${route.id} name=${route.id} />`
-          : route.page === 'journeys' ? html`<${JourneysPage} />`
+          : route.page === 'journeys' ? html`<${JourneysPage} project=${project} />`
           : route.page === 'journey' ? html`<${JourneyPage} key=${route.id} id=${route.id} />`
           : html`<${RunsPage} project=${full} projectErr=${projectErr} runs=${runs} runsErr=${runsErr}
                     queue=${queue} status=${status} active=${active} onStarted=${loadRuns} />`}

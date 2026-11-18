@@ -3,8 +3,10 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -124,6 +126,105 @@ func TestJourneysRoute(t *testing.T) {
 	resp = do(t, "GET", srv.URL+"/api/journeys?persona=bob", "")
 	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil || len(got) != 0 {
 		t.Fatalf("filter: %+v %v", got, err)
+	}
+}
+
+func TestStepNames(t *testing.T) {
+	code := "await bp.step('Open the form', async () => {});\n" +
+		"await bp.step(\"Fill the business\", async () => {});\n" +
+		"await bp.step(\n  `Check the total`, async () => {});\n" +
+		"await bp.step('Don\\'t pay twice', async () => {});\n" +
+		"await page.click('x'); step('not a step');"
+	got := stepNames(code)
+	want := []string{"Open the form", "Fill the business", "Check the total", "Don't pay twice"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("steps %q, want %q", got, want)
+	}
+	if got := stepNames(""); got == nil || len(got) != 0 {
+		t.Fatalf("no code: %#v", got)
+	}
+	many := strings.Repeat("await bp.step('s', async () => {});\n", maxStepNames+5)
+	if n := len(stepNames(many)); n != maxStepNames {
+		t.Fatalf("capped at %d, got %d", maxStepNames, n)
+	}
+}
+
+func TestJourneysListStepsAndRecord(t *testing.T) {
+	srv, svc := setup(t, 1<<20)
+	j := withJourney(t, svc)
+	now := time.Now().UTC()
+	for i, st := range []store.RunState{store.RunDone, store.RunFailed} {
+		id := fmt.Sprintf("rp%d", i)
+		if err := svc.Store.CreateRun(store.Run{ID: id, Token: "t-" + id, Persona: "ann", Story: "checkout", State: st, Started: now,
+			Finished: now.Add(time.Duration(i) * time.Minute), Chain: id, Kind: store.RunReplay, JourneyID: j.ID, Revision: 1}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var got []struct {
+		Steps  []string
+		Record struct {
+			Recent []struct {
+				RunID  string `json:"runId"`
+				Passed bool
+			}
+			WeekPassed int `json:"weekPassed"`
+			WeekFailed int `json:"weekFailed"`
+		}
+	}
+	resp := do(t, "GET", srv.URL+"/api/journeys", "")
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil || len(got) != 1 {
+		t.Fatalf("%v %+v", err, got)
+	}
+	if !slices.Equal(got[0].Steps, stepNames(journeyJS)) || len(got[0].Steps) == 0 {
+		t.Fatalf("steps %q from %q", got[0].Steps, journeyJS)
+	}
+	r := got[0].Record
+	if len(r.Recent) != 2 || r.Recent[0].RunID != "rp1" || r.Recent[0].Passed || !r.Recent[1].Passed || r.WeekPassed != 1 || r.WeekFailed != 1 {
+		t.Fatalf("record %+v", r)
+	}
+}
+
+func TestJourneysListBlockedWhileIssueOpen(t *testing.T) {
+	srv, svc := setup(t, 1<<20)
+	j := withJourney(t, svc)
+	now := time.Now().UTC()
+	if err := svc.Store.CreateRun(store.Run{ID: "ai", Token: "t-ai", Persona: "ann", Story: "checkout", State: store.RunDone, Started: now, Chain: "ai"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Store.AddBug(store.Bug{ID: "b1", RunID: "ai", Summary: "Pay button does nothing", Created: now}); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Store.SetBlocked(j.ID, 3, "b1"); err != nil {
+		t.Fatal(err)
+	}
+	type row struct {
+		Blocked *struct {
+			Step    int
+			IssueID string `json:"issueId"`
+			Summary string
+		}
+	}
+	list := func() row {
+		var got []row
+		resp := do(t, "GET", srv.URL+"/api/journeys", "")
+		if err := json.NewDecoder(resp.Body).Decode(&got); err != nil || len(got) != 1 {
+			t.Fatalf("%v %+v", err, got)
+		}
+		return got[0]
+	}
+	b, err := svc.Store.Report("b1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := list()
+	if got.Blocked == nil || got.Blocked.Step != 3 || got.Blocked.IssueID != b.IssueID || got.Blocked.Summary != "Pay button does nothing" {
+		t.Fatalf("blocked %+v", got.Blocked)
+	}
+	if err := svc.Store.SetIssueStatus(b.IssueID, store.IssueClosed, "fixed", now); err != nil {
+		t.Fatal(err)
+	}
+	if got := list(); got.Blocked != nil {
+		t.Fatalf("a closed issue blocks nothing: %+v", got.Blocked)
 	}
 }
 

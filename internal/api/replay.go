@@ -242,6 +242,62 @@ func personaHasEmail(p project.Project, r store.Run) bool {
 type journeyItem struct {
 	store.Journey
 	Revisions []revisionItem `json:"revisions"`
+	// Steps are the live revision's step names, in order.
+	Steps  []string           `json:"steps"`
+	Record store.ReplayRecord `json:"record"`
+	// Blocked is the open issue the journey's replays stop at, if any.
+	Blocked *blockedItem `json:"blocked,omitempty"`
+}
+
+type blockedItem struct {
+	Step    int    `json:"step"`
+	IssueID string `json:"issueId"`
+	Summary string `json:"summary"`
+}
+
+// blockedBy is the issue j's replays stop at while it is open or confirmed,
+// as the scheduler treats it; nil otherwise.
+func (s *server) blockedBy(j store.Journey) (*blockedItem, error) {
+	if j.BlockedBug == "" {
+		return nil, nil
+	}
+	b, err := s.svc.Store.Report(j.BlockedBug)
+	if errors.Is(err, store.ErrNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	is, err := s.svc.Store.Issue(b.IssueID)
+	if errors.Is(err, store.ErrNotFound) || (err == nil && is.Status != store.IssueOpen && is.Status != store.IssueConfirmed) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &blockedItem{Step: j.BlockedStep, IssueID: is.ID, Summary: is.Summary}, nil
+}
+
+const (
+	recentReplays = 10                 // replays a journey's row shows
+	recordWindow  = 7 * 24 * time.Hour // the row's "this week"
+	maxStepNames  = 50
+)
+
+// stepCall finds bp.step('name', …) in journey code, with any of JS's three
+// quotes; stepEscape undoes a backslash escape inside the name.
+var (
+	stepCall   = regexp.MustCompile(`\bbp\.step\(\s*(?:'((?:[^'\\]|\\.)*)'|"((?:[^"\\]|\\.)*)"|` + "`" + `((?:[^\\` + "`" + `]|\\.)*)` + "`" + `)`)
+	stepEscape = regexp.MustCompile(`\\(.)`)
+)
+
+// stepNames lists the step names in journey code, at most maxStepNames.
+func stepNames(code string) []string {
+	out := []string{}
+	for _, m := range stepCall.FindAllStringSubmatch(code, maxStepNames) {
+		out = append(out, stepEscape.ReplaceAllString(m[1]+m[2]+m[3], "$1"))
+	}
+	return out
 }
 
 type revisionItem struct {
@@ -262,6 +318,7 @@ func (s *server) listJourneys(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out := []journeyItem{}
+	now := time.Now()
 	for _, j := range js {
 		if (persona != "" && j.Persona != persona) || (story != "" && j.Story != story) {
 			continue
@@ -271,9 +328,20 @@ func (s *server) listJourneys(w http.ResponseWriter, r *http.Request) {
 			fail(w, err)
 			return
 		}
-		item := journeyItem{Journey: j, Revisions: make([]revisionItem, 0, len(revs))}
+		item := journeyItem{Journey: j, Revisions: make([]revisionItem, 0, len(revs)), Steps: []string{}}
 		for _, rv := range revs {
 			item.Revisions = append(item.Revisions, revisionItem{N: rv.N, Kind: rv.Kind, Reason: rv.Reason, RunID: rv.RunID, BugID: rv.BugID, Created: rv.Created})
+			if rv.N == j.LiveRev {
+				item.Steps = stepNames(rv.Code)
+			}
+		}
+		if item.Record, err = s.svc.Store.ReplayRecord(j.ID, recentReplays, now.Add(-recordWindow)); err != nil {
+			fail(w, err)
+			return
+		}
+		if item.Blocked, err = s.blockedBy(j); err != nil {
+			fail(w, err)
+			return
 		}
 		out = append(out, item)
 	}

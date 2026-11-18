@@ -633,6 +633,56 @@ func (s *Store) decisions(where string, args ...any) ([]Decision, error) {
 	return out, rows.Err()
 }
 
+// ReplayResult is one finished replay that counts towards a journey's
+// record: done passed; failed and stuck did not.
+type ReplayResult struct {
+	RunID  string    `json:"runId"`
+	Passed bool      `json:"passed"`
+	At     time.Time `json:"at"`
+}
+
+// ReplayRecord is a journey's recent replays, newest first, and how many
+// passed and failed since a moment.
+type ReplayRecord struct {
+	Recent     []ReplayResult `json:"recent"`
+	WeekPassed int            `json:"weekPassed"`
+	WeekFailed int            `json:"weekFailed"`
+}
+
+// countedReplays are the replays CountReplay counts: finished, and not fix
+// checks (a fix check is not the journey's health).
+const countedReplays = `kind = '` + RunReplay + `' AND journey_id = ? AND state IN ('done','failed','stuck')
+	AND (context = '' OR json_extract(context, '$.verify') IS NULL)`
+
+// ReplayRecord returns journeyID's last limit counted replays and its passes
+// and failures finished at or after since.
+func (s *Store) ReplayRecord(journeyID string, limit int, since time.Time) (ReplayRecord, error) {
+	rec := ReplayRecord{Recent: []ReplayResult{}}
+	rows, err := s.db.Query(`SELECT id, state, finished FROM runs WHERE `+countedReplays+`
+		ORDER BY finished DESC, rowid DESC LIMIT ?`, journeyID, limit)
+	if err != nil {
+		return rec, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var r ReplayResult
+		var state string
+		var at int64
+		if err := rows.Scan(&r.RunID, &state, &at); err != nil {
+			return rec, err
+		}
+		r.Passed, r.At = state == string(RunDone), fromTS(at)
+		rec.Recent = append(rec.Recent, r)
+	}
+	if err := rows.Err(); err != nil {
+		return rec, err
+	}
+	rows.Close() // one connection: free it for the count
+	err = s.db.QueryRow(`SELECT COALESCE(SUM(state = 'done'), 0), COALESCE(SUM(state != 'done'), 0) FROM runs
+		WHERE `+countedReplays+` AND finished >= ?`, journeyID, ts(since)).Scan(&rec.WeekPassed, &rec.WeekFailed)
+	return rec, err
+}
+
 // CountReplay adds one replay's result to a journey.
 func (s *Store) CountReplay(journeyID string, passed bool, at time.Time) error {
 	col := "failed"
