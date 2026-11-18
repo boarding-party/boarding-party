@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"strings"
 	"testing"
@@ -98,5 +99,65 @@ func TestIssueSaysHowAFixIsChecked(t *testing.T) {
 	withJourney(t, svc) // puts the project
 	if got := checkBy(); got != "run" {
 		t.Fatalf("checkBy = %q", got)
+	}
+}
+
+func postJSON(t *testing.T, url, body string) (int, string) {
+	t.Helper()
+	req, _ := http.NewRequest("POST", url, strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+testToken)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	b, _ := io.ReadAll(resp.Body)
+	return resp.StatusCode, string(b)
+}
+
+func TestIssueMainAndSplitAPI(t *testing.T) {
+	srv, _, svc := setupBoth(t, 1024)
+	now := time.Now().UTC()
+	if err := svc.Store.CreateRun(store.Run{ID: "r1", Token: "tok", Persona: "ann", Role: "buyer", Story: "checkout",
+		State: store.RunDone, Started: now, Chain: "r1"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Store.AddBug(store.Bug{ID: "b1", RunID: "r1", Summary: "total wrong", Created: now}); err != nil {
+		t.Fatal(err)
+	}
+	is, _ := svc.Store.Issues()
+	id := is[0].ID
+	if err := svc.Store.AddBug(store.Bug{ID: "b2", RunID: "r1", Summary: "total off", Created: now.Add(time.Second), IssueID: id}); err != nil {
+		t.Fatal(err)
+	}
+	base := srv.URL + "/api/issues/" + id
+	if code, body := postJSON(t, base+"/main", `{"report":"b2"}`); code != 204 {
+		t.Fatalf("main %d %s", code, body)
+	}
+	if got, _ := svc.Store.Issue(id); got.Main != "b2" || got.Summary != "total off" {
+		t.Fatalf("issue %+v", got)
+	}
+	if code, _ := postJSON(t, base+"/main", `{"report":"ghost"}`); code != 404 {
+		t.Fatalf("ghost main %d", code)
+	}
+	code, body := postJSON(t, base+"/split", `{"report":"b1"}`)
+	var out struct{ ID string }
+	if code != 200 || json.Unmarshal([]byte(body), &out) != nil || out.ID == "" || out.ID == id {
+		t.Fatalf("split %d %s", code, body)
+	}
+	if rs, _ := svc.Store.IssueReports(out.ID); len(rs) != 1 || rs[0].ID != "b1" {
+		t.Fatalf("new issue reports %+v", rs)
+	}
+	if code, body := postJSON(t, base+"/split", `{"report":"b2"}`); code != 409 || !strings.Contains(body, "one report") {
+		t.Fatalf("last report split %d %s", code, body)
+	}
+	log, _ := svc.Store.AuditLog(10)
+	seen := map[string]bool{}
+	for _, e := range log {
+		seen[e.Action] = true
+	}
+	if !seen["issue.main"] || !seen["issue.split"] {
+		t.Fatalf("audit %+v", log)
 	}
 }

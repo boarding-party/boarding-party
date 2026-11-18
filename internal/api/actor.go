@@ -30,6 +30,8 @@ var auditActions = map[string]string{
 	"DELETE /api/mailbox":                    "mailbox.delete",
 	"DELETE /api/browser-profiles/{persona}": "profile.delete",
 	"POST /api/issues/{id}/status":           "issue.triage",
+	"POST /api/issues/{id}/main":             "issue.main",
+	"POST /api/issues/{id}/split":            "issue.split",
 	"POST /api/leads/{persona}/wake":         "lead.wake",
 	"PUT /api/children/{name}":               "child.adopt",
 	"DELETE /api/children/{name}":            "child.delete",

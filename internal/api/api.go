@@ -114,6 +114,8 @@ func admin(svc *runs.Service, maxBytes int64, token string, hub *live.Hub, mail 
 	mux.HandleFunc("GET /api/issues", s.listIssues)
 	mux.HandleFunc("GET /api/issues/{id}", s.getIssue)
 	mux.HandleFunc("POST /api/issues/{id}/status", s.putIssueStatus)
+	mux.HandleFunc("POST /api/issues/{id}/main", s.putIssueMain)
+	mux.HandleFunc("POST /api/issues/{id}/split", s.splitIssue)
 	mux.HandleFunc("GET /api/leads/{persona}", s.getLead)
 	mux.HandleFunc("POST /api/leads/{persona}/wake", s.wakeLead)
 	mux.HandleFunc("PUT /api/children/{name}", s.adoptChild)

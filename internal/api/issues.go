@@ -73,3 +73,51 @@ func (s *server) putIssueStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
+
+// reportOf reads the {"report": "<bug id>"} body of the make main and split
+// routes; false when it wrote an error.
+func reportOf(w http.ResponseWriter, r *http.Request) (string, bool) {
+	var req struct {
+		Report string `json:"report"`
+	}
+	if !mediaTypeIs(r, jsonType) {
+		http.Error(w, "content type must be application/json", http.StatusUnsupportedMediaType)
+		return "", false
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&req); err != nil {
+		http.Error(w, "bad json", http.StatusBadRequest)
+		return "", false
+	}
+	return req.Report, true
+}
+
+// putIssueMain makes one of the issue's reports the one it is shown by.
+func (s *server) putIssueMain(w http.ResponseWriter, r *http.Request) {
+	report, ok := reportOf(w, r)
+	if !ok {
+		return
+	}
+	if err := s.svc.Store.SetMain(r.PathValue("id"), report); err != nil {
+		fail(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// splitIssue moves one report into a new issue and returns its id.
+func (s *server) splitIssue(w http.ResponseWriter, r *http.Request) {
+	report, ok := reportOf(w, r)
+	if !ok {
+		return
+	}
+	id, err := s.svc.Store.SplitReport(r.PathValue("id"), report, time.Now().UTC())
+	if errors.Is(err, store.ErrLastReport) {
+		http.Error(w, "an issue with one report cannot be split", http.StatusConflict)
+		return
+	}
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"id": id})
+}
