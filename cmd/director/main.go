@@ -210,8 +210,10 @@ func run() error {
 		return fmt.Errorf("scheme: %w", err)
 	}
 	kc, err := client.New(restCfg, client.Options{Scheme: scheme})
+	var projectConfig *frameSource
 	if err == nil {
-		cfg.Frame = (&frameSource{c: kc, ns: cfg.Namespace, ttl: frameTTL, now: time.Now}).Get
+		projectConfig = &frameSource{c: kc, ns: cfg.Namespace, ttl: frameTTL, now: time.Now}
+		cfg.Frame = projectConfig.Get
 	}
 	if err != nil {
 		return fmt.Errorf("kubernetes client: %w", err)
@@ -234,6 +236,7 @@ func run() error {
 		Launcher:  tl,
 		Rewind:    rewind.New(filepath.Join(cfg.Data, "rewind"), maxRewindBytes),
 	}
+	svc.StagingURL = projectConfig.StagingURL
 	kube, err := kubernetes.NewForConfig(restCfg)
 	if err != nil {
 		return fmt.Errorf("kubernetes clientset: %w", err)

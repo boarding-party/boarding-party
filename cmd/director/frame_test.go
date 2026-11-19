@@ -37,3 +37,26 @@ func TestProjectFrameFollowsConfigMap(t *testing.T) {
 		t.Fatalf("after the cache: %q", got)
 	}
 }
+
+func TestProjectStagingURLFromConfigMap(t *testing.T) {
+	sc := runtime.NewScheme()
+	if err := clientgoscheme.AddToScheme(sc); err != nil {
+		t.Fatal(err)
+	}
+	c := fake.NewClientBuilder().WithScheme(sc).Build()
+	f := &frameSource{c: c, ns: "ns", ttl: 0, now: time.Now}
+	ctx := context.Background()
+	if got := f.StagingURL(ctx); got != "" {
+		t.Fatalf("no ConfigMap: %q", got)
+	}
+	if err := c.Create(ctx, &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "bp-project", Namespace: "ns"},
+		Data: map[string]string{"frameAncestors": "https://cloud.test", "stagingURL": " https://staging.example.com "}}); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.StagingURL(ctx); got != "https://staging.example.com" {
+		t.Fatalf("staging URL %q", got)
+	}
+	if got := f.Get(ctx); got != "https://cloud.test" {
+		t.Fatalf("frame %q", got)
+	}
+}

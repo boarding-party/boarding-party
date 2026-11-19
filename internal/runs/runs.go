@@ -222,9 +222,13 @@ type Service struct {
 	AgentKey agentkey.Store
 	// OnFinish, when set, is called after any run leaves the active states.
 	OnFinish func()
+	// StagingURL, when set, returns the staging URL the cloud gave the
+	// project (ConfigMap bp-project), which the setup page starts from.
+	StagingURL func(ctx context.Context) string
 
 	startMu sync.Mutex // makes the one-active-run check and CreateRun atomic
 	usageMu sync.Mutex // makes SaveUsage's read-merge-write atomic
+	setupMu sync.Mutex // makes Setup's set-up check and write atomic
 }
 
 func randHex(n int) (string, error) {
