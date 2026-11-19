@@ -387,22 +387,6 @@ func parseProfile(m map[string]string) (project.Profile, string) {
 	return p, ""
 }
 
-// childEmail adds +name to the local part of the lead's address, replacing
-// any +tag, so the child's mail reaches the same inbox.
-func childEmail(leadEmail, name string) string {
-	a, err := mail.ParseAddress(leadEmail)
-	if err != nil {
-		return ""
-	}
-	local, domain, ok := strings.Cut(a.Address, "@")
-	if !ok {
-		return ""
-	}
-	local, _, _ = strings.Cut(local, "+")
-	tag := strings.ToLower(strings.NewReplacer(" ", ".", "'", "").Replace(name))
-	return local + "+" + tag + "@" + domain
-}
-
 // randomHex returns 16 random hex characters.
 func randomHex() (string, error) {
 	b := make([]byte, 8)
@@ -602,7 +586,7 @@ func addLeadTools(s *mcp.Server, lt *leadTools) {
 			if !childName.MatchString(name) {
 				return toolErr("name must start with a capital letter and use only letters, digits, spaces, ' and -, at most 40 characters")
 			}
-			email := childEmail(c.lead.Identity["email"], name)
+			email := project.ChildEmail(c.lead.Identity["email"], name)
 			taken, err := lt.nameTaken(c.p, name, email)
 			if err != nil {
 				return nil, nil, err

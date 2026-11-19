@@ -56,6 +56,9 @@ type Project struct {
 	// DailyBudget caps a day's spend, in US dollars. Optional; nil means
 	// DefaultDailyBudget.
 	DailyBudget *float64 `json:"dailyBudget,omitempty"`
+	// Logins are accounts the owner made on the site, one per kind of user,
+	// for personas that can't sign up themselves. Optional.
+	Logins []Login `json:"logins,omitempty"`
 }
 
 // Time zone and budget defaults and bounds.
@@ -210,6 +213,9 @@ type Persona struct {
 	Profile Profile `json:"profile,omitzero"`
 	// Lead, with any power ticked, makes the persona a lead.
 	Lead *Lead `json:"lead,omitempty"`
+	// Login names one of the project's logins by kind; the director signs
+	// the persona in with it instead of its own identity.
+	Login string `json:"login,omitempty"`
 }
 
 type Story struct {
@@ -335,6 +341,9 @@ func (p Project) validate() error {
 	if p.RuntimeClass != "" && len(validation.IsDNS1123Subdomain(p.RuntimeClass)) > 0 {
 		return fmt.Errorf("runtimeClass %q must be a RuntimeClass name, such as gvisor", p.RuntimeClass)
 	}
+	if err := p.normaliseLogins(); err != nil {
+		return err
+	}
 	seen := map[string]bool{}
 	personas := map[string]bool{} // runs and persona state are keyed by persona name
 	for i := range p.Roles {
@@ -374,6 +383,9 @@ func (p Project) validate() error {
 			personas[pe.Name] = true
 			if err := pe.Profile.validate(); err != nil {
 				return fmt.Errorf("persona %q: %w", pe.Name, err)
+			}
+			if _, ok := p.LoginFor(pe.Login); pe.Login != "" && !ok {
+				return fmt.Errorf("persona %q: no login for %q", pe.Name, pe.Login)
 			}
 			if pe.Lead != nil {
 				if err := pe.Lead.normalise(); err != nil {
