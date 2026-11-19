@@ -88,6 +88,7 @@ func admin(svc *runs.Service, maxBytes int64, token string, hub *live.Hub, mail 
 	mux.HandleFunc("GET /api/runs", s.listRuns)
 	mux.HandleFunc("GET /api/runs/{id}", s.getRun)
 	mux.HandleFunc("POST /api/runs/{id}/stop", s.stopRun)
+	mux.HandleFunc("POST /api/runs/{id}/login", s.postLogin)
 	mux.HandleFunc("GET /api/status", s.getStatus)
 	mux.HandleFunc("GET /api/value", s.getValue)
 	mux.HandleFunc("GET /api/digest", s.getDigest)

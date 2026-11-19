@@ -874,3 +874,23 @@ func TestDrainStartsReplayPastItemWithoutAgentKey(t *testing.T) {
 		t.Fatalf("queue = %+v, want the AI item left", q)
 	}
 }
+
+func TestLoginWaitResumesWhenGiven(t *testing.T) {
+	f := newFix(t, schedYAML)
+	f.waiting("p1", "Ada", "patient", "book", "j1", store.Wait{Kind: "login", Login: "admin", Deadline: now.Add(time.Hour)})
+	f.tick()
+	if w := f.wait("p1"); w.Status != store.WaitOpen {
+		t.Fatalf("resolved before a login: %+v", w)
+	}
+	if ok, err := f.st.GiveLogin("p1", f.clk.Now()); err != nil || !ok {
+		t.Fatal(ok, err)
+	}
+	f.tick()
+	if w := f.wait("p1"); w.Status != store.WaitMet || w.Detail != `login for "admin" given` {
+		t.Fatalf("wait = %+v", w)
+	}
+	calls := f.starter.Calls()
+	if len(calls) == 0 || calls[len(calls)-1].Via != "continue" || calls[len(calls)-1].Follows != "p1" {
+		t.Fatalf("no continuation started: %+v %+v", calls, f.queue())
+	}
+}

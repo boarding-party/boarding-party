@@ -108,6 +108,11 @@ func (s *server) putMailbox(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	m.Verified()
+	// Personas made before the mailbox get their addresses now.
+	if err := s.svc.FillEmails(r.Context(), c.Username); err != nil {
+		fail(w, err)
+		return
+	}
 	m.Kick()
 	writeJSON(w, http.StatusOK, view(c, true, m.Status()))
 }

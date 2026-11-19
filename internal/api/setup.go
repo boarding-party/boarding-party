@@ -55,3 +55,26 @@ func (s *server) postSetup(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
+
+// postLogin answers a run that waits for a login. The password never comes back.
+func (s *server) postLogin(w http.ResponseWriter, r *http.Request) {
+	if !mediaTypeIs(r, jsonType) {
+		jsonError(w, http.StatusUnsupportedMediaType, "content type must be application/json")
+		return
+	}
+	var in struct{ Username, Password string }
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10)).Decode(&in); err != nil {
+		jsonError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	err := s.svc.GiveLogin(r.Context(), r.PathValue("id"), in.Username, in.Password)
+	if errors.Is(err, runs.ErrNoLoginWait) {
+		jsonError(w, http.StatusConflict, err.Error())
+		return
+	}
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
