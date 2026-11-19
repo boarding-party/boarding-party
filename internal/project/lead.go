@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 )
 
 // LeadStory is the reserved story name of a lead run: a run of the lead
@@ -94,7 +95,7 @@ func parseClock(s string) (int, int, bool) {
 // normalise checks the lead's limits; "Create personas" ticks "Start runs",
 // since children run only when their lead queues them.
 func (l *Lead) normalise() error {
-	if len(l.Brief) > MaxLeadBrief {
+	if utf8.RuneCountInString(l.Brief) > MaxLeadBrief {
 		return fmt.Errorf("lead brief is longer than %d characters", MaxLeadBrief)
 	}
 	if b := l.DailyBudget; b != nil && (!(*b > 0) || *b > MaxDailyBudget) {

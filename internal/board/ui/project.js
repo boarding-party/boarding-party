@@ -91,7 +91,7 @@ const newRole = () => ({ id: nid(), name: '', description: '', canWatchRecording
 // A story's handoffs are kept as the draft ids of the stories they point
 // at, so renaming a role or story carries through and removing one drops
 // the reference; toJSON turns them back into names.
-function fromProject(p) {
+export function fromProject(p) {
   p = p || {};
   const sites = (p.sites || []).map(row);
   const d = {
@@ -104,8 +104,9 @@ function fromProject(p) {
     timezone: p.timezone || '',
     locale: p.locale || '',
     dailyBudget: p.dailyBudget != null ? String(p.dailyBudget) : '',
-    // Not edited here, but carried so a save never drops it.
+    // Not edited here, but carried so a save never drops them.
     resources: p.resources || null,
+    logins: p.logins || [],
     allowFrom: [...((p.inbox && p.inbox.allowFrom) || [])],
     authServId: (p.inbox && p.inbox.authServId) || '',
     roles: (p.roles || []).map((r) => ({
@@ -122,6 +123,7 @@ function fromProject(p) {
         traits: [...(pe.traits || [])],
         identity: Object.entries(pe.identity || {}).map(([k, v]) => ({ id: nid(), k, v: String(v) })),
         lead: leadFromProject(pe.lead),
+        login: pe.login || '', // carried, not edited
       })),
       stories: (r.stories || []).map((s) => ({ id: nid(), name: s.name || '', goal: s.goal || '', model: s.model || '', handoffs: s.handoffs || [], trigger: triggerFromProject(s.trigger), freshBrowser: !!s.freshBrowser, replay: s.replay !== false })),
     })),
@@ -160,7 +162,7 @@ function identityWarnings(rows) {
 
 const vals = (rows) => rows.map((x) => x.v.trim()).filter(Boolean);
 
-function toJSON(d) {
+export function toJSON(d) {
   const targets = storyTargets(d.roles);
   const handoffs = (s) => s.handoffs.map((id) => targets.get(id)).filter((t) => t && t.role && t.story);
   return {
@@ -174,6 +176,7 @@ function toJSON(d) {
     ...(d.locale.trim() ? { locale: d.locale.trim() } : {}),
     ...(d.dailyBudget.trim() !== '' && isFinite(Number(d.dailyBudget)) ? { dailyBudget: Number(d.dailyBudget) } : {}),
     ...(d.resources ? { resources: d.resources } : {}),
+    ...(d.logins.length ? { logins: d.logins } : {}),
     ...(d.allowFrom.length || d.authServId.trim() ? { inbox: { allowFrom: d.allowFrom, ...(d.authServId.trim() ? { authServId: d.authServId.trim() } : {}) } } : {}),
     roles: d.roles.map((r) => ({
       name: r.name.trim(),
@@ -187,6 +190,7 @@ function toJSON(d) {
         traits: pe.traits,
         identity: Object.fromEntries(pe.identity.filter((x) => x.k.trim()).map((x) => [x.k.trim(), x.v])),
         ...(leadToJSON(pe.lead) ? { lead: leadToJSON(pe.lead) } : {}),
+        ...(pe.login ? { login: pe.login } : {}),
       })),
       stories: r.stories.map((s) => {
         const h = handoffs(s);

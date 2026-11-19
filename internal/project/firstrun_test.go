@@ -96,3 +96,15 @@ func TestFirstRunBriefFits(t *testing.T) {
 		t.Fatalf("brief for one persona:\n%s", b1)
 	}
 }
+
+func TestFirstRunBriefFitsInOtherScripts(t *testing.T) {
+	var stories []string
+	for range MaxFirstRunStories {
+		stories = append(stories, strings.Repeat("ї", MaxFirstRunStory))
+	}
+	b := FirstRunBrief(stories, MaxFirstRunPersonas)
+	j := `{"name":"p","sites":["https://x.test"],"roles":[{"name":"r","personas":[{"name":"L","lead":{"seeRuns":true,"brief":` + fmt.Sprintf("%q", b) + `}}]}]}`
+	if _, err := LoadJSON([]byte(j)); err != nil {
+		t.Fatalf("5 stories of %d Cyrillic letters: %v", MaxFirstRunStory, err)
+	}
+}

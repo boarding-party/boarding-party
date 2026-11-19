@@ -48,6 +48,12 @@ func TestRunPromptTeachesLoginWait(t *testing.T) {
 	}
 }
 
+func TestRunPromptExplainsGivenLogin(t *testing.T) {
+	if p := Prompt(store.Run{}); !strings.Contains(p, "If identity has a username, the owner made that account for you: sign in with identity.username and identity.password") {
+		t.Error("prompt does not say how to use a login the owner gave")
+	}
+}
+
 func TestPromptTeachesGenerators(t *testing.T) {
 	p := Prompt(store.Run{})
 	for _, want := range []string{"data.lineItems(", "data.businessName({ size", "exclude", "fits the persona"} {
