@@ -76,6 +76,7 @@ type childInfo struct {
 	Stories    []storyInfo       `json:"stories"`
 	Stopped    bool              `json:"stopped"`
 	Reason     string            `json:"reason"`
+	Login      string            `json:"login,omitempty"`
 	RecentRuns []runLine         `json:"recentRuns"`
 }
 
@@ -91,7 +92,8 @@ type leadAssignment struct {
 	Lead        leadInfo        `json:"lead"`
 	Sites       []string        `json:"sites"`
 	Budget      leadBudget      `json:"budget"`
-	Inbox       bool            `json:"inbox"` // children get email addresses
+	Inbox       bool            `json:"inbox"`  // children get email addresses
+	Logins      []string        `json:"logins"` // kinds of user with a login; never the values
 	Children    []childInfo     `json:"children"`
 	Personas    []handmadeInfo  `json:"personas"`
 	RecentRuns  []runLine       `json:"recentRuns,omitempty"` // only with seeRuns
@@ -202,6 +204,7 @@ func (s *leadTools) assignment(ctx context.Context, c leadCtx) (leadAssignment, 
 		Sites:    c.p.Sites,
 		Budget:   leadBudget{DailyBudget: l.Budget(), SpentToday: u.Spent, DailyRuns: l.Runs(), RunsToday: u.Runs, MaxChildren: l.Children()},
 		Inbox:    c.lead.Identity["email"] != "",
+		Logins:   c.p.LoginKinds(),
 		Children: []childInfo{}, Personas: []handmadeInfo{}, Notes: json.RawMessage("null"),
 	}
 	var rc store.RunContext
@@ -218,7 +221,7 @@ func (s *leadTools) assignment(ctx context.Context, c leadCtx) (leadAssignment, 
 	}
 	for _, ch := range cs {
 		ci := childInfo{Name: ch.Name, Traits: traits(ch.Persona.Traits), Profile: ch.Persona.Profile.Labels(),
-			Stories: stories(ch.Stories), Stopped: !ch.Stopped.IsZero(), Reason: ch.Reason, RecentRuns: []runLine{}}
+			Stories: stories(ch.Stories), Stopped: !ch.Stopped.IsZero(), Reason: ch.Reason, Login: ch.Persona.Login, RecentRuns: []runLine{}}
 		for _, r := range recent {
 			if r.Persona != ch.Name || len(ci.RecentRuns) >= recentChildRuns {
 				continue
@@ -310,6 +313,23 @@ type childArgs struct {
 	Profile map[string]string `json:"profile,omitempty" jsonschema:"device, age, techLevel, patience, reading, assistive, vision, display; each value as shown on the hand-made personas; a wrong value is refused with the allowed list"`
 	Stories []storyArgs       `json:"stories,omitempty" jsonschema:"one to five stories"`
 	Reason  string            `json:"reason" jsonschema:"why, in one short sentence; shown to the owner"`
+	Login   *string           `json:"login,omitempty" jsonschema:"one of the assignment's logins, for a persona of that kind of user; empty for none"`
+}
+
+// loginKind returns the project's spelling of a login kind the lead named,
+// or a tool error message.
+func loginKind(p project.Project, kind string) (string, string) {
+	if strings.TrimSpace(kind) == "" {
+		return "", ""
+	}
+	l, ok := p.LoginFor(kind)
+	if !ok {
+		if len(p.Logins) == 0 {
+			return "", "the owner gave no logins"
+		}
+		return "", fmt.Sprintf("no login for %q; logins: %s", kind, strings.Join(p.LoginKinds(), ", "))
+	}
+	return l.Kind, ""
 }
 
 type nameArgs struct {
@@ -605,6 +625,12 @@ func addLeadTools(s *mcp.Server, lt *leadTools) {
 			if msg != "" {
 				return toolErr(msg)
 			}
+			var login string
+			if in.Login != nil {
+				if login, msg = loginKind(c.p, *in.Login); msg != "" {
+					return toolErr(msg)
+				}
+			}
 			cs, err := lt.st.Children(c.lead.Name)
 			if err != nil {
 				return nil, nil, err
@@ -627,7 +653,7 @@ func addLeadTools(s *mcp.Server, lt *leadTools) {
 				id["email"] = email
 			}
 			ch := store.Child{Name: name, Lead: c.lead.Name, Reason: strings.TrimSpace(in.Reason),
-				Persona: project.Persona{Name: name, Traits: in.Traits, Identity: id, Profile: prof}, Stories: sts, Created: time.Now().UTC()}
+				Persona: project.Persona{Name: name, Traits: in.Traits, Identity: id, Profile: prof, Login: login}, Stories: sts, Created: time.Now().UTC()}
 			if err := lt.st.AddChild(ch); errors.Is(err, store.ErrExists) {
 				return toolErr(fmt.Sprintf("the name %q is taken", name))
 			} else if err != nil {
@@ -640,7 +666,7 @@ func addLeadTools(s *mcp.Server, lt *leadTools) {
 		})
 
 	mcp.AddTool(s, &mcp.Tool{Name: "child_change",
-		Description: "Lead only, needs create personas. Change one of your personas: traits, profile or stories (each replaces what was there)."},
+		Description: "Lead only, needs create personas. Change one of your personas: traits, profile, stories or login (each replaces what was there)."},
 		func(ctx context.Context, _ *mcp.CallToolRequest, in childArgs) (*mcp.CallToolResult, any, error) {
 			c, bad, err := lt.resolve(create)
 			if bad != nil || err != nil {
@@ -675,6 +701,13 @@ func addLeadTools(s *mcp.Server, lt *leadTools) {
 					return toolErr(msg)
 				}
 				ch.Stories = sts
+			}
+			if in.Login != nil {
+				login, msg := loginKind(c.p, *in.Login)
+				if msg != "" {
+					return toolErr(msg)
+				}
+				ch.Persona.Login = login
 			}
 			if err := lt.st.UpdateChild(ch); err != nil {
 				return nil, nil, err

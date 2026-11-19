@@ -378,3 +378,78 @@ func TestReportJoinRespectsTriage(t *testing.T) {
 		t.Fatal(text)
 	}
 }
+
+// withLogin gives the stored project an admin login.
+func (f leadFix) withLogin(t *testing.T) {
+	t.Helper()
+	p, err := f.st.RawProject()
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.Logins = []project.Login{{Kind: "Admin", Username: "ann@x.test", Password: "s3cret-pw"}}
+	if err := f.st.PutProject(p); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestLeadAssignmentListsLoginKindsOnly(t *testing.T) {
+	f := newLeadFix(t, allPowers())
+	f.withLogin(t)
+	f.run(t, "l1", "Kate", "owner", project.LeadStory, store.RunRunning)
+	text, isErr := call(t, connect(t, f.srv, "tok-l1"), "next_assignment", nil)
+	if isErr {
+		t.Fatal(text)
+	}
+	if !strings.Contains(text, `"logins":["Admin"]`) || strings.Contains(text, "ann@x.test") || strings.Contains(text, "s3cret-pw") {
+		t.Fatalf("assignment: %s", text)
+	}
+}
+
+func TestChildCreateWithLogin(t *testing.T) {
+	f := newLeadFix(t, allPowers())
+	f.withLogin(t)
+	f.run(t, "l1", "Kate", "owner", project.LeadStory, store.RunRunning)
+	cs := connect(t, f.srv, "tok-l1")
+	mk := func(name, login string) (string, bool) {
+		return call(t, cs, "child_create", map[string]any{"name": name, "login": login,
+			"stories": []map[string]any{{"name": "settings", "goal": "change the VAT rate"}}, "reason": "admins need it"})
+	}
+	if text, isErr := mk("Olu Adams", "admin"); isErr {
+		t.Fatal(text)
+	}
+	if c, _ := f.st.Child("Olu Adams"); c.Persona.Login != "Admin" {
+		t.Fatalf("login = %q", c.Persona.Login)
+	}
+	if text, isErr := mk("Bea Lin", "owner"); !isErr || !strings.Contains(text, "Admin") {
+		t.Fatalf("unknown kind: %q %v", text, isErr)
+	}
+	text, _ := call(t, cs, "next_assignment", nil)
+	if !strings.Contains(text, `"login":"Admin"`) {
+		t.Fatalf("child's login not shown: %s", text)
+	}
+}
+
+func TestChildChangeLogin(t *testing.T) {
+	f := newLeadFix(t, allPowers())
+	f.withLogin(t)
+	f.run(t, "l1", "Kate", "owner", project.LeadStory, store.RunRunning)
+	cs := connect(t, f.srv, "tok-l1")
+	if text, isErr := call(t, cs, "child_change", map[string]any{"name": "Ana", "login": "Admin", "reason": "r"}); isErr {
+		t.Fatal(text)
+	}
+	if c, _ := f.st.Child("Ana"); c.Persona.Login != "Admin" {
+		t.Fatalf("login = %q", c.Persona.Login)
+	}
+	if text, isErr := call(t, cs, "child_change", map[string]any{"name": "Ana", "traits": []string{"calm"}, "reason": "r"}); isErr {
+		t.Fatal(text)
+	}
+	if c, _ := f.st.Child("Ana"); c.Persona.Login != "Admin" {
+		t.Fatal("a change without login cleared it")
+	}
+	if text, isErr := call(t, cs, "child_change", map[string]any{"name": "Ana", "login": "", "reason": "r"}); isErr {
+		t.Fatal(text)
+	}
+	if c, _ := f.st.Child("Ana"); c.Persona.Login != "" {
+		t.Fatalf("login = %q", c.Persona.Login)
+	}
+}
