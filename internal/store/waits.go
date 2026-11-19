@@ -16,7 +16,7 @@ const (
 // Wait is the condition a waiting run is parked on.
 type Wait struct {
 	RunID    string     `json:"runId"`
-	Kind     string     `json:"kind"` // "email" | "handoff" | "time"
+	Kind     string     `json:"kind"` // "email" | "handoff" | "time" | "login"
 	From     string     `json:"from,omitempty"`
 	Subject  string     `json:"subject,omitempty"`
 	AfterID  string     `json:"afterId,omitempty"` // email: only mail after this message
@@ -28,9 +28,12 @@ type Wait struct {
 	Status   WaitStatus `json:"status"`
 	Detail   string     `json:"detail,omitempty"`
 	Ended    time.Time  `json:"ended,omitzero"`
+	// Login and Note: a login wait's kind of user and what the persona needs it for.
+	Login string `json:"login,omitempty"`
+	Note  string `json:"note,omitempty"`
 }
 
-const waitCols = `run_id, kind, sender, subject, role, story, at, began, deadline, status, detail, ended, after_id`
+const waitCols = `run_id, kind, sender, subject, role, story, at, began, deadline, status, detail, ended, after_id, login, note`
 
 // FinishRunWaiting moves an active run to waiting and records w as open, in
 // one transaction. It returns false, writing nothing, if the run was not active.
@@ -54,8 +57,8 @@ func (s *Store) FinishRunWaiting(id, outcome string, finished time.Time, w Wait)
 	if !w.Began.IsZero() && w.Began.Before(finished) && w.Kind == "email" && w.AfterID == "" {
 		began = w.Began
 	}
-	_, err = tx.Exec(`INSERT INTO waits(`+waitCols+`) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-		id, w.Kind, w.From, w.Subject, w.Role, w.Story, ts(w.At), ts(began), ts(w.Deadline), string(WaitOpen), "", 0, w.AfterID)
+	_, err = tx.Exec(`INSERT INTO waits(`+waitCols+`) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		id, w.Kind, w.From, w.Subject, w.Role, w.Story, ts(w.At), ts(began), ts(w.Deadline), string(WaitOpen), "", 0, w.AfterID, w.Login, w.Note)
 	if err != nil {
 		return false, err
 	}
@@ -66,7 +69,7 @@ func scanWait(sc interface{ Scan(...any) error }) (Wait, error) {
 	var w Wait
 	var status string
 	var at, began, deadline, ended int64
-	if err := sc.Scan(&w.RunID, &w.Kind, &w.From, &w.Subject, &w.Role, &w.Story, &at, &began, &deadline, &status, &w.Detail, &ended, &w.AfterID); err != nil {
+	if err := sc.Scan(&w.RunID, &w.Kind, &w.From, &w.Subject, &w.Role, &w.Story, &at, &began, &deadline, &status, &w.Detail, &ended, &w.AfterID, &w.Login, &w.Note); err != nil {
 		return Wait{}, err
 	}
 	w.Status = WaitStatus(status)
@@ -89,6 +92,18 @@ func (s *Store) queryWaits(q string, args ...any) ([]Wait, error) {
 		out = append(out, w)
 	}
 	return out, rows.Err()
+}
+
+// GiveLogin marks run's open login wait as answered at at; the scheduler
+// then continues the run. It returns false if the run has no open,
+// unanswered login wait.
+func (s *Store) GiveLogin(runID string, at time.Time) (bool, error) {
+	r, err := s.db.Exec(`UPDATE waits SET at=? WHERE run_id=? AND status='open' AND kind='login' AND at=0`, ts(at), runID)
+	if err != nil {
+		return false, err
+	}
+	n, err := r.RowsAffected()
+	return n > 0, err
 }
 
 // OpenWaits returns the unresolved waits, oldest first.

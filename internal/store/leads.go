@@ -68,7 +68,28 @@ func (s *Store) Project() (project.Project, error) {
 		p.Roles = append(p.Roles, project.Role{Name: c.Name, Description: "Made by " + c.Lead, MadeBy: c.Lead,
 			Personas: []project.Persona{pe}, Stories: c.Stories})
 	}
+	withLogins(p)
 	return p, nil
+}
+
+// withLogins signs in every persona that names one of p's logins with it:
+// its identity, a copy, gets the login's username and password.
+func withLogins(p project.Project) {
+	for i := range p.Roles {
+		for j := range p.Roles[i].Personas {
+			pe := &p.Roles[i].Personas[j]
+			l, ok := p.LoginFor(pe.Login)
+			if pe.Login == "" || !ok {
+				continue
+			}
+			id := make(map[string]string, len(pe.Identity)+2)
+			for k, v := range pe.Identity {
+				id[k] = v
+			}
+			id["username"], id["password"] = l.Username, l.Password
+			pe.Identity = id
+		}
+	}
 }
 
 const childCols = `name, lead, body, reason, created, stopped`

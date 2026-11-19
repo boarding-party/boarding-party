@@ -328,6 +328,8 @@ var queueAddedColumns = []addedColumn{
 // waitsAddedColumns are the waits columns added after the table first shipped.
 var waitsAddedColumns = []addedColumn{
 	{"after_id", "after_id TEXT NOT NULL DEFAULT ''"},
+	{"login", "login TEXT NOT NULL DEFAULT ''"},
+	{"note", "note TEXT NOT NULL DEFAULT ''"},
 }
 
 // bugsAddedColumns are the bugs columns added after the table first shipped.
