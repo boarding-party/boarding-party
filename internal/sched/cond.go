@@ -19,11 +19,12 @@ const (
 	MinWait        = time.Minute
 )
 
-// Until says what a run waits for. Set exactly one of email, handoff or time.
+// Until says what a run waits for. Set exactly one of email, handoff, time or login.
 type Until struct {
 	Email   *EmailCond   `json:"email,omitempty" jsonschema:"wait for an email to arrive in this persona's inbox"`
 	Handoff *HandoffCond `json:"handoff,omitempty" jsonschema:"wait for a story that this story hands off to, to finish"`
 	Time    *TimeCond    `json:"time,omitempty" jsonschema:"wait until a point in time"`
+	Login   *LoginCond   `json:"login,omitempty" jsonschema:"wait for the owner to give a login for a kind of user you can't sign up as, such as an admin"`
 	Timeout string       `json:"timeout,omitempty" jsonschema:"how long to wait before giving up, such as 8h; from 1m to 168h, default 24h; ignored for time waits"`
 }
 
@@ -32,6 +33,17 @@ type EmailCond struct {
 	Subject string `json:"subject,omitempty" jsonschema:"part of the subject, case-insensitive"`
 	AfterID string `json:"after_id,omitempty" jsonschema:"the id of the newest message you already saw in messages_list; any later message counts, even one that arrives while you wrap up"`
 }
+
+type LoginCond struct {
+	Kind string `json:"kind" jsonschema:"the kind of user the story needs, such as admin"`
+	Note string `json:"note,omitempty" jsonschema:"what you need the account for, in one short sentence; shown to the owner"`
+}
+
+// Login wait limits.
+const (
+	maxLoginKind = 40
+	maxLoginNote = 200
+)
 
 type HandoffCond struct {
 	Role  string `json:"role" jsonschema:"the role of the story to wait for, as declared in the story's handoffs"`
@@ -52,13 +64,13 @@ func durationIn(s string) (time.Duration, bool) {
 // wait to record.
 func ParseWait(u Until, p project.Project, r store.Run, now time.Time) (store.Wait, error) {
 	n := 0
-	for _, set := range []bool{u.Email != nil, u.Handoff != nil, u.Time != nil} {
+	for _, set := range []bool{u.Email != nil, u.Handoff != nil, u.Time != nil, u.Login != nil} {
 		if set {
 			n++
 		}
 	}
 	if n != 1 {
-		return store.Wait{}, errors.New("until needs exactly one of email, handoff or time")
+		return store.Wait{}, errors.New("until needs exactly one of email, handoff, time or login")
 	}
 	w := store.Wait{RunID: r.ID, Began: now, Status: store.WaitOpen}
 	switch {
@@ -67,6 +79,17 @@ func ParseWait(u Until, p project.Project, r store.Run, now time.Time) (store.Wa
 			return w, errors.New("email needs from or subject")
 		}
 		w.Kind, w.From, w.Subject, w.AfterID = "email", u.Email.From, u.Email.Subject, u.Email.AfterID
+	case u.Login != nil:
+		kind, note := strings.TrimSpace(u.Login.Kind), strings.TrimSpace(u.Login.Note)
+		switch {
+		case kind == "":
+			return w, errors.New("login needs kind")
+		case len(kind) > maxLoginKind:
+			return w, fmt.Errorf("login kind is longer than %d characters", maxLoginKind)
+		case len(note) > maxLoginNote:
+			return w, fmt.Errorf("login note is longer than %d characters", maxLoginNote)
+		}
+		w.Kind, w.Login, w.Note = "login", kind, note
 	case u.Handoff != nil:
 		h := u.Handoff
 		st, _ := p.FindStory(r.Role, r.Story)
@@ -143,6 +166,8 @@ func Describe(w store.Wait) string {
 		return fmt.Sprintf("%s to finish %q", w.Role, w.Story)
 	case "time":
 		return w.At.UTC().Format("15:04 on 2 Jan 2006") + " (UTC)"
+	case "login":
+		return fmt.Sprintf("a login for %q", w.Login)
 	}
 	return w.Kind
 }
@@ -156,6 +181,11 @@ type Arrival struct {
 // Met reports whether the wait's condition has happened. r is the waiting run.
 func Met(st *store.Store, w store.Wait, r store.Run, now time.Time) (Arrival, bool, error) {
 	switch w.Kind {
+	case "login":
+		// The owner's answer sets At (store.GiveLogin).
+		if !w.At.IsZero() {
+			return Arrival{Detail: fmt.Sprintf("login for %q given", w.Login)}, true, nil
+		}
 	case "time":
 		if !now.Before(w.At) {
 			return Arrival{Detail: "time reached"}, true, nil

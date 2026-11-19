@@ -57,7 +57,7 @@ func wantErr(t *testing.T, u Until, want string) {
 }
 
 func TestParseWaitExactlyOne(t *testing.T) {
-	msg := "until needs exactly one of email, handoff or time"
+	msg := "until needs exactly one of email, handoff, time or login"
 	wantErr(t, Until{}, msg)
 	wantErr(t, Until{Email: &EmailCond{From: "a"}, Time: &TimeCond{After: "30m"}}, msg)
 }
@@ -317,5 +317,34 @@ func TestMetHandoffDetailPlain(t *testing.T) {
 	}
 	if n := utf8.RuneCountInString(a.Detail); n > 200+len(`doc [31m finished "approve": `) {
 		t.Fatalf("detail too long: %d", n)
+	}
+}
+
+func TestParseWaitLogin(t *testing.T) {
+	wantErr(t, Until{Login: &LoginCond{}}, "login needs kind")
+	wantErr(t, Until{Login: &LoginCond{Kind: strings.Repeat("k", 41)}}, "login kind is longer than 40 characters")
+	wantErr(t, Until{Login: &LoginCond{Kind: "admin", Note: strings.Repeat("n", 201)}}, "login note is longer than 200 characters")
+	wantErr(t, Until{Login: &LoginCond{Kind: "admin"}, Time: &TimeCond{After: "30m"}}, "until needs exactly one of email, handoff, time or login")
+	w, err := ParseWait(Until{Login: &LoginCond{Kind: " admin ", Note: "open Settings"}, Timeout: "8h"}, proj(t), run, now)
+	if err != nil || w.Kind != "login" || w.Login != "admin" || w.Note != "open Settings" || !w.Deadline.Equal(now.Add(8*time.Hour)) || !w.At.IsZero() {
+		t.Fatalf("%+v %v", w, err)
+	}
+}
+
+func TestMetLogin(t *testing.T) {
+	w := store.Wait{Kind: "login", Login: "admin"}
+	if _, ok, _ := Met(nil, w, run, now); ok {
+		t.Fatal("met before a login was given")
+	}
+	w.At = now
+	a, ok, _ := Met(nil, w, run, now)
+	if !ok || a.Detail != `login for "admin" given` {
+		t.Fatalf("%+v %v", a, ok)
+	}
+}
+
+func TestDescribeLogin(t *testing.T) {
+	if got := Describe(store.Wait{Kind: "login", Login: "admin"}); got != `a login for "admin"` {
+		t.Fatalf("got %q", got)
 	}
 }

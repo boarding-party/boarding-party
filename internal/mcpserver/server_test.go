@@ -645,7 +645,7 @@ func TestFinishWaitingValidation(t *testing.T) {
 		args  map[string]any
 		wants string
 	}{
-		{"no until", ok, "a@b.test", map[string]any{"outcome": "waiting", "summary": "s"}, "outcome waiting needs until: exactly one of email, handoff or time"},
+		{"no until", ok, "a@b.test", map[string]any{"outcome": "waiting", "summary": "s"}, "outcome waiting needs until: exactly one of email, handoff, time or login"},
 		{"until on done", ok, "a@b.test", map[string]any{"outcome": "done", "summary": "s", "until": email}, "until applies only to outcome waiting"},
 		{"no mailbox", nil, "a@b.test", map[string]any{"outcome": "waiting", "summary": "s", "until": email}, errNoMailbox},
 		{"no email", ok, "", map[string]any{"outcome": "waiting", "summary": "s", "until": email}, "this persona has no email address, so it can't wait for email"},

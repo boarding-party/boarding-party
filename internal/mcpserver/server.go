@@ -443,7 +443,7 @@ func newServer(svc *runs.Service, st *store.Store, directorURL, token string, ma
 		})
 
 	mcp.AddTool(s, &mcp.Tool{Name: "finish_run",
-		Description: "Finish your run. outcome is done, stuck, failed or waiting. For waiting, set until to exactly one of email {from, subject, after_id: the id of the newest message you already saw}, handoff {role, story} or time {at or after}, plus an optional timeout. On a fix check run (context verify), finish done with verify {reached, still_there, note}. Call this last."},
+		Description: "Finish your run. outcome is done, stuck, failed or waiting. For waiting, set until to exactly one of email {from, subject, after_id: the id of the newest message you already saw}, handoff {role, story}, time {at or after} or login {kind, note}, plus an optional timeout. On a fix check run (context verify), finish done with verify {reached, still_there, note}. Call this last."},
 		func(ctx context.Context, _ *mcp.CallToolRequest, in finishArgs) (*mcp.CallToolResult, any, error) {
 			r, bad, err := active()
 			if bad != nil || err != nil {
@@ -611,7 +611,7 @@ func liveRevision(st *store.Store, r store.Run) (*store.Revision, error) {
 // finishWaiting ends the run as waiting on in.Until after checking the wait can be met.
 func finishWaiting(ctx context.Context, svc *runs.Service, st *store.Store, mail mailbox, token string, r store.Run, in finishArgs) (*mcp.CallToolResult, any, error) {
 	if in.Until == nil {
-		return toolErr("outcome waiting needs until: exactly one of email, handoff or time")
+		return toolErr("outcome waiting needs until: exactly one of email, handoff, time or login")
 	}
 	p, err := st.Project()
 	if err != nil {

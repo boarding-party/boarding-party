@@ -39,6 +39,15 @@ func TestRunPromptTeachesWaits(t *testing.T) {
 	}
 }
 
+func TestRunPromptTeachesLoginWait(t *testing.T) {
+	p := Prompt(store.Run{})
+	for _, want := range []string{"login {kind, note}", "an account you do not have", "cannot wait for a login"} {
+		if !strings.Contains(p, want) {
+			t.Errorf("prompt lacks %q", want)
+		}
+	}
+}
+
 func TestPromptTeachesGenerators(t *testing.T) {
 	p := Prompt(store.Run{})
 	for _, want := range []string{"data.lineItems(", "data.businessName({ size", "exclude", "fits the persona"} {
