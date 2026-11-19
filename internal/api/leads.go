@@ -19,6 +19,10 @@ type childView struct {
 	store.Child
 	Runs int `json:"runs"`
 	Bugs int `json:"bugs"`
+	// LoginWait is the kind of user the child's newest run waits for a
+	// login for, and LoginRun that run; empty when it waits for none.
+	LoginWait string `json:"loginWait,omitempty"`
+	LoginRun  string `json:"loginRun,omitempty"`
 }
 
 func (s *server) getLead(w http.ResponseWriter, r *http.Request) {
@@ -54,6 +58,16 @@ func (s *server) getLead(w http.ResponseWriter, r *http.Request) {
 		for _, run := range recent {
 			if run.Persona != c.Name {
 				continue
+			}
+			if v.Runs == 0 && run.State == store.RunWaiting { // runs are newest first
+				wt, err := s.svc.Store.WaitFor(run.ID)
+				if err != nil && !errors.Is(err, store.ErrNotFound) {
+					fail(w, err)
+					return
+				}
+				if err == nil && wt.Kind == "login" && wt.Status == store.WaitOpen {
+					v.LoginWait, v.LoginRun = wt.Login, run.ID
+				}
 			}
 			v.Runs++
 			bugs, err := s.svc.Store.Bugs(run.ID)

@@ -176,8 +176,12 @@ func TestDevDirectorSeedsChain(t *testing.T) {
 		t.Fatalf("runs: %v: %s", err, b)
 	}
 	var waiting []string
-	continued := ""
+	continued, logins := "", 0
 	for _, r := range list {
+		if r.State == store.RunWaiting && r.Wait != nil && r.Wait.WaitingFor == `a login for "admin"` {
+			logins++ // seedLoginWait's run, apart from the chain
+			continue
+		}
 		if r.State == store.RunWaiting {
 			if r.Wait == nil || !strings.Contains(r.Wait.WaitingFor, "Booking confirmed") {
 				t.Fatalf("waiting run %s wait = %+v", r.ID, r.Wait)
@@ -190,6 +194,9 @@ func TestDevDirectorSeedsChain(t *testing.T) {
 	}
 	if len(waiting) != 1 {
 		t.Fatalf("waiting runs = %v, want one (%s)", waiting, b)
+	}
+	if logins != 1 {
+		t.Fatalf("login waits = %d, want one", logins)
 	}
 
 	_, b = do(t, d, "GET", "/api/queue", "", d.Token, "")

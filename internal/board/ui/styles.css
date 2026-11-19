@@ -849,3 +849,23 @@ pre.diff { padding: 6px 0; margin-top: 8px; }
 .pageview-wait.msg a { color: #9DB8F5; }
 .player.pagemode .caption { bottom: 60px; } /* above Page's controls */
 .pagebar .pagebar-at { text-align: right; color: #A9B4C4; }
+
+/* Setup page and logins */
+.page.setup { max-width: 760px; }
+.setupform textarea { min-height: 120px; resize: vertical; line-height: 1.5; }
+.setuprow { margin-top: 14px; align-items: flex-start; }
+.setuprow .field { flex: 1 1 200px; }
+.loginrow { margin-bottom: 8px; flex-wrap: nowrap; }
+.loginrow input { flex: 1 1 0; min-width: 0; }
+.loginrow .btn { flex: none; }
+.ferr { color: var(--bad); font-size: 12px; }
+.loginwait { border-color: var(--wait); }
+aside nav .count.need { margin-left: 6px; padding: 0 6px; border-radius: 9px; background: var(--wait-soft); color: var(--wait); font-weight: 600; }
+.loginneed { display: inline-block; margin-top: 4px; text-decoration: none; }
+@media (max-width: 640px) {
+  .loginrow { flex-wrap: wrap; }
+  .loginrow input { flex: 1 1 100%; }
+}
+.studio-banners .loginwait { margin: 0; border-radius: 0; border-width: 0 0 1px; padding: 12px 16px; }
+.studio-banners .loginwait h2 { margin: 0 0 4px; }
+.studio-banners .loginwait .loginrow { max-width: 760px; margin: 8px 0 0; }

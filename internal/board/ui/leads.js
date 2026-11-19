@@ -131,6 +131,7 @@ function Child({ c, lead, onChange }) {
       <span class="small muted">${plural(c.runs, 'run', 'runs')}, ${plural(c.bugs, 'bug', 'bugs')}</span>
     </div>
     <span class="small muted">Made by ${lead}: ${c.reason}</span>
+    ${c.loginWait ? html`<a class="tag wait loginneed" href=${runHref(c.loginRun)}>Waiting for a login: ${c.loginWait}</a>` : null}
     <span class="small">${(c.stories || []).map((s) => s.name).join(', ')}</span>
     ${editing ? html`
       <form class="adopt" onSubmit=${adopt}>

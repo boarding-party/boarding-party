@@ -1037,7 +1037,7 @@ const eyeOff = html`<svg width="16" height="16" viewBox="0 0 24 24" fill="none" 
 
 // The Anthropic key agents run with. Saved straight away into the
 // namespace's agent secret; the board only ever learns whether one is set.
-function AgentKeyCard() {
+export function AgentKeyCard({ onSaved } = {}) {
   const [st, setSt] = useState(null);
   const [key, setKey] = useState('');
   const [show, setShow] = useState(false);
@@ -1052,7 +1052,7 @@ function AgentKeyCard() {
     setBusy(true); setErr(''); setDone('');
     try {
       await api('api/agent-key', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: key.trim() }) });
-      setKey(''); setDone('Saved.'); await load();
+      setKey(''); setDone('Saved.'); await load(); if (onSaved) onSaved();
     } catch (e) { setErr(e.message); } finally { setBusy(false); }
   };
   const line = !st ? null
@@ -1085,6 +1085,30 @@ function AgentKeyCard() {
 }
 
 function InboxCard({ allowFrom, authServId, onChange }) {
+  return html`
+    <div class="card" id="inbox-card">
+      <h2>Inbox</h2>
+      <p class="hint">One mailbox for all personas. Each persona gets mail at its own address, such as cast+john@yourdomain.com. Use a mailbox nobody uses for real work.</p>
+      <${MailboxFields} />
+
+      <div class="field" style="margin-top:16px">
+        <label>Accept mail from</label>
+        <span class="hint">Senders or domains your site mails from, such as smesolutions.uk. Mail from anyone else is kept out of the personas' reach.</span>
+        <${Tags} tags=${allowFrom} label="Accept mail from" placeholder="smesolutions.uk" more="Add sender"
+          onChange=${(fn) => onChange((d) => fn(d.allowFrom))} />
+      </div>
+      <div class="field" style="margin-top:14px">
+        <label for="mb-auth">Verifying server <span class="hint">(optional)</span></label>
+        <input id="mb-auth" value=${authServId} placeholder="mx.google.com" autocomplete="off"
+          onInput=${(e) => { const v = e.currentTarget.value; onChange((d) => { d.authServId = v; }); }} />
+        <span class="hint">The server name your mail provider puts in Authentication-Results. Leave empty for Gmail and Google Workspace. Mail whose sender isn't verified by that server is kept out.</span>
+      </div>
+    </div>`;
+}
+
+// MailboxFields set up, test and remove the project's mailbox. onSaved runs
+// after a save that signed in.
+export function MailboxFields({ onSaved } = {}) {
   const [mb, setMb] = useState(null); // the saved mailbox, as the director reports it
   const [loadErr, setLoadErr] = useState('');
   const [host, setHost] = useState('');
@@ -1126,6 +1150,7 @@ function InboxCard({ allowFrom, authServId, onChange }) {
         body: JSON.stringify({ host: host.trim(), port: n, username: user.trim(), password: pass.replace(/\s+/g, '') }),
       }));
       setDone(`Signed in to ${user.trim()}. New mail reaches the personas within a few seconds.`);
+      if (onSaved) onSaved();
     } catch (e) { setErr(e.message); } finally { setBusy(false); }
   };
   const remove = async () => {
@@ -1141,9 +1166,7 @@ function InboxCard({ allowFrom, authServId, onChange }) {
     : { cls: '', text: 'Not connected' };
 
   return html`
-    <div class="card" id="inbox-card">
-      <h2>Inbox</h2>
-      <p class="hint">One mailbox for all personas. Each persona gets mail at its own address, such as cast+john@yourdomain.com. Use a mailbox nobody uses for real work.</p>
+    <div class="mbfields">
       ${loadErr ? html`<div class="note bad" role="alert">Could not load the mailbox: ${loadErr}</div>` : null}
       ${line ? html`<p class="mbstatus"><span class=${'dot ' + line.cls}></span>${line.text}</p>` : null}
       <div class="mbform">
@@ -1180,18 +1203,5 @@ function InboxCard({ allowFrom, authServId, onChange }) {
       </div>
       ${err ? html`<div class="note bad" role="alert">${err}</div>` : null}
       ${done && !err ? html`<div class="note ok" role="status">${done}</div>` : null}
-
-      <div class="field" style="margin-top:16px">
-        <label>Accept mail from</label>
-        <span class="hint">Senders or domains your site mails from, such as smesolutions.uk. Mail from anyone else is kept out of the personas' reach.</span>
-        <${Tags} tags=${allowFrom} label="Accept mail from" placeholder="smesolutions.uk" more="Add sender"
-          onChange=${(fn) => onChange((d) => fn(d.allowFrom))} />
-      </div>
-      <div class="field" style="margin-top:14px">
-        <label for="mb-auth">Verifying server <span class="hint">(optional)</span></label>
-        <input id="mb-auth" value=${authServId} placeholder="mx.google.com" autocomplete="off"
-          onInput=${(e) => { const v = e.currentTarget.value; onChange((d) => { d.authServId = v; }); }} />
-        <span class="hint">The server name your mail provider puts in Authentication-Results. Leave empty for Gmail and Google Workspace. Mail whose sender isn't verified by that server is kept out.</span>
-      </div>
     </div>`;
 }

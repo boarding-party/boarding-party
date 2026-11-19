@@ -143,3 +143,26 @@ func TestStartRunOverLeadBudgetIs409(t *testing.T) {
 		t.Fatalf("code %d", resp.StatusCode)
 	}
 }
+
+func TestLeadPageShowsLoginWait(t *testing.T) {
+	srv, _, svc := setupBoth(t, 1024)
+	withLead(t, svc)
+	if err := svc.Store.CreateRun(store.Run{ID: "c2", Token: "tok-c2", Persona: "Bo", Role: "Bo", Story: "pay",
+		State: store.RunRunning, Started: time.Now().Add(time.Second), Chain: "c2"}); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := svc.Store.FinishRunWaiting("c2", "needs admin", time.Now(), store.Wait{Kind: "login", Login: "admin", Deadline: time.Now().Add(time.Hour)}); err != nil || !ok {
+		t.Fatal(ok, err)
+	}
+	var lead struct {
+		Children []struct {
+			Name      string
+			LoginWait string `json:"loginWait"`
+			LoginRun  string `json:"loginRun"`
+		}
+	}
+	json.NewDecoder(send(t, "GET", srv.URL+"/api/leads/Kate", "").Body).Decode(&lead)
+	if len(lead.Children) != 2 || lead.Children[0].LoginWait != "" || lead.Children[1].LoginWait != "admin" || lead.Children[1].LoginRun != "c2" {
+		t.Fatalf("children %+v", lead.Children)
+	}
+}

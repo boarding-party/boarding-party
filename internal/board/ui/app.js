@@ -23,6 +23,8 @@ import { Shot } from './shot.js';
 import { personaLabel } from './persona-label.js';
 import { JourneysPage, JourneyPage, journeyHref } from './journeys.js';
 import { InboxPage } from './inbox.js';
+import { SetupPage } from './setup.js';
+import { LoginWaitCard } from './login-wait.js';
 
 const ACTIVE = new Set(['pending', 'running']);
 // LOCAL is the CLI's own board, which listens on loopback only; anywhere
@@ -106,6 +108,7 @@ function parseRoute(hash) {
     return { page: 'project', section, roleN: section === 'roles' && /^[1-9][0-9]*$/.test(parts[2] || '') ? parts[2] : '' };
   }
   if (parts[0] === 'inbox') return { page: 'inbox' };
+  if (parts[0] === 'setup') return { page: 'setup' };
   if (parts[0] === 'bugs' && parts[1]) {
     try { return { page: 'issue', id: decodeURIComponent(parts[1]) }; } catch (_) { /* fall through */ }
   }
@@ -246,6 +249,7 @@ function App() {
         ${route.page === 'run' ? null : html`<${RunStrip} director=${director} active=${active} status=${status} onChange=${loadRuns} />`}
         ${route.page === 'run' ? html`<${RunPage} key=${route.id} id=${route.id} onChange=${loadRuns} />`
           : route.page === 'project' ? html`<${ProjectPage} section=${route.section} roleN=${route.roleN} onSaved=${loadProject} onDirty=${onDirty} />`
+          : route.page === 'setup' ? html`<${SetupPage} onDone=${loadProject} />`
           : route.page === 'inbox' ? html`<${InboxPage} names=${[...new Set(allPersonas(project).map((p) => p.name))]} />`
           : route.page === 'bugs' ? html`<${BugsPage} />`
           : route.page === 'issue' ? html`<${IssuePage} key=${route.id} id=${route.id} />`
@@ -280,17 +284,18 @@ function Sidebar({ route, project, runs, leads, children }) {
     } catch (_) { /* the count is optional */ }
     return SIDEBAR_POLL_MS;
   }, [route.page]);
+  const needLogin = (runs || []).filter((r) => r.wait && r.wait.kind === 'login' && r.wait.status === 'open').length;
   const site = (project && project.sites && project.sites[0]) || '';
   let host = site;
   try { host = site ? new URL(site).host : ''; } catch (_) { /* show it as written */ }
   return html`
     <aside>
       <div class="brand">boardingparty</div>
-      ${project ? html`<div class="proj">${project.name || 'Unnamed project'}<small>${host || 'no site yet'}</small></div>`
-        : project === null ? html`<div class="proj">Not set up yet<small><a href="#/project" style="color:inherit">Add a site and personas</a></small></div>`
+      ${project && (project.roles || []).length ? html`<div class="proj">${project.name || 'Unnamed project'}<small>${host || 'no site yet'}</small></div>`
+        : project || project === null ? html`<div class="proj">${project && project.name ? project.name : 'Not set up yet'}<small><a href="#/setup" style="color:inherit">Set up the site and stories</a></small></div>`
         : null}
       <nav aria-label="Main">
-        <a href="#/runs" class=${on('runs')}>Runs ${runs ? html`<span class="count">${runs.length}</span>` : null}</a>
+        <a href="#/runs" class=${on('runs')}>Runs ${runs ? html`<span class="count">${runs.length}</span>` : null}${needLogin ? html`<span class="count need" title=${needLogin === 1 ? 'A run is waiting for a login' : needLogin + ' runs are waiting for a login'}>${needLogin} login</span>` : null}</a>
         <a href="#/journeys" class=${on('journeys')}>Journeys</a>
         <a href="#/bugs" class=${on('bugs')}>Bugs ${open ? html`<span class="count" title="Open bugs">${open}</span>` : null}</a>
         <a href="#/inbox" class=${on('inbox')}>Inbox</a>
@@ -380,11 +385,11 @@ function RunsPage({ project, projectErr, runs, runsErr, queue, status, active, o
       <div class="stack">
         ${projectErr ? html`<div class="note bad">Could not load the project: ${projectErr}</div>` : null}
         ${project === null
-          ? html`<div class="empty"><b>Set up your project first</b>Runs need a site, a role, a persona and a story.
-              <div style="margin-top:12px"><a class="btn primary" href="#/project">Set up your project</a></div></div>`
+          ? html`<div class="empty"><b>Set up your project first</b>Give the site and what has to work there, and the board writes the personas.
+              <div style="margin-top:12px"><a class="btn primary" href="#/setup">Set up</a></div></div>`
           : project ? html`<div class="runs-top">
               ${canStart ? null : html`<div class="empty"><b>Add a persona to start a run</b>
-                Your project has no personas yet. <a href="#/project">Edit the project</a>.</div>`}
+                Your project has no personas yet. ${(project.roles || []).length ? html`<a href="#/project">Edit the project</a>.` : html`<a href="#/setup">Set it up</a>.`}</div>`}
               ${queue.length || (status && status.due.length) ? html`<${UpNext} queue=${queue} due=${status ? status.due : []} zone=${status && status.timezone} onChange=${onStarted} />` : null}
             </div>` : null}
         ${runsErr ? html`<div class="note bad">Could not load runs: ${runsErr}</div>` : null}
@@ -1113,7 +1118,8 @@ function RunPage({ id, onChange }) {
     ${err ? html`<div class="note bad banner">Lost contact with the director: ${err}. ${gaveUp ? 'Reload the page to try again.' : 'Retrying.'}</div>` : null}
     ${run.restarts?.length ? html`<div class="note banner">Restarted ${run.restarts.length === 1 ? 'once' : `${run.restarts.length} times`}, last at ${fmtFull(run.restarts[run.restarts.length - 1])}:
       the run's pod was replaced (a Spot node taken back, or an evicted pod) and the agent started again from the beginning.
-      The video covers the last attempt only.</div>` : null}`;
+      The video covers the last attempt only.</div>` : null}
+    ${wait && wait.kind === 'login' && wait.status === 'open' ? html`<${LoginWaitCard} run=${run} wait=${wait} onSaved=${onChange} />` : null}`;
 
   const stage = lead ? null : html`
     <div class="stage-bar">

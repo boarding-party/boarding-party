@@ -182,7 +182,7 @@ func (g *globals) serveBoard(ctx context.Context, cfg *rest.Config, ns string, o
 
 func newBoard(g *globals) *cobra.Command {
 	var o boardOpts
-	var dev bool
+	var dev, devEmpty bool
 	cmd := &cobra.Command{
 		Use:   "board",
 		Short: "Open the boardingparty UI in your browser",
@@ -196,7 +196,7 @@ func newBoard(g *globals) *cobra.Command {
 				if g.namespace != "" || g.kubeContext != "" {
 					return errors.New("--dev-director runs without a cluster; drop -n/--context")
 				}
-				return runDevBoard(ctx, o, cmd.OutOrStdout())
+				return runDevBoard(ctx, o, devEmpty, cmd.OutOrStdout())
 			}
 			if err := g.chooseTarget(ctx); err != nil {
 				return err
@@ -212,13 +212,19 @@ func newBoard(g *globals) *cobra.Command {
 	cmd.Flags().BoolVar(&o.noOpen, "no-open", false, "don't open a browser")
 	cmd.Flags().BoolVar(&dev, "dev-director", false, "serve a fake in-process director (no cluster) for checking the UI")
 	_ = cmd.Flags().MarkHidden("dev-director")
+	cmd.Flags().BoolVar(&devEmpty, "dev-empty", false, "with --dev-director: start with no project, as a new project does")
+	_ = cmd.Flags().MarkHidden("dev-empty")
 	return cmd
 }
 
 // runDevBoard serves the UI over an in-process director with fake runs and a
 // sample project. It never touches kube.
-func runDevBoard(ctx context.Context, o boardOpts, out io.Writer) error {
-	d, err := devdirector.Start(ctx, devdirector.SampleProject(), devdirector.RunDuration)
+func runDevBoard(ctx context.Context, o boardOpts, empty bool, out io.Writer) error {
+	sample := devdirector.SampleProject()
+	if empty {
+		sample = nil
+	}
+	d, err := devdirector.Start(ctx, sample, devdirector.RunDuration)
 	if err != nil {
 		return err
 	}

@@ -332,6 +332,8 @@ type Director struct {
 // Start serves the admin API on a loopback port, with a temp data directory,
 // the project loaded from projectYAML, and a fake launcher taking duration per run.
 // Call Close to stop it and delete the data.
+// Start serves a dev director with projectYAML seeded with sample runs, or,
+// with no YAML, an empty one as a new project starts.
 func Start(ctx context.Context, projectYAML []byte, duration time.Duration) (*Director, error) {
 	dir, err := os.MkdirTemp("", "bp-dev-director-")
 	if err != nil {
@@ -350,22 +352,29 @@ func start(ctx context.Context, dir string, projectYAML []byte, duration time.Du
 	if err != nil {
 		return nil, err
 	}
-	p, err := project.Load(projectYAML)
-	if err != nil {
-		st.Close()
-		return nil, fmt.Errorf("sample project: %w", err)
-	}
-	if err := st.PutProject(p); err != nil {
-		st.Close()
-		return nil, err
-	}
-	if err := seedJourney(st, p, time.Now().UTC()); err != nil {
-		st.Close()
-		return nil, err
-	}
-	if err := seedChain(st, p, time.Now().UTC()); err != nil {
-		st.Close()
-		return nil, fmt.Errorf("seed runs: %w", err)
+	// No project YAML: an empty director, as a new project starts.
+	if len(projectYAML) > 0 {
+		p, err := project.Load(projectYAML)
+		if err != nil {
+			st.Close()
+			return nil, fmt.Errorf("sample project: %w", err)
+		}
+		if err := st.PutProject(p); err != nil {
+			st.Close()
+			return nil, err
+		}
+		if err := seedJourney(st, p, time.Now().UTC()); err != nil {
+			st.Close()
+			return nil, err
+		}
+		if err := seedChain(st, p, time.Now().UTC()); err != nil {
+			st.Close()
+			return nil, fmt.Errorf("seed runs: %w", err)
+		}
+		if err := seedLoginWait(st, p, time.Now().UTC()); err != nil {
+			st.Close()
+			return nil, fmt.Errorf("seed login wait: %w", err)
+		}
 	}
 	hub := live.NewHub()
 	mail := &inbox.Service{
@@ -389,6 +398,9 @@ func start(ctx context.Context, dir string, projectYAML []byte, duration time.Du
 		Rewind:    rewind.New(filepath.Join(dir, "rewind"), 48<<20),
 	}
 	l.Svc = svc
+	if len(projectYAML) == 0 {
+		svc.StagingURL = func(context.Context) string { return "https://staging.example.com" }
+	}
 	// No scheduler here: queued replays start whenever a run ends or one is
 	// queued. The seeded AI items stay put.
 	svc.OnFinish = func() { go startReplays(ctx, svc) }
@@ -426,6 +438,31 @@ func start(ctx context.Context, dir string, projectYAML []byte, duration time.Du
 	}()
 	go svc.Watch(ctx, time.Second, 10*time.Minute)
 	return &Director{Base: "http://" + ln.Addr().String(), Token: token, srv: srv, st: st, dir: dir}, nil
+}
+
+// seedLoginWait adds a run of the first persona that waits for an admin
+// login, so the board's login form can be checked.
+func seedLoginWait(st *store.Store, p project.Project, now time.Time) error {
+	if len(p.Roles) == 0 || len(p.Roles[0].Personas) == 0 || len(p.Roles[0].Stories) == 0 {
+		return nil
+	}
+	role := p.Roles[0]
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		return err
+	}
+	id := hex.EncodeToString(b)
+	r := store.Run{ID: id, Token: id + "-login", Persona: role.Personas[0].Name, Role: role.Name, Story: role.Stories[0].Name,
+		State: store.RunRunning, Started: now.Add(-12 * time.Minute), Chain: id}
+	if err := st.CreateRun(r); err != nil {
+		return err
+	}
+	ok, err := st.FinishRunWaiting(id, "Reached the admin area and needs an admin account to change the VAT rate (sample run).",
+		now.Add(-8*time.Minute), store.Wait{Kind: "login", Login: "admin", Note: "change the VAT rate in Settings", Deadline: now.Add(24 * time.Hour)})
+	if err == nil && !ok {
+		err = fmt.Errorf("sample login run %s was not active", id)
+	}
+	return err
 }
 
 // startReplays starts the first queued replay that can start.
