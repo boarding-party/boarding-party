@@ -223,7 +223,7 @@ type LeadAction struct {
 	ID      int64     `json:"id"`
 	Lead    string    `json:"lead"`
 	RunID   string    `json:"runId"`
-	Action  string    `json:"action"`  // create, change, stop, run, join
+	Action  string    `json:"action"`  // create, change, stop, run, join, ask
 	Subject string    `json:"subject"` // the child, or the report joined
 	Reason  string    `json:"reason"`
 	Created time.Time `json:"created"`
@@ -240,6 +240,42 @@ func (s *Store) LogLead(a LeadAction) error {
 func (s *Store) LeadLog(lead string, limit int) ([]LeadAction, error) {
 	rows, err := s.db.Query(`SELECT id, lead, run_id, action, subject, reason, created FROM lead_log
 		WHERE lead = ? ORDER BY created DESC, id DESC LIMIT ?`, lead, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []LeadAction
+	for rows.Next() {
+		var a LeadAction
+		var c int64
+		if err := rows.Scan(&a.ID, &a.Lead, &a.RunID, &a.Action, &a.Subject, &a.Reason, &c); err != nil {
+			return nil, err
+		}
+		a.Created = fromTS(c)
+		out = append(out, a)
+	}
+	return out, rows.Err()
+}
+
+// NewestLeadAction returns a lead's newest action of kind action.
+func (s *Store) NewestLeadAction(lead, action string) (LeadAction, error) {
+	var a LeadAction
+	var c int64
+	err := s.db.QueryRow(`SELECT id, lead, run_id, action, subject, reason, created FROM lead_log
+		WHERE lead = ? AND action = ? ORDER BY created DESC, id DESC LIMIT 1`, lead, action).
+		Scan(&a.ID, &a.Lead, &a.RunID, &a.Action, &a.Subject, &a.Reason, &c)
+	if errors.Is(err, sql.ErrNoRows) {
+		return a, ErrNotFound
+	}
+	a.Created = fromTS(c)
+	return a, err
+}
+
+// LeadActionsSince returns every lead's actions of kind action logged at or
+// after since, oldest first.
+func (s *Store) LeadActionsSince(action string, since time.Time) ([]LeadAction, error) {
+	rows, err := s.db.Query(`SELECT id, lead, run_id, action, subject, reason, created FROM lead_log
+		WHERE action = ? AND created >= ? ORDER BY created, id`, action, ts(since))
 	if err != nil {
 		return nil, err
 	}

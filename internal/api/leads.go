@@ -87,7 +87,30 @@ func (s *server) getLead(w http.ResponseWriter, r *http.Request) {
 	if log == nil {
 		log = []store.LeadAction{}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"lead": pe, "usage": u, "children": children, "log": log})
+	ask, err := s.svc.OpenAsk(name)
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"lead": pe, "usage": u, "children": children, "log": log, "ask": ask})
+}
+
+// raiseLead is the lead page's answer to an ask: it raises one limit.
+func (s *server) raiseLead(w http.ResponseWriter, r *http.Request) {
+	var a runs.Ask
+	if !mediaTypeIs(r, jsonType) {
+		http.Error(w, "content type must be application/json", http.StatusUnsupportedMediaType)
+		return
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&a); err != nil {
+		http.Error(w, "bad json", http.StatusBadRequest)
+		return
+	}
+	if err := s.svc.RaiseLeadLimit(r.Context(), r.PathValue("persona"), a); err != nil {
+		fail(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // wakeLead is "Run now" on the lead page.

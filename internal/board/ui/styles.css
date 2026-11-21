@@ -869,3 +869,9 @@ aside nav .count.need { margin-left: 6px; padding: 0 6px; border-radius: 9px; ba
 .studio-banners .loginwait { margin: 0; border-radius: 0; border-width: 0 0 1px; padding: 12px 16px; }
 .studio-banners .loginwait h2 { margin: 0 0 4px; }
 .studio-banners .loginwait .loginrow { max-width: 760px; margin: 8px 0 0; }
+.askcard { border-color: var(--wait); background: var(--wait-soft); margin-bottom: 16px; }
+.askcard h2 { margin: 0 0 6px; }
+.askcard p { margin: 0 0 10px; }
+.askcard .why { color: var(--muted); }
+.askcard .row { align-items: center; gap: 12px; }
+.askcard .hint { margin: 10px 0 0; }

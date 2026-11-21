@@ -215,12 +215,44 @@ type finishArgs struct {
 	Summary string       `json:"summary" jsonschema:"what happened"`
 	Until   *sched.Until `json:"until,omitempty" jsonschema:"what to wait for; required for outcome waiting and not allowed otherwise"`
 	Verify  *verifyArgs  `json:"verify,omitempty" jsonschema:"what a fix check found; required with outcome done on a fix check run and not allowed otherwise"`
+	Ask     *askArgs     `json:"ask,omitempty" jsonschema:"lead runs only, with outcome done: a limit of yours that stopped you and what to raise it to"`
+}
+
+type askArgs struct {
+	Limit  string  `json:"limit" jsonschema:"maxChildren, dailyRuns or dailyBudget"`
+	To     float64 `json:"to" jsonschema:"the value you need, more than it is now"`
+	Reason string  `json:"reason" jsonschema:"what you would do with it, shown to the owner"`
 }
 
 type verifyArgs struct {
 	Reached    *bool  `json:"reached" jsonschema:"true if you got to the step where the problem was"`
 	StillThere *bool  `json:"still_there,omitempty" jsonschema:"true if the problem is still there; required when reached is true"`
 	Note       string `json:"note,omitempty" jsonschema:"what you saw"`
+}
+
+// checkAsk says what is wrong with finish_run's ask, or "".
+func checkAsk(st *store.Store, r store.Run, lead bool, in finishArgs) string {
+	if !lead {
+		return "ask is only for a lead run"
+	}
+	if in.Outcome != "done" {
+		return "ask goes only with outcome done: a limit you hit is not being stuck"
+	}
+	if msg := checkReason(in.Ask.Reason); msg != "" {
+		return "ask " + msg
+	}
+	p, err := st.Project()
+	if err != nil {
+		return "could not load the project"
+	}
+	pe, _, ok := p.Persona(r.Persona)
+	if !ok || pe.Lead == nil {
+		return "ask is only for a lead run"
+	}
+	if err := runs.CheckAsk(*pe.Lead, runs.Ask{Limit: in.Ask.Limit, To: in.Ask.To}); err != nil {
+		return strings.TrimPrefix(err.Error(), runs.ErrInvalid.Error()+": ")
+	}
+	return ""
 }
 
 // isFixCheck reports whether r is a fix check run: it checks one bug and
@@ -443,16 +475,23 @@ func newServer(svc *runs.Service, st *store.Store, directorURL, token string, ma
 		})
 
 	mcp.AddTool(s, &mcp.Tool{Name: "finish_run",
-		Description: "Finish your run. outcome is done, stuck, failed or waiting. For waiting, set until to exactly one of email {from, subject, after_id: the id of the newest message you already saw}, handoff {role, story}, time {at or after} or login {kind, note}, plus an optional timeout. On a fix check run (context verify), finish done with verify {reached, still_there, note}. Call this last."},
+		Description: "Finish your run. outcome is done, stuck, failed or waiting. For waiting, set until to exactly one of email {from, subject, after_id: the id of the newest message you already saw}, handoff {role, story}, time {at or after} or login {kind, note}, plus an optional timeout. On a fix check run (context verify), finish done with verify {reached, still_there, note}. A lead that a limit stopped finishes done with ask {limit, to, reason}. Call this last."},
 		func(ctx context.Context, _ *mcp.CallToolRequest, in finishArgs) (*mcp.CallToolResult, any, error) {
 			r, bad, err := active()
 			if bad != nil || err != nil {
 				return bad, nil, err
 			}
-			if lead, err := onLeadRun(r); err != nil {
+			lead, err := onLeadRun(r)
+			if err != nil {
 				return nil, nil, err
-			} else if lead && (in.Outcome == "waiting" || in.Until != nil || in.Verify != nil) {
+			}
+			if lead && (in.Outcome == "waiting" || in.Until != nil || in.Verify != nil) {
 				return toolErr("a lead run finishes done, stuck or failed, without until or verify")
+			}
+			if in.Ask != nil {
+				if msg := checkAsk(st, r, lead, in); msg != "" {
+					return toolErr(msg)
+				}
 			}
 			if in.Outcome == "waiting" {
 				if in.Verify != nil {
@@ -498,6 +537,12 @@ func newServer(svc *runs.Service, st *store.Store, directorURL, token string, ma
 			}
 			if err != nil {
 				return nil, nil, err
+			}
+			if in.Ask != nil {
+				a := runs.Ask{Limit: in.Ask.Limit, To: in.Ask.To}
+				if err := svc.LogAsk(r.Persona, r.ID, a, strings.TrimSpace(in.Ask.Reason), time.Now().UTC()); err != nil {
+					return nil, nil, err
+				}
 			}
 			return text("finished")
 		})

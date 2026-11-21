@@ -46,6 +46,9 @@ func (s *Service) Digest(since, now time.Time) (digest.Digest, error) {
 	if err != nil && !errors.Is(err, store.ErrNotFound) {
 		return d, fmt.Errorf("load project: %w", err)
 	} // no project yet: the default timezone and budget
+	if d.Asks, err = s.asksSince(p, since); err != nil {
+		return d, fmt.Errorf("asks: %w", err)
+	}
 	loc := p.Location()
 	today := DayStart(now, loc)
 	if d.Spent, err = s.SpentBetween(DayStart(today.Add(-time.Hour), loc), today); err != nil {

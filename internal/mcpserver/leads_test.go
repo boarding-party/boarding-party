@@ -332,6 +332,41 @@ func TestLeadFinishNoWaiting(t *testing.T) {
 	}
 }
 
+func TestLeadFinishWithAsk(t *testing.T) {
+	lead := allPowers()
+	lead.MaxChildren = 2
+	f := newLeadFix(t, lead)
+	f.run(t, "l1", "Kate", "owner", project.LeadStory, store.RunRunning)
+	cs := connect(t, f.srv, "tok-l1")
+	for _, bad := range []map[string]any{
+		{"outcome": "stuck", "summary": "s", "ask": map[string]any{"limit": "maxChildren", "to": 3, "reason": "venue"}},
+		{"outcome": "done", "summary": "s", "ask": map[string]any{"limit": "maxChildren", "to": 2, "reason": "venue"}},
+		{"outcome": "done", "summary": "s", "ask": map[string]any{"limit": "maxChildren", "to": 3}},
+	} {
+		if text, isErr := call(t, cs, "finish_run", bad); !isErr {
+			t.Fatalf("accepted %v: %s", bad, text)
+		}
+	}
+	if text, isErr := call(t, cs, "finish_run", map[string]any{"outcome": "done", "summary": "no free slot",
+		"ask": map[string]any{"limit": "maxChildren", "to": 3, "reason": "a restaurant venue persona"}}); isErr {
+		t.Fatal(text)
+	}
+	if r, _ := f.st.RunByID("l1"); r.State != store.RunDone {
+		t.Fatalf("state %s", r.State)
+	}
+	a, err := f.st.NewestLeadAction("Kate", "ask")
+	if err != nil || a.Subject != "maxChildren 3" || a.Reason != "a restaurant venue persona" || a.RunID != "l1" {
+		t.Fatalf("ask %+v, %v", a, err)
+	}
+
+	f.run(t, "p1", "Tom", "owner", "invoice", store.RunRunning)
+	ps := connect(t, f.srv, "tok-p1")
+	if text, isErr := call(t, ps, "finish_run", map[string]any{"outcome": "done", "summary": "s",
+		"ask": map[string]any{"limit": "maxChildren", "to": 3, "reason": "r"}}); !isErr || !strings.Contains(text, "lead") {
+		t.Fatalf("persona ask: %s", text)
+	}
+}
+
 func TestChildCreateNoAddressClash(t *testing.T) {
 	f := newLeadFix(t, allPowers())
 	// Tom's address is what a child named "Tom" or "TOM" would get.

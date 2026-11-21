@@ -375,6 +375,10 @@ func start(ctx context.Context, dir string, projectYAML []byte, duration time.Du
 			st.Close()
 			return nil, fmt.Errorf("seed login wait: %w", err)
 		}
+		if err := seedLeadAsk(st, p, time.Now().UTC()); err != nil {
+			st.Close()
+			return nil, fmt.Errorf("seed lead ask: %w", err)
+		}
 	}
 	hub := live.NewHub()
 	mail := &inbox.Service{
@@ -438,6 +442,20 @@ func start(ctx context.Context, dir string, projectYAML []byte, duration time.Du
 	}()
 	go svc.Watch(ctx, time.Second, 10*time.Minute)
 	return &Director{Base: "http://" + ln.Addr().String(), Token: token, srv: srv, st: st, dir: dir}, nil
+}
+
+// seedLeadAsk adds lead Lena, with one persona slot, asking for one more,
+// as a lead stopped by its limit does when it finishes. The dev director
+// runs no scheduler, so Lena never wakes on her own.
+func seedLeadAsk(st *store.Store, p project.Project, now time.Time) error {
+	p.Roles = append(p.Roles, project.Role{Name: "manager", Description: "Plans who tests what.",
+		Personas: []project.Persona{{Name: "Lena", Lead: &project.Lead{Brief: "Find where people new to lists give up.",
+			SeeRuns: true, CreatePersonas: true, StartRuns: true, MaxChildren: 1}}}})
+	if err := st.PutProject(p); err != nil {
+		return err
+	}
+	return st.LogLead(store.LeadAction{Lead: "Lena", Action: "ask", Subject: "maxChildren 2",
+		Reason: "a persona who has never used a to-do list, on a phone", Created: now.Add(-time.Hour)})
 }
 
 // seedLoginWait adds a run of the first persona that waits for an admin

@@ -166,3 +166,42 @@ func TestLeadPageShowsLoginWait(t *testing.T) {
 		t.Fatalf("children %+v", lead.Children)
 	}
 }
+
+func TestLeadAskAndRaise(t *testing.T) {
+	srv, _, svc := setupBoth(t, 1024)
+	withLead(t, svc)
+	if err := svc.LogAsk("Kate", "l2", runs.Ask{Limit: runs.AskChildren, To: 8}, "a venue persona", time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+	var lead struct {
+		Ask *struct {
+			Limit  string
+			To     float64
+			Now    float64
+			Reason string
+			RunID  string `json:"runId"`
+		}
+	}
+	json.NewDecoder(send(t, "GET", srv.URL+"/api/leads/Kate", "").Body).Decode(&lead)
+	if a := lead.Ask; a == nil || a.Limit != "maxChildren" || a.To != 8 || a.Now != 6 || a.Reason != "a venue persona" || a.RunID != "l2" {
+		t.Fatalf("ask %+v", lead.Ask)
+	}
+	if code := send(t, "POST", srv.URL+"/api/leads/Kate/raise", `{"limit":"maxChildren","to":5}`).StatusCode; code != 400 {
+		t.Fatalf("lower raise %d", code)
+	}
+	if code := send(t, "POST", srv.URL+"/api/leads/ann/raise", `{"limit":"maxChildren","to":8}`).StatusCode; code != 400 {
+		t.Fatalf("raise non-lead %d", code)
+	}
+	if code := send(t, "POST", srv.URL+"/api/leads/Kate/raise", `{"limit":"maxChildren","to":8}`).StatusCode; code != 204 {
+		t.Fatalf("raise %d", code)
+	}
+	p, _ := svc.Store.RawProject()
+	if pe, _, _ := p.Persona("Kate"); pe.Lead.MaxChildren != 8 {
+		t.Fatalf("maxChildren %d", pe.Lead.MaxChildren)
+	}
+	lead.Ask = nil
+	json.NewDecoder(send(t, "GET", srv.URL+"/api/leads/Kate", "").Body).Decode(&lead)
+	if lead.Ask != nil {
+		t.Fatalf("met ask shown: %+v", lead.Ask)
+	}
+}

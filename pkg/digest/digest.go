@@ -57,6 +57,15 @@ type Run struct {
 	State   string `json:"state"`
 }
 
+// Ask is a lead asking its owner to raise one of its limits (maxChildren,
+// dailyRuns or dailyBudget) from Now to To.
+type Ask struct {
+	Lead  string  `json:"lead"`
+	Limit string  `json:"limit"`
+	Now   float64 `json:"now"`
+	To    float64 `json:"to"`
+}
+
 // Journeys broke (a replay failed) or got repaired or rolled back.
 type Journeys struct {
 	Broke    List[Journey] `json:"broke"`
@@ -78,6 +87,7 @@ type Digest struct {
 	FixChecks  List[FixCheck] `json:"fixChecks"`
 	Journeys   Journeys       `json:"journeys"`
 	Runs       Runs           `json:"runs"`
+	Asks       List[Ask]      `json:"asks"`
 	Spent      float64        `json:"spent"`
 	Budget     float64        `json:"budget"`
 	OverBudget bool           `json:"overBudget"`
@@ -89,5 +99,5 @@ type Digest struct {
 // would otherwise say the same thing every morning.
 func (d Digest) News() bool {
 	return !d.NewBugs.empty() || !d.FixChecks.empty() || !d.Journeys.Broke.empty() ||
-		!d.Journeys.Repaired.empty() || !d.Runs.Stuck.empty() || d.OverBudget
+		!d.Journeys.Repaired.empty() || !d.Runs.Stuck.empty() || !d.Asks.empty() || d.OverBudget
 }

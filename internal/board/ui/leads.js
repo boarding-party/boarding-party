@@ -4,6 +4,7 @@
 // them only as text through htm/Preact.
 import { useState } from './vendor/hooks.module.js';
 import { html, api, confirmDialog, fmtWhen, runHref, usePoll } from './lib.js';
+import { askLine, raiseLabel, askSubject } from './ask-rules.js';
 
 const POLL_MS = 15000;
 
@@ -51,7 +52,7 @@ export function LeadPage({ name }) {
   if (!data) {
     return html`<section class="page">${err ? html`<div class="note bad">Could not load the lead: ${err}</div>` : html`<p class="muted">Loading…</p>`}</section>`;
   }
-  const { lead, usage, children = [], log = [] } = data;
+  const { lead, usage, children = [], log = [], ask } = data;
   const l = lead.lead || {};
   const budget = l.dailyBudget != null ? l.dailyBudget : 5;
   const runs = l.dailyRuns || 10;
@@ -65,6 +66,7 @@ export function LeadPage({ name }) {
       ${note ? html`<div class="note" role="status">${note}</div>` : null}
       ${err ? html`<div class="note bad banner">Lost contact with the director: ${err}. Retrying.</div>` : null}
       ${l.brief ? html`<p class="small">${l.brief}</p>` : null}
+      ${ask && askLine(ask) ? html`<${AskCard} name=${lead.name} ask=${ask} onDone=${() => setTick((t) => t + 1)} />` : null}
       <div class="stack">
         <div class="card">
           <h2>Personas it made</h2>
@@ -76,13 +78,41 @@ export function LeadPage({ name }) {
           <h2>Decisions</h2>
           ${log.length ? html`<ul class="decisions">${log.map((a) => html`<li key=${a.id}>
               <span class="muted">${a.runId ? html`<a href=${runHref(a.runId)}>${fmtWhen(a.created)}</a>` : fmtWhen(a.created)}</span>
-              <span>${a.action}</span>
-              <span>${a.subject}</span>
+              <span>${a.action === 'ask' ? 'asked' : a.action}</span>
+              <span>${a.action === 'ask' ? askSubject(a.subject) : a.subject}</span>
               <span class="why">${a.reason}</span></li>`)}</ul>`
             : html`<p class="muted small">No decisions yet.</p>`}
         </div>
       </div>
     </section>`;
+}
+
+// AskCard is the lead's newest ask while its limit is below it, with a
+// button that raises the limit. The reason is agent-written text.
+function AskCard({ name, ask, onDone }) {
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const raise = async () => {
+    setBusy(true); setErr('');
+    try {
+      await api(`api/leads/${encodeURIComponent(name)}/raise`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ limit: ask.limit, to: ask.to }),
+      });
+      onDone();
+    } catch (e) { setErr(e.message); setBusy(false); }
+  };
+  return html`
+    <div class="card askcard" role="status">
+      <h2>${name} needs more room</h2>
+      <p>${askLine(ask)} ${ask.reason ? html`<span class="why">“${ask.reason}”</span>` : null}</p>
+      <div class="row">
+        <button type="button" class="btn primary" disabled=${busy} onClick=${raise}>${busy ? 'Saving…' : raiseLabel(ask)}</button>
+        ${ask.runId ? html`<a class="small" href=${runHref(ask.runId)}>See the run</a>` : null}
+      </div>
+      <p class="hint">The lead uses it on its next run. You can change its limits on the Project page.</p>
+      ${err ? html`<div class="note bad" role="alert">${err}</div>` : null}
+    </div>`;
 }
 
 function Child({ c, lead, onChange }) {
