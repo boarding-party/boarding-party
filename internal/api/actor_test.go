@@ -87,3 +87,20 @@ func TestAuditSubjectIsWhatTheHandlerSaw(t *testing.T) {
 		t.Fatalf("code %d audit %+v %v", w.Code, got, err)
 	}
 }
+
+func TestOwnerWritesAreAudited(t *testing.T) {
+	for _, pattern := range []string{"POST /api/setup", "POST /api/runs/{id}/login", "POST /api/leads/{persona}/raise"} {
+		if auditActions[pattern] == "" {
+			t.Errorf("%s is not audited", pattern)
+		}
+	}
+	srv, _, svc := setupBoth(t, 1<<20)
+	withLead(t, svc)
+	if r := doAs(t, "ann@x.io", "POST", srv.URL+"/api/leads/Kate/raise", `{"limit":"maxChildren","to":8}`); r.StatusCode != 204 {
+		t.Fatalf("raise = %d", r.StatusCode)
+	}
+	got := auditOf(t, srv.URL)
+	if len(got) != 1 || got[0].Action != "lead.raise" || got[0].Subject != "Kate" || got[0].Actor != "ann@x.io" {
+		t.Fatalf("audit %+v", got)
+	}
+}
