@@ -6,6 +6,7 @@
 // rejects unknown fields.
 import { useState, useEffect, useRef } from './vendor/hooks.module.js';
 import { html, api, confirmDialog, dialogOpen, useProfileFields } from './lib.js';
+import { MODELS, scheduleSummary, profileSummary, storyOptionsSummary } from './form-rules.js';
 
 // ---- model --------------------------------------------------------------
 // The draft carries a stable id on every repeatable row so inputs keep focus
@@ -537,7 +538,7 @@ function RoleCard({ role, n, profileFields, roles, onChange, onRemove }) {
       <div class="row between nowrap">
         <div class="field grow">
           <label for=${id + '-name'}>Role ${n}</label>
-          <input id=${id + '-name'} class="strong" value=${role.name} placeholder="Customer"
+          <input id=${id + '-name'} class="strong" value=${role.name} placeholder="Name the role, such as customer"
             onInput=${(e) => { const v = e.currentTarget.value; onChange((r) => { r.name = v; }); }} />
         </div>
         <button class="btn danger-ghost" type="button" onClick=${onRemove}>Remove role</button>
@@ -547,23 +548,21 @@ function RoleCard({ role, n, profileFields, roles, onChange, onRemove }) {
         <textarea id=${id + '-desc'} rows="2" value=${role.description} placeholder="Who they are and what they want from the site."
           onInput=${(e) => { const v = e.currentTarget.value; onChange((r) => { r.description = v; }); }}></textarea>
       </div>
-      <div class="field">
-        <label for=${id + '-activity'}>Activity</label>
-        <input id=${id + '-activity'} value=${role.activity} placeholder="every 30 min, 09:00–17:30"
-          onInput=${(e) => { const v = e.currentTarget.value; onChange((r) => { r.activity = v; }); }} />
-        <span class="hint">How often personas in this role act on their own. Examples: daily at 09:00 · every 2 h, 09:00–17:30 · 2–4 times a day, 07:00–23:00. Leave empty to run them only by hand or hand-off.</span>
-      </div>
-      <div class="field">
-        <label for=${id + '-explore'}>Fresh AI run</label>
-        <input id=${id + '-explore'} value=${role.explore} placeholder="weekly"
-          onInput=${(e) => { const v = e.currentTarget.value; onChange((r) => { r.explore = v; }); }} />
-        <span class="hint">How often each story gets a fresh AI run. In between, scheduled runs replay the story's recorded journey, which costs nothing. Examples: daily · every 3 days · every 12 h. Empty is weekly.</span>
-      </div>
-      <label class="check">
-        <input type="checkbox" checked=${role.canWatchRecordings}
-          onChange=${(e) => { const v = e.currentTarget.checked; onChange((r) => { r.canWatchRecordings = v; }); }} />
-        <span>Can watch other roles' recordings <span class="hint">For a supervisor role that reviews what others did. Not used by runs yet; leave it off.</span></span>
-      </label>
+      <details class="fold">
+        <summary><span class="foldname">Schedule</span> <span class="foldsum">${scheduleSummary(role)}</span></summary>
+        <div class="field">
+          <label for=${id + '-activity'}>Activity</label>
+          <input id=${id + '-activity'} value=${role.activity} placeholder="every 30 min, 09:00–17:30"
+            onInput=${(e) => { const v = e.currentTarget.value; onChange((r) => { r.activity = v; }); }} />
+          <span class="hint">How often personas in this role act on their own. Examples: daily at 09:00 · every 2 h, 09:00–17:30 · 2–4 times a day, 07:00–23:00. Leave empty to run them only by hand or hand-off.</span>
+        </div>
+        <div class="field">
+          <label for=${id + '-explore'}>Fresh AI run</label>
+          <input id=${id + '-explore'} value=${role.explore} placeholder="weekly"
+            onInput=${(e) => { const v = e.currentTarget.value; onChange((r) => { r.explore = v; }); }} />
+          <span class="hint">How often each story gets a fresh AI run. In between, scheduled runs replay the story's recorded journey, which costs nothing. Examples: daily · every 3 days · every 12 h. Empty is weekly.</span>
+        </div>
+      </details>
 
       <div class="cols">
         <div>
@@ -653,6 +652,8 @@ function PersonaRow({ persona, fields, onChange, onRemove }) {
         <button class="btn icon" type="button" title="Remove persona" aria-label=${'Remove persona ' + persona.name}
           onClick=${onRemove}>×</button>
       </div>
+      <details class="fold" open=${personaOpen(persona)}>
+        <summary><span class="foldname">Details</span> <span class="foldsum">${personaSummary(persona, fields)}</span></summary>
       <${ProfileGrid} profile=${persona.profile} fields=${fields} onChange=${onChange} />
       <${SavedBrowser} name=${persona.name.trim()} />
       <${Tags} tags=${persona.traits} label="Other traits (optional)" placeholder="Optional. Enter adds"
@@ -672,8 +673,20 @@ function PersonaRow({ persona, fields, onChange, onRemove }) {
         <div><button class="btn ghost small" type="button" onClick=${() => onChange((p) => { p.identity.push({ id: nid(), k: '', v: '' }); })}>Add identity field</button></div>
       </div>
       <${LeadFields} id=${id} name=${persona.name.trim()} lead=${persona.lead} onChange=${(fn) => onChange((p) => fn(p.lead))} />
+      </details>
     </div>`;
 }
+
+// personaSummary is the closed Details line: profile and traits, and
+// whether the persona is a lead.
+function personaSummary(persona, fields) {
+  const parts = [profileSummary(persona.profile, persona.traits, fields)];
+  if (isLead(persona.lead)) parts.push('lead');
+  return parts.filter(Boolean).join(' · ') || 'Add age, device, traits and identity';
+}
+
+// personaOpen opens Details on a persona that has a warning to show.
+const personaOpen = (persona) => identityWarnings(persona.identity).some(Boolean);
 
 const POWERS = [
   ['seeRuns', 'See other runs'],
@@ -730,6 +743,8 @@ function StoryRow({ story, targets, onChange, onRemove }) {
       </div>
       <textarea rows="3" value=${story.goal} placeholder="In their words: I need to bill a client £450 + VAT and download the invoice as a PDF." aria-label="Goal"
         onInput=${(e) => { const v = e.currentTarget.value; onChange((s) => { s.goal = v; }); }}></textarea>
+      <details class="fold">
+        <summary><span class="foldname">Options</span> <span class="foldsum">${storyOptionsSummary(story) || 'Model, hand-offs, triggers, browser'}</span></summary>
       <label class="field">Model
         <${ModelSelect} value=${story.model} empty="Project's model" onChange=${(v) => onChange((s) => { s.model = v; })} />
       </label>
@@ -745,6 +760,7 @@ function StoryRow({ story, targets, onChange, onRemove }) {
           onChange=${(e) => { const v = e.currentTarget.checked; onChange((s) => { s.replay = v; }); }} />
         <span>Replay its journey on schedule <span class="hint">Once the story has a recorded journey, scheduled runs play it back between fresh AI runs. Turn off to keep every scheduled run an AI run.</span></span>
       </label>
+      </details>
     </div>`;
 }
 
@@ -821,14 +837,6 @@ function HandsOffTo({ story, targets, onChange }) {
       <span class="hint">When this story ends, or waits for one of these, the director starts it for the first persona of that role.</span>
     </fieldset>`;
 }
-
-// MODELS are the models offered in the editor, cheapest first. A model the
-// project already names but this list lacks stays selectable.
-const MODELS = [
-  { value: 'claude-haiku-5-5', label: 'Haiku 5.5, cheapest' },
-  { value: 'claude-sonnet-5-5', label: 'Sonnet 5.5' },
-  { value: 'claude-opus-5-5', label: 'Opus 5.5, most thorough' },
-];
 
 function ModelSelect({ id, value, empty, onChange }) {
   const known = !value || MODELS.some((m) => m.value === value);

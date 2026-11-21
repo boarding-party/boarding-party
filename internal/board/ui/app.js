@@ -223,6 +223,15 @@ function App() {
 
   useEffect(() => { loadProject(); }, [loadProject, route.page]);
 
+  // A new project opens on Setup: only when no page was asked for, so a
+  // link to a run or the project editor still lands there.
+  useEffect(() => {
+    if (location.hash.replace(/^#\/?/, '')) return;
+    api('api/setup').then((s) => {
+      if (s && s.needed && !location.hash.replace(/^#\/?/, '')) location.replace('#/setup');
+    }).catch(() => {});
+  }, []);
+
   const active = (runs || []).find((r) => ACTIVE.has(r.state));
 
   // The personas each lead made live beside the project, not in it.
