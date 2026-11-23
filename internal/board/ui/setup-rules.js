@@ -19,13 +19,15 @@ export function parseStories(text) {
     stories.push(s);
     if ([...s].length > MAX_STORY && !errors.length) errors.push(`Story ${stories.length} is longer than ${MAX_STORY} characters.`);
   });
-  if (!stories.length) errors.push('Write at least one story.');
-  else if (stories.length > MAX_STORIES) errors.unshift(`At most ${MAX_STORIES} stories.`);
+  if (stories.length > MAX_STORIES) errors.unshift(`At most ${MAX_STORIES} stories.`);
   return { stories, errors: errors.slice(0, 1) };
 }
 
-// runsPerDay is how many persona runs the first-run lead may start a day.
+// runsPerDay is how many persona runs the first-run lead may start a day
+// (project.FirstRunLimits). With no stories, Explorer runs once and the lead
+// may write up to MAX_STORIES stories itself.
 export function runsPerDay(personas, stories) {
+  if (!stories) return Math.min(1 + personas * MAX_STORIES, MAX_RUNS);
   return Math.min(personas * stories, MAX_RUNS);
 }
 

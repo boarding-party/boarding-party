@@ -7,8 +7,8 @@ test('parseStories: one per line, trimmed, blanks dropped', () => {
   assert.deepEqual(parseStories('  sign up \n\n make an invoice\n'), { stories: ['sign up', 'make an invoice'], errors: [] });
 });
 
-test('parseStories: at least one, at most 5', () => {
-  assert.deepEqual(parseStories(' \n ').errors, ['Write at least one story.']);
+test('parseStories: none is fine (Explorer finds them), at most 5', () => {
+  assert.deepEqual(parseStories(' \n '), { stories: [], errors: [] });
   assert.equal(parseStories('a\nb\nc\nd\ne').errors.length, 0);
   assert.deepEqual(parseStories('a\nb\nc\nd\ne\nf').errors, [`At most ${MAX_STORIES} stories.`]);
 });
@@ -19,10 +19,12 @@ test('parseStories: a long line is named by its number', () => {
   assert.equal(parseStories('x'.repeat(MAX_STORY)).errors.length, 0);
 });
 
-test('runsPerDay: personas × stories, at most 30', () => {
+test('runsPerDay: personas × stories, at most 30; with no stories Explorer plus up to 5 each', () => {
   assert.equal(runsPerDay(4, 2), 8);
   assert.equal(runsPerDay(6, 5), 30);
-  assert.equal(runsPerDay(4, 0), 0);
+  assert.equal(runsPerDay(4, 0), 21);
+  assert.equal(runsPerDay(1, 0), 6);
+  assert.equal(runsPerDay(6, 0), 30);
 });
 
 test('costLine: says what the money allows and that later runs wait', () => {

@@ -138,9 +138,22 @@ func TestSetupLeadEmailFromMailbox(t *testing.T) {
 	}
 }
 
+func TestSetupWithoutStoriesExploresFirst(t *testing.T) {
+	svc := emptySvc(t)
+	req := setupReq()
+	req.Stories = nil
+	if err := svc.Setup(context.Background(), req, ""); err != nil {
+		t.Fatal(err)
+	}
+	p, _ := svc.Store.RawProject()
+	l := firstLead(t, p).Lead
+	if l.Brief != project.FirstRunBrief(nil, 4) || l.MaxChildren != 5 || l.DailyRuns != 21 {
+		t.Fatalf("lead %+v", l)
+	}
+}
+
 func TestSetupValidates(t *testing.T) {
 	bad := map[string]func(*SetupRequest){
-		"no stories":    func(r *SetupRequest) { r.Stories = nil },
 		"blank story":   func(r *SetupRequest) { r.Stories = []string{"  "} },
 		"six stories":   func(r *SetupRequest) { r.Stories = []string{"a", "b", "c", "d", "e", "f"} },
 		"long story":    func(r *SetupRequest) { r.Stories = []string{strings.Repeat("s", 201)} },

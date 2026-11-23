@@ -36,7 +36,8 @@ func (s *Service) SetupNeeded() (bool, error) {
 }
 
 // Setup starts a new project: it writes the site, the logins and a
-// first-run lead whose brief is the owner's stories, into whatever project
+// first-run lead whose brief is the owner's stories (or, with none, finding
+// them with an Explorer child first), into whatever project
 // file exists. The scheduler's first wake then starts the lead. mailbox is
 // the saved mailbox's username ("" for none); when it is an address, the
 // lead gets it, so its personas get email.
@@ -72,9 +73,10 @@ func (s *Service) Setup(ctx context.Context, req SetupRequest, mailbox string) e
 		p.Inbox = &project.Inbox{AllowFrom: []string{d}}
 	}
 	budget := req.DailyBudget
+	children, runs := project.FirstRunLimits(req.Personas, len(stories))
 	lead := project.Persona{Name: project.FirstRunLead, Identity: map[string]string{}, Lead: &project.Lead{
 		Brief: project.FirstRunBrief(stories, req.Personas), SeeRuns: true, CreatePersonas: true, StartRuns: true,
-		DailyBudget: &budget, DailyRuns: min(req.Personas*len(stories), project.MaxFirstRunRuns), MaxChildren: req.Personas}}
+		DailyBudget: &budget, DailyRuns: runs, MaxChildren: children}}
 	if a, err := mail.ParseAddress(mailbox); err == nil && a.Address == mailbox {
 		lead.Identity["email"] = mailbox
 	}
@@ -105,8 +107,8 @@ func checkSetup(req SetupRequest) ([]string, error) {
 		stories = append(stories, st)
 	}
 	switch {
-	case len(stories) == 0 || len(stories) > project.MaxFirstRunStories:
-		return nil, fmt.Errorf("%w: give 1 to %d stories", ErrInvalid, project.MaxFirstRunStories)
+	case len(stories) > project.MaxFirstRunStories:
+		return nil, fmt.Errorf("%w: give at most %d stories", ErrInvalid, project.MaxFirstRunStories)
 	case req.Personas < 1 || req.Personas > project.MaxFirstRunPersonas:
 		return nil, fmt.Errorf("%w: personas must be 1 to %d", ErrInvalid, project.MaxFirstRunPersonas)
 	case !(req.DailyBudget > 0) || req.DailyBudget > project.MaxDailyBudget:

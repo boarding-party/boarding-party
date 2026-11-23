@@ -108,3 +108,32 @@ func TestFirstRunBriefFitsInOtherScripts(t *testing.T) {
 		t.Fatalf("5 stories of %d Cyrillic letters: %v", MaxFirstRunStory, err)
 	}
 }
+
+func TestFirstRunBriefExploresWithoutStories(t *testing.T) {
+	b := FirstRunBrief(nil, MaxFirstRunPersonas)
+	if len([]rune(b)) > MaxLeadBrief {
+		t.Fatalf("brief is %d characters, more than %d", len([]rune(b)), MaxLeadBrief)
+	}
+	for _, w := range []string{ExplorerName, ExplorerGoal, "run_read", "child_stop", "6 personas", "untrusted"} {
+		if !strings.Contains(b, w) {
+			t.Fatalf("brief misses %q:\n%s", w, b)
+		}
+	}
+	if strings.Contains(b, "The owner wants these stories") {
+		t.Fatalf("brief lists stories the owner did not give:\n%s", b)
+	}
+	// The lead writes the goal with child_create, which takes at most 500 characters.
+	if n := len([]rune(ExplorerGoal)); n > 500 {
+		t.Fatalf("explorer goal is %d characters", n)
+	}
+}
+
+func TestFirstRunLimits(t *testing.T) {
+	for _, c := range []struct{ personas, stories, children, runs int }{
+		{4, 2, 4, 8}, {6, 5, 6, 30}, {4, 0, 5, 21}, {6, 0, 7, 30}, {1, 0, 2, 6},
+	} {
+		if ch, r := FirstRunLimits(c.personas, c.stories); ch != c.children || r != c.runs {
+			t.Errorf("FirstRunLimits(%d, %d) = %d, %d; want %d, %d", c.personas, c.stories, ch, r, c.children, c.runs)
+		}
+	}
+}

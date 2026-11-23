@@ -46,7 +46,7 @@ func TestSetupEndpoints(t *testing.T) {
 	if code, b := postJSON(t, srv+"/api/setup", body); code != http.StatusConflict {
 		t.Fatalf("second POST %d %s", code, b)
 	}
-	if code, _ := postJSON(t, srv+"/api/setup", `{"site":"https://staging.example.com","stories":[],"personas":4,"dailyBudget":5}`); code != http.StatusBadRequest {
+	if code, _ := postJSON(t, srv+"/api/setup", `{"site":"https://staging.example.com","stories":[],"personas":0,"dailyBudget":5}`); code != http.StatusBadRequest {
 		t.Fatalf("bad request %d", code)
 	}
 	if v := get(); v["needed"] != false {

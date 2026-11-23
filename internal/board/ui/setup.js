@@ -1,5 +1,6 @@
-// Setup page: a new project's owner gives the site and the stories, and the
-// board makes a first-run lead that writes the personas and starts them.
+// Setup page: a new project's owner gives the site and the stories (or none,
+// and an explorer finds them), and the board makes a first-run lead that
+// writes the personas and starts them.
 import { useState, useEffect } from './vendor/hooks.module.js';
 import { html, api } from './lib.js';
 import { AgentKeyCard, MailboxFields } from './project.js';
@@ -73,7 +74,7 @@ export function SetupPage({ onDone }) {
   return html`
     <section class="page setup">
       <h1>Set up</h1>
-      <p class="lede">Tell the board your site and what has to work there. It writes ${personas === 1 ? 'a persona' : personas + ' personas'} of different ages, devices and confidence, and starts them. You can change them afterwards.</p>
+      <p class="lede">Tell the board your site and, if you know it, what has to work there. It writes ${personas === 1 ? 'a persona' : personas + ' personas'} of different ages, devices and confidence, and starts them. You can change them afterwards.</p>
       <div class="stack setupform">
         <div class="card">
           <div class="field">
@@ -94,11 +95,11 @@ export function SetupPage({ onDone }) {
           </div>` : null}
         <div class="card">
           <div class="field">
-            <label for="su-stories">Stories</label>
+            <label for="su-stories">Stories <span class="hint">(optional)</span></label>
             <span class="hint">What a person does on your site, one per line, in plain words. Up to ${MAX_STORIES}, each up to ${MAX_STORY} characters.</span>
             <textarea id="su-stories" rows="5" value=${text} placeholder=${PLACEHOLDER} onInput=${(e) => setText(e.currentTarget.value)}></textarea>
-            <span class="hint">${stories.length} of ${MAX_STORIES}</span>
-            ${(touched || stories.length > MAX_STORIES || errors[0] !== 'Write at least one story.') && errors[0] ? html`<span class="ferr">${errors[0]}</span>` : null}
+            <span class="hint">${stories.length ? `${stories.length} of ${MAX_STORIES}` : 'Leave it empty and an explorer looks round the site first and writes the stories. That is one extra run before the personas start.'}</span>
+            ${errors[0] ? html`<span class="ferr">${errors[0]}</span>` : null}
           </div>
           <div class="row setuprow">
             <div class="field">
@@ -112,7 +113,7 @@ export function SetupPage({ onDone }) {
               <input id="su-budget" value=${budget} inputmode="decimal" onInput=${(e) => setBudget(e.currentTarget.value)} />
             </div>
           </div>
-          <p class="hint">${budgetErr && touched ? html`<span class="ferr">${budgetErr}</span>` : costLine(n > 0 ? n : 0, personas, Math.max(stories.length, 1))}</p>
+          <p class="hint">${budgetErr && touched ? html`<span class="ferr">${budgetErr}</span>` : costLine(n > 0 ? n : 0, personas, stories.length)}</p>
         </div>
         <div class="card">
           <h2>Logins <span class="hint">(optional)</span></h2>
