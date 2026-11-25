@@ -488,3 +488,33 @@ func TestChildChangeLogin(t *testing.T) {
 		t.Fatalf("login = %q", c.Persona.Login)
 	}
 }
+
+func TestLeadAskAfterOwnerSaidNo(t *testing.T) {
+	lead := allPowers()
+	lead.MaxChildren = 2
+	f := newLeadFix(t, lead)
+	now := time.Now().UTC()
+	for _, a := range []store.LeadAction{
+		{Lead: "Kate", Action: "ask", Subject: "maxChildren 3", Reason: "venue", Created: now.Add(-2 * time.Hour)},
+		{Lead: "Kate", Action: "decline", Subject: "maxChildren 2", Reason: "The owner kept it at 2", Created: now.Add(-time.Hour)},
+	} {
+		if err := f.st.LogLead(a); err != nil {
+			t.Fatal(err)
+		}
+	}
+	f.run(t, "l1", "Kate", "owner", project.LeadStory, store.RunRunning)
+	cs := connect(t, f.srv, "tok-l1")
+	text, isErr := call(t, cs, "next_assignment", nil)
+	if isErr || !strings.Contains(text, `"declined":{"maxChildren":2}`) {
+		t.Fatalf("assignment does not show the no: %s", text)
+	}
+	text, isErr = call(t, cs, "finish_run", map[string]any{"outcome": "done", "summary": "s",
+		"ask": map[string]any{"limit": "maxChildren", "to": 3, "reason": "venue"}})
+	if !isErr || !strings.Contains(text, "said no") {
+		t.Fatalf("ask after a no: %q %v", text, isErr)
+	}
+	if text, isErr := call(t, cs, "finish_run", map[string]any{"outcome": "done", "summary": "s",
+		"ask": map[string]any{"limit": "dailyRuns", "to": 20, "reason": "more runs"}}); isErr {
+		t.Fatalf("other limit refused: %s", text)
+	}
+}

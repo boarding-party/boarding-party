@@ -205,3 +205,32 @@ func TestLeadAskAndRaise(t *testing.T) {
 		t.Fatalf("met ask shown: %+v", lead.Ask)
 	}
 }
+
+func TestLeadDeclineAsk(t *testing.T) {
+	srv, _, svc := setupBoth(t, 1024)
+	withLead(t, svc)
+	if code := send(t, "POST", srv.URL+"/api/leads/Kate/decline", `{"limit":"maxChildren"}`).StatusCode; code != 400 {
+		t.Fatalf("decline with no ask %d", code)
+	}
+	if err := svc.LogAsk("Kate", "l2", runs.Ask{Limit: runs.AskChildren, To: 8}, "a venue persona", time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+	if code := send(t, "POST", srv.URL+"/api/leads/Kate/decline", `{"limit":"maxChildren"}`).StatusCode; code != 204 {
+		t.Fatalf("decline %d", code)
+	}
+	var lead struct {
+		Ask *runs.OpenAsk
+		Log []struct{ Action, Subject string }
+	}
+	json.NewDecoder(send(t, "GET", srv.URL+"/api/leads/Kate", "").Body).Decode(&lead)
+	if lead.Ask != nil {
+		t.Fatalf("declined ask shown: %+v", lead.Ask)
+	}
+	if len(lead.Log) == 0 || lead.Log[0].Action != "decline" || lead.Log[0].Subject != "maxChildren 6" {
+		t.Fatalf("log %+v", lead.Log)
+	}
+	p, _ := svc.Store.RawProject()
+	if pe, _, _ := p.Persona("Kate"); pe.Lead.Children() != 6 {
+		t.Fatalf("maxChildren changed to %d", pe.Lead.Children())
+	}
+}

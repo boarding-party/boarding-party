@@ -34,6 +34,7 @@ var auditActions = map[string]string{
 	"POST /api/issues/{id}/split":            "issue.split",
 	"POST /api/leads/{persona}/wake":         "lead.wake",
 	"POST /api/leads/{persona}/raise":        "lead.raise",
+	"POST /api/leads/{persona}/decline":      "lead.decline",
 	"POST /api/setup":                        "project.setup",
 	"POST /api/runs/{id}/login":              "run.login",
 	"PUT /api/children/{name}":               "child.adopt",

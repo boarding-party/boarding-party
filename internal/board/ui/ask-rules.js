@@ -18,10 +18,20 @@ export function askLine(a) {
 
 export const raiseLabel = (a) => `Raise to ${value(a.limit, a.to)}`;
 
-// askSubject reads an ask's lead log subject ("maxChildren 3"); anything
-// else comes back as it is.
-export function askSubject(subject) {
+export const keepLabel = (a) => `Keep at ${value(a.limit, a.now)}`;
+
+// askSubject reads an ask's or a no's lead log subject ("maxChildren 3");
+// anything else comes back as it is.
+function askSubject(subject) {
   const [limit, to] = String(subject).split(' ');
   const say = LIMITS[limit];
   return say && to !== undefined && !Number.isNaN(Number(to)) ? say(Number(to)) : subject;
+}
+
+const VERBS = { ask: 'asked', decline: 'you kept' };
+
+// logLine is a lead log entry's verb and subject as the decisions list
+// shows them.
+export function logLine(a) {
+  return VERBS[a.action] ? [VERBS[a.action], askSubject(a.subject)] : [a.action, a.subject];
 }

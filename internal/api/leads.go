@@ -113,6 +113,27 @@ func (s *server) raiseLead(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// declineLead is "Keep at" on a lead's ask: the owner says no to raising
+// the limit it names.
+func (s *server) declineLead(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Limit string `json:"limit"`
+	}
+	if !mediaTypeIs(r, jsonType) {
+		http.Error(w, "content type must be application/json", http.StatusUnsupportedMediaType)
+		return
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&in); err != nil {
+		http.Error(w, "bad json", http.StatusBadRequest)
+		return
+	}
+	if err := s.svc.DeclineAsk(r.PathValue("persona"), in.Limit, time.Now().UTC()); err != nil {
+		fail(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // wakeLead is "Run now" on the lead page.
 func (s *server) wakeLead(w http.ResponseWriter, r *http.Request) {
 	q, err := s.svc.WakeLead(r.PathValue("persona"), "Run from the board", time.Now().UTC())

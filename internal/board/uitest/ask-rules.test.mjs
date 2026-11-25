@@ -1,7 +1,7 @@
 // Tests for the lead ask rules: `node --test 'internal/board/uitest/*.test.mjs'`.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { askLine, raiseLabel, askSubject } from '../ui/ask-rules.js';
+import { askLine, raiseLabel, keepLabel, logLine } from '../ui/ask-rules.js';
 
 test('askLine says what the lead wants and has now', () => {
   assert.equal(askLine({ limit: 'maxChildren', now: 2, to: 3 }), 'Asks for 3 persona slots (now 2).');
@@ -16,8 +16,15 @@ test('raiseLabel names the new value', () => {
   assert.equal(raiseLabel({ limit: 'dailyBudget', to: 3.5 }), 'Raise to $3.50');
 });
 
-test('askSubject reads the lead log subject', () => {
-  assert.equal(askSubject('maxChildren 3'), '3 persona slots');
-  assert.equal(askSubject('dailyBudget 2.5'), '$2.50 a day');
-  assert.equal(askSubject('odd'), 'odd');
+test('keepLabel names the value now', () => {
+  assert.equal(keepLabel({ limit: 'maxChildren', now: 2 }), 'Keep at 2');
+  assert.equal(keepLabel({ limit: 'dailyBudget', now: 2 }), 'Keep at $2.00');
+});
+
+test('logLine reads asks and the owner\'s no in the lead log', () => {
+  assert.deepEqual(logLine({ action: 'ask', subject: 'maxChildren 3' }), ['asked', '3 persona slots']);
+  assert.deepEqual(logLine({ action: 'ask', subject: 'dailyBudget 2.5' }), ['asked', '$2.50 a day']);
+  assert.deepEqual(logLine({ action: 'decline', subject: 'maxChildren 2' }), ['you kept', '2 persona slots']);
+  assert.deepEqual(logLine({ action: 'ask', subject: 'odd' }), ['asked', 'odd']);
+  assert.deepEqual(logLine({ action: 'create', subject: 'Ana' }), ['create', 'Ana']);
 });

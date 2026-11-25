@@ -4,7 +4,7 @@
 // them only as text through htm/Preact.
 import { useState } from './vendor/hooks.module.js';
 import { html, api, confirmDialog, fmtWhen, runHref, usePoll } from './lib.js';
-import { askLine, raiseLabel, askSubject } from './ask-rules.js';
+import { askLine, raiseLabel, keepLabel, logLine } from './ask-rules.js';
 
 const POLL_MS = 15000;
 
@@ -78,8 +78,7 @@ export function LeadPage({ name }) {
           <h2>Decisions</h2>
           ${log.length ? html`<ul class="decisions">${log.map((a) => html`<li key=${a.id}>
               <span class="muted">${a.runId ? html`<a href=${runHref(a.runId)}>${fmtWhen(a.created)}</a>` : fmtWhen(a.created)}</span>
-              <span>${a.action === 'ask' ? 'asked' : a.action}</span>
-              <span>${a.action === 'ask' ? askSubject(a.subject) : a.subject}</span>
+              ${logLine(a).map((t) => html`<span>${t}</span>`)}
               <span class="why">${a.reason}</span></li>`)}</ul>`
             : html`<p class="muted small">No decisions yet.</p>`}
         </div>
@@ -92,12 +91,12 @@ export function LeadPage({ name }) {
 function AskCard({ name, ask, onDone }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
-  const raise = async () => {
-    setBusy(true); setErr('');
+  // answer posts the owner's raise or no; busy names the button pressed.
+  const answer = async (path, body) => {
+    setBusy(path); setErr('');
     try {
-      await api(`api/leads/${encodeURIComponent(name)}/raise`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ limit: ask.limit, to: ask.to }),
+      await api(`api/leads/${encodeURIComponent(name)}/${path}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
       });
       onDone();
     } catch (e) { setErr(e.message); setBusy(false); }
@@ -107,10 +106,11 @@ function AskCard({ name, ask, onDone }) {
       <h2>${name} needs more room</h2>
       <p>${askLine(ask)} ${ask.reason ? html`<span class="why">“${ask.reason}”</span>` : null}</p>
       <div class="row">
-        <button type="button" class="btn primary" disabled=${busy} onClick=${raise}>${busy ? 'Saving…' : raiseLabel(ask)}</button>
+        <button type="button" class="btn primary" disabled=${!!busy} onClick=${() => answer('raise', { limit: ask.limit, to: ask.to })}>${busy === 'raise' ? 'Saving…' : raiseLabel(ask)}</button>
+        <button type="button" class="btn" disabled=${!!busy} onClick=${() => answer('decline', { limit: ask.limit })}>${busy === 'decline' ? 'Saving…' : keepLabel(ask)}</button>
         ${ask.runId ? html`<a class="small" href=${runHref(ask.runId)}>See the run</a>` : null}
       </div>
-      <p class="hint">The lead uses it on its next run. You can change its limits on the Project page.</p>
+      <p class="hint">A raise counts from the lead's next run. If you keep it, the lead stops asking until you change this limit on the Project page.</p>
       ${err ? html`<div class="note bad" role="alert">${err}</div>` : null}
     </div>`;
 }

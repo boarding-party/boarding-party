@@ -100,6 +100,8 @@ type leadAssignment struct {
 	Issues      []knownIssue    `json:"issues,omitempty"`     // only with seeRuns
 	Notes       json.RawMessage `json:"notes"`
 	WokeBecause string          `json:"wokeBecause"`
+	// Declined are the limits the owner said no to raising, at the value they kept.
+	Declined map[string]float64 `json:"declined,omitempty"`
 }
 
 func powers(l project.Lead) []string {
@@ -210,6 +212,9 @@ func (s *leadTools) assignment(ctx context.Context, c leadCtx) (leadAssignment, 
 	var rc store.RunContext
 	if json.Unmarshal(c.run.Context, &rc) == nil {
 		a.WokeBecause = rc.Reason
+	}
+	if a.Declined, err = runs.Declined(s.st, c.lead.Name, l); err != nil {
+		return leadAssignment{}, err
 	}
 	recent, err := s.st.Runs(leadRunsLookback)
 	if err != nil {

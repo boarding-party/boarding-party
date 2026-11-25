@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -251,6 +252,13 @@ func checkAsk(st *store.Store, r store.Run, lead bool, in finishArgs) string {
 	}
 	if err := runs.CheckAsk(*pe.Lead, runs.Ask{Limit: in.Ask.Limit, To: in.Ask.To}); err != nil {
 		return strings.TrimPrefix(err.Error(), runs.ErrInvalid.Error()+": ")
+	}
+	kept, err := runs.Declined(st, r.Persona, *pe.Lead)
+	if err != nil {
+		return "could not read the owner's answers"
+	}
+	if v, no := kept[in.Ask.Limit]; no {
+		return fmt.Sprintf("the owner said no to raising %s and keeps it at %s; do not ask for it again until they change it", in.Ask.Limit, strconv.FormatFloat(v, 'f', -1, 64))
 	}
 	return ""
 }

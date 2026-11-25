@@ -137,3 +137,77 @@ func TestDigestAsks(t *testing.T) {
 		t.Fatalf("met ask in digest: %+v", d.Asks)
 	}
 }
+
+func TestDeclineAsk(t *testing.T) {
+	svc := askSvc(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	if err := svc.DeclineAsk("Megan", AskChildren, now); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("decline with no ask: %v", err)
+	}
+	if err := svc.LogAsk("Megan", "run1", Ask{Limit: AskChildren, To: 3}, "venue", now); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.DeclineAsk("Megan", AskRuns, now); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("decline of a limit not asked for: %v", err)
+	}
+	if err := svc.DeclineAsk("Megan", AskChildren, now.Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if a, err := svc.OpenAsk("Megan"); err != nil || a != nil {
+		t.Fatalf("declined ask still open: %+v, %v", a, err)
+	}
+	d, err := Declined(svc.Store, "Megan", megan(t, svc))
+	if err != nil || len(d) != 1 || d[AskChildren] != 2 {
+		t.Fatalf("Declined = %v, %v", d, err)
+	}
+	// The same ask again stays closed while the owner keeps the limit.
+	if err := svc.LogAsk("Megan", "run2", Ask{Limit: AskChildren, To: 3}, "venue", now.Add(2*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if a, _ := svc.OpenAsk("Megan"); a != nil {
+		t.Fatalf("ask after decline open: %+v", a)
+	}
+	// Once the owner changes the limit, the no no longer holds.
+	if err := svc.RaiseLeadLimit(ctx, "Megan", Ask{Limit: AskChildren, To: 3}); err != nil {
+		t.Fatal(err)
+	}
+	if d, _ := Declined(svc.Store, "Megan", megan(t, svc)); len(d) != 0 {
+		t.Fatalf("Declined after raise = %v", d)
+	}
+}
+
+func TestDigestNamesAnAskOnce(t *testing.T) {
+	svc := askSvc(t)
+	since := time.Now().UTC().Add(-time.Hour)
+	if err := svc.LogAsk("Megan", "r0", Ask{Limit: AskChildren, To: 3}, "venue", since.Add(-24*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.LogAsk("Megan", "r1", Ask{Limit: AskChildren, To: 3}, "venue again", since.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if d, _ := svc.Digest(since, time.Now().UTC()); len(d.Asks.Items) != 0 {
+		t.Fatalf("repeated ask emailed again: %+v", d.Asks)
+	}
+	if err := svc.LogAsk("Megan", "r2", Ask{Limit: AskChildren, To: 4}, "two venues", since.Add(2*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	d, _ := svc.Digest(since, time.Now().UTC())
+	if len(d.Asks.Items) != 1 || d.Asks.Items[0].To != 4 {
+		t.Fatalf("bigger ask not emailed: %+v", d.Asks)
+	}
+}
+
+func TestDigestLeavesOutDeclinedAsk(t *testing.T) {
+	svc := askSvc(t)
+	since := time.Now().UTC().Add(-time.Hour)
+	if err := svc.LogAsk("Megan", "r1", Ask{Limit: AskChildren, To: 3}, "venue", since.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.DeclineAsk("Megan", AskChildren, since.Add(2*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if d, _ := svc.Digest(since, time.Now().UTC()); len(d.Asks.Items) != 0 {
+		t.Fatalf("declined ask emailed: %+v", d.Asks)
+	}
+}

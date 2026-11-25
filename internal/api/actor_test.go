@@ -89,7 +89,7 @@ func TestAuditSubjectIsWhatTheHandlerSaw(t *testing.T) {
 }
 
 func TestOwnerWritesAreAudited(t *testing.T) {
-	for _, pattern := range []string{"POST /api/setup", "POST /api/runs/{id}/login", "POST /api/leads/{persona}/raise"} {
+	for _, pattern := range []string{"POST /api/setup", "POST /api/runs/{id}/login", "POST /api/leads/{persona}/raise", "POST /api/leads/{persona}/decline"} {
 		if auditActions[pattern] == "" {
 			t.Errorf("%s is not audited", pattern)
 		}

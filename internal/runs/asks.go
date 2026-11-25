@@ -24,6 +24,10 @@ const (
 // askAction is the lead log action of an ask; its subject is "<limit> <to>".
 const askAction = "ask"
 
+// declineAction is the owner saying no to an ask; its subject is
+// "<limit> <value kept>".
+const declineAction = "decline"
+
 // Ask is a lead asking its owner to raise one of its limits to To.
 type Ask struct {
 	Limit string  `json:"limit"`
@@ -116,23 +120,69 @@ func (s *Service) OpenAsk(lead string) (*OpenAsk, error) {
 	if err != nil {
 		return nil, err
 	}
-	return openAsk(p, a), nil
+	return s.openAsk(p, a)
 }
 
-func openAsk(p project.Project, a store.LeadAction) *OpenAsk {
+// openAsk returns a as an open ask, or nil once its limit is met or the
+// owner said no to raising that limit and still keeps it.
+func (s *Service) openAsk(p project.Project, a store.LeadAction) (*OpenAsk, error) {
 	l, ok := leadLimits(p, a.Lead)
 	if !ok {
-		return nil
+		return nil, nil
 	}
 	ask, ok := parseAsk(a.Subject)
 	if !ok {
-		return nil
+		return nil, nil
 	}
 	now, ok := current(l, ask.Limit)
 	if !ok || now >= ask.To {
-		return nil
+		return nil, nil
 	}
-	return &OpenAsk{Ask: ask, Now: now, Reason: a.Reason, RunID: a.RunID, Created: a.Created}
+	kept, err := Declined(s.Store, a.Lead, l)
+	if err != nil {
+		return nil, err
+	}
+	if _, no := kept[ask.Limit]; no {
+		return nil, nil
+	}
+	return &OpenAsk{Ask: ask, Now: now, Reason: a.Reason, RunID: a.RunID, Created: a.Created}, nil
+}
+
+// DeclineAsk records the owner's no to the lead's open ask for limit. Until
+// the owner changes that limit, the ask stays closed and the lead may not
+// ask for it again.
+func (s *Service) DeclineAsk(lead, limit string, now time.Time) error {
+	o, err := s.OpenAsk(lead)
+	if err != nil {
+		return err
+	}
+	if o == nil || o.Limit != limit {
+		return fmt.Errorf("%w: %q has no open ask for %s", ErrInvalid, lead, limit)
+	}
+	return s.Store.LogLead(store.LeadAction{Lead: lead, Action: declineAction,
+		Subject: limit + " " + num(o.Now), Reason: "The owner kept it at " + num(o.Now), Created: now})
+}
+
+// Declined returns the limits the owner said no to raising for lead and
+// still keeps at the value they kept, such as {"maxChildren": 2}.
+func Declined(st *store.Store, lead string, l project.Lead) (map[string]float64, error) {
+	ds, err := st.LeadActionsSince(declineAction, time.Time{})
+	if err != nil {
+		return nil, err
+	}
+	newest := map[string]float64{}
+	for _, d := range ds { // oldest first
+		if a, ok := parseAsk(d.Subject); ok && d.Lead == lead {
+			newest[a.Limit] = a.To
+		}
+	}
+	out := map[string]float64{}
+	for limit, kept := range newest {
+		if now, ok := current(l, limit); ok && now == kept {
+			out[limit] = kept
+		}
+	}
+	return out, nil
 }
 
 // RaiseLeadLimit sets a hand-made lead's limit to a.To, which must be more
@@ -168,15 +218,21 @@ func (s *Service) RaiseLeadLimit(ctx context.Context, lead string, a Ask) error 
 }
 
 // asksSince are the leads' asks logged since since that are still open,
-// the newest one per lead.
+// the newest one per lead. An ask the lead already made before since, the
+// same limit and value, was in an earlier digest and is left out.
 func (s *Service) asksSince(p project.Project, since time.Time) (digest.List[digest.Ask], error) {
-	as, err := s.Store.LeadActionsSince(askAction, since)
+	as, err := s.Store.LeadActionsSince(askAction, time.Time{})
 	if err != nil {
 		return digest.List[digest.Ask]{}, err
 	}
 	newest := map[string]store.LeadAction{}
+	earlier := map[string]store.LeadAction{} // each lead's last ask before since
 	var order []string
 	for _, a := range as { // oldest first
+		if a.Created.Before(since) {
+			earlier[a.Lead] = a
+			continue
+		}
 		if _, ok := newest[a.Lead]; !ok {
 			order = append(order, a.Lead)
 		}
@@ -184,7 +240,15 @@ func (s *Service) asksSince(p project.Project, since time.Time) (digest.List[dig
 	}
 	var out []digest.Ask
 	for _, lead := range order {
-		if o := openAsk(p, newest[lead]); o != nil {
+		a := newest[lead]
+		if e, ok := earlier[lead]; ok && e.Subject == a.Subject {
+			continue
+		}
+		o, err := s.openAsk(p, a)
+		if err != nil {
+			return digest.List[digest.Ask]{}, err
+		}
+		if o != nil {
 			out = append(out, digest.Ask{Lead: lead, Limit: o.Limit, Now: o.Now, To: o.To})
 		}
 	}

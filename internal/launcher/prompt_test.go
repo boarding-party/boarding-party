@@ -90,7 +90,7 @@ func TestRunPromptNarrates(t *testing.T) {
 
 func TestLeadPromptAsksInsteadOfStuck(t *testing.T) {
 	p := LeadPrompt(store.Run{})
-	for _, w := range []string{"ask {limit, to, reason}", "maxChildren, dailyRuns or dailyBudget", "Use stuck only when something broke"} {
+	for _, w := range []string{"ask {limit, to, reason}", "maxChildren, dailyRuns or dailyBudget", "Use stuck only when something broke", "declined"} {
 		if !strings.Contains(p, w) {
 			t.Errorf("lead prompt misses %q", w)
 		}
